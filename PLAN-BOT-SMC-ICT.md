@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED (2026-06-10):** este documento fue reemplazado por [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). Se conserva solo como histórico.
+
 # Plan: Bot SMC/ICT — TradingView → MetaTrader 5
 
 ## Contexto

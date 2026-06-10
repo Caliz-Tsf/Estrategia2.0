@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED (2026-06-10):** este documento fue reemplazado por [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). Se conserva solo como histórico. ⚠️ Las API keys que aparecen abajo están comprometidas y deben rotarse (tarea SEC-01 del workplan v2).
+
 # PLAN MAESTRO — Estrategia2.0
 > Bot SMC/ICT para Forex EURUSD | TradingView Pine Script → MetaTrader 5 MQL5
 > Generado: 2026-06-10 | Estado: PRE-EJECUCIÓN — solo planificación, nada ejecutado aún
