@@ -51,4 +51,4 @@
 - **task-master (MCP-06):** **OPCIONAL — se puede saltar sin perder nada** (decisión usuario Sesion-005). No es pieza del sistema (el WORKPLAN ya es el backlog; teoría→indicador corre sobre reglas-smc-ict.md + smc-sprint/Archon + smc-validator-agent). Si se hiciera, es en VER-09 y **a criterio de Fable** decidir si vale la pena (probablemente no). CLI disponible (0.43.1).
 - **SCR-02 sync-obsidian.ps1** ✅: copia incremental (por hash) de `memory/sesiones/`, `docs/adrs/`, `memory/ESTADO-ACTUAL.md` → `D:\obsidian\boveda MENTE\Mente\Estrategia2.0\`. `-DryRun` para simular. Idempotente. Adelantado del Bloque F.
 
-*Última actualización: 2026-06-11 — Sesion-006: Bloques D (9 skills) y E (8 agentes) construidos y commiteados. Prioridad próxima sesión: verificar que skills y agentes están activos/funcionando (VER-04 + prueba Done E).*
+*Última actualización: 2026-06-11 — Sesion-007: Bloque F (5 ítems) completado. VER-04 CERRADO. Siguiente: VER-01..08 (verificación Fase 0) → VER-09 (gate Fable) → Fase 1.*
