@@ -439,7 +439,7 @@ Flujo de traducción: `mql5-translator-agent` (Opus) → Antigravity escribe →
       "command": "npx",
       "args": ["-y", "firecrawl-mcp"],
       "env": {
-        "FIRECRAWL_API_KEY": "fc-b474081cd20c43f5ad084896c2c406dd",
+        "FIRECRAWL_API_KEY": "<REVOCADA-2026-06-10-usar-env-var>",
         "FIRECRAWL_RETRY_MAX_ATTEMPTS": "5",
         "FIRECRAWL_CREDIT_WARNING_THRESHOLD": "2000",
         "FIRECRAWL_CREDIT_CRITICAL_THRESHOLD": "500"
@@ -453,7 +453,7 @@ Flujo de traducción: `mql5-translator-agent` (Opus) → Antigravity escribe →
     "tavily-mcp": {
       "command": "npx",
       "args": ["-y", "tavily-mcp@latest"],
-      "env": { "TAVILY_API_KEY": "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" }
+      "env": { "TAVILY_API_KEY": "<REVOCADA-2026-06-10-usar-env-var>" }
     },
     "context-mode": { "command": "context-mode" },
     "code-review-graph": {

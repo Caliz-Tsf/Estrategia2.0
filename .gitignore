@@ -1,0 +1,42 @@
+# Secrets — nunca commitear
+.env
+.env.local
+.env*.local
+
+# MCP config con keys
+.mcp.json
+*.local.json
+
+# Herramientas que generan artefactos locales
+.code-review-graph/
+.task-master/
+.context-mode/
+.claude-mem/
+
+# Archon clonado (repo externo, no anidar en git)
+.archon/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Build
+dist/
+build/
+*.tmp
