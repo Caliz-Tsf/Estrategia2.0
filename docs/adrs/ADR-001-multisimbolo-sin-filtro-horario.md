@@ -22,7 +22,7 @@ Un filtro horario fijo (London 08–10 GMT, etc.) es intrínsecamente EURUSD/FX-
 Componentes:
 1. **Todo umbral relativo a ATR** (ya adoptado en §0) — fundamento de la portabilidad entre símbolos y escalas de precio.
 2. **`sessionProfile` configurable por símbolo** (`FX-London-NY` default · `FX-Asia` · `None`). `f_killZone(time, sessionProfile)` informa qué sesión está activa; alimenta la confluencia #34 con peso calibrado **por símbolo**. No bloquea.
-3. **Filtro de spread** (rechaza entrada si spread real > máximo configurable) — guardián de liquidez agnóstico al símbolo y a la hora.
+3. **Filtro de spread** (rechaza entrada si spread real > máximo configurable) — guardián de liquidez agnóstico al símbolo y a la hora. **Nota de implementación (2026-06-11):** Pine NO puede leer el spread real → este filtro vive **solo en el EA** (Fase 4, `SMC_RiskManager`). En TV (Fases 1-3) los costes se modelan con comisión+slippage (D-PINE-05) y la Fase 3 **segmenta resultados por sesión** para detectar señales rentables solo por costes modelados constantes.
 4. **Perfiles de pesos del scoring por símbolo** — los pesos validados en EURUSD no transfieren 1:1; cada símbolo tiene su set (o re-validación).
 5. **Lo inherentemente por-símbolo va como input:** pip/point, spread típico, sessionProfile, pesos.
 

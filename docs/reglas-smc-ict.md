@@ -425,7 +425,7 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 ### 3.4 Kill Zones `f_killZone` `[ADR-001]`
 
-**Concepto.** Ventanas horarias de **alta actividad institucional**. En el diseño multi-símbolo NO son un filtro duro (un bloqueo por reloj sabotea símbolos con otras sesiones o sin sesiones —cripto/índices 24h—). Son una **confluencia ponderada** opcional + un **perfil configurable por símbolo**. El guardián universal de calidad de liquidez es el **filtro de spread** (§6 Strategy), no el reloj.
+**Concepto.** Ventanas horarias de **alta actividad institucional**. En el diseño multi-símbolo NO son un filtro duro (un bloqueo por reloj sabotea símbolos con otras sesiones o sin sesiones —cripto/índices 24h—). Son una **confluencia ponderada** opcional + un **perfil configurable por símbolo**. El guardián universal de calidad de liquidez es el **filtro de spread**, no el reloj — con una precisión de implementación: Pine no puede leer el spread real, así que ese filtro vive **solo en el EA** (Fase 4, `SMC_RiskManager`); en TV los costes se modelan con comisión+slippage (D-PINE-05) y la Fase 3 segmenta resultados por sesión.
 
 **Definición cuantificada.**
 - `f_killZone(time, sessionProfile)` devuelve **qué sesión está activa** (o ninguna) + si estamos en la **primera mitad** de la ventana (necesario para Judas, §3.5).

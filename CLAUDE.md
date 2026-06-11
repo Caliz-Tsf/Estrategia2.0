@@ -13,7 +13,8 @@ Bot de trading **SMC/ICT** para Forex. Primero un sistema completo y validado en
 ## ⚠️ Referencias externas (regla absoluta)
 - **La ÚNICA referencia externa permitida es el indicador SMC de LuxAlgo** (`pine/reference/LuxAlgo-SMC-base.pine`). De ahí se portan algoritmos base (swings, OB, FVG, EQH/EQL, Premium/Discount) v5→v6.
 - Este es un **proyecto nuevo desde cero**. **PROHIBIDO** leer, copiar o referenciar `D:\CODE\BOT\Bot\` (EA antiguo) o cualquier vault/proyecto previo (`Estrategia-Nueva`). No existen para este proyecto.
-- **Única excepción:** el fork del TV MCP vive físicamente en `D:\CODE\BOT\Bot\tradingview-mcp-jackson\` — es **herramienta**, no referencia de código. Ejecutarlo/actualizarlo (MCP-02) está permitido; lo prohibido es usar el código del EA antiguo o el vault como fuente del sistema.
+- **Única excepción:** el fork del TV MCP vive físicamente en `D:\CODE\BOT\Bot\tradingview-mcp-jackson\` — es **herramienta**, no referencia de código. Ejecutarlo/actualizarlo (MCP-02) está permitido; lo prohibido es usar el código del EA antiguo como fuente del sistema.
+- **Vault Obsidian — precisión:** lo prohibido es **leer `Mente/Estrategia-Nueva/`** (proyecto previo) como fuente. El vault en sí NO está prohibido: `D:\obsidian\boveda MENTE\Mente\Estrategia2.0\` es el **destino de respaldo** del proyecto (SCR-02 `sync-obsidian.ps1` copia ahí sesiones y ADRs — escritura, no lectura de referencia). La limpieza del vault viejo es manual del usuario con backup previo `[P-21/OBS-01]`.
 - Licencia LuxAlgo CC BY-NC-SA: uso personal OK, atribución en headers, **no** publicar derivado comercial.
 
 ## Arquitectura (no re-litigar)

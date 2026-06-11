@@ -34,5 +34,11 @@ Cumplir el paso acordado en Sesion-002: **validar con Fable todo lo informativo*
 - Poblar casos ⏳PENDIENTE-TVMCP de reglas-smc-ict.md + aprobación final (gate VER-05) — necesita gráfico.
 - **Siguiente paso (próxima sesión): Bloque C (MCP-01..06) → D (skills) → E (agentes) → F (workflows/scripts) → VER-01..08 → gate VER-09.**
 
+## Addendum (misma sesión) — 2 precisiones tras preguntas de Freddy
+1. **Filtro de spread = SOLO EA (hueco técnico real detectado).** Pine no puede leer el spread real (TV no expone bid/ask en una strategy) → el "guardián universal" del ADR-001 solo es implementable en Fase 4 (`SMC_RiskManager`). Corregido en: PINE-PLAN §6 (filtro retirado de la lógica Pine, nota explícita), WORKPLAN §4.8 + F2-T02 (spread = solo EA), ADR-001 (nota de implementación), reglas-smc-ict §3.4. **Mitigación añadida:** F3-T02 ahora exige segmentación por sesión para detectar señales rentables solo por costes modelados constantes.
+2. **Vault Obsidian precisado en CLAUDE.md:** lo prohibido es LEER `Mente/Estrategia-Nueva/` como fuente; el vault NO está prohibido como destino — `Mente/Estrategia2.0/` es el respaldo del proyecto (SCR-02). La limpieza del vault viejo es manual de Freddy con backup previo [P-21/OBS-01]; ninguna sesión de Claude la ejecuta.
+
+**Veredicto multi-símbolo (opinión Fable):** decisión correcta como está diseñada — es arquitectura símbolo-agnóstica con validación de UN símbolo a la vez (EURUSD primero, Fase 5 par a par, pesos por símbolo). El único hueco real era el spread-en-Pine, ya corregido.
+
 ## Cierre
-Revisión Fable de lo informativo ✅ PASADA con 4 correcciones aplicadas y commiteadas. El camino al Bloque C está despejado.
+Revisión Fable de lo informativo ✅ PASADA con 4 correcciones aplicadas y commiteadas + addendum (spread solo-EA, vault precisado). El camino al Bloque C está despejado.

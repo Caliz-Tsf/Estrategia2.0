@@ -232,7 +232,7 @@ Filas con toggle individual (panel compacto vs completo). Colores: verde/rojo/gr
 
 **Lógica de entrada (solo en vela confirmada):**
 ```
-si scoreLong ≥ threshold y scoreLong > scoreShort y spread ≤ maxSpread:   // [ADR-001] KZ no es precondición
+si scoreLong ≥ threshold y scoreLong > scoreShort:   // [ADR-001] KZ no es precondición; filtro de spread = solo EA (ver Filtros abajo)
     [sl, tp1, tpExt, ok] = f_computeSLTP(...)
     si ok:  // R:R 1:3 calculable
         strategy.entry("L", strategy.long, alert_message = jsonDetalle)
@@ -241,7 +241,8 @@ si scoreLong ≥ threshold y scoreLong > scoreShort y spread ≤ maxSpread:   //
 (espejo para short)
 ```
 **Trailing estructural:** mientras la posición esté abierta, al confirmarse un nuevo HL (long) / LH (short) en el chart TF → mover stop de "L-ext" a ese swing ± buffer.
-**Filtros duros (no-score):** spread ≤ `maxSpread` (input, guardián universal de liquidez `[ADR-001]`) · R:R ≥ 3 calculable · sin posición abierta del mismo lado. La Kill Zone NO filtra: aporta como confluencia #34 ponderada; inputs `sessionProfile` (FX-London-NY/FX-Asia/None) y `maxSpread` en el grupo Sesiones/Filtros.
+**Filtros duros (no-score):** R:R ≥ 3 calculable · sin posición abierta del mismo lado. La Kill Zone NO filtra: aporta como confluencia #34 ponderada; input `sessionProfile` (FX-London-NY/FX-Asia/None) en el grupo Sesiones/Filtros.
+**Filtro de spread `[ADR-001]` — solo EA:** Pine NO puede leer el spread real (TV no expone bid/ask en una strategy) → el guardián universal de liquidez se implementa **en el EA (Fase 4, SMC_RiskManager)**. En TV la realidad de costes la aporta D-PINE-05 (comisión+slippage realistas). Consecuencia para Fase 3: **segmentar resultados por sesión** para detectar señales que solo son "rentables" porque el modelo de costes es constante (el spread real de la sesión asiática es mayor).
 
 **Visual mínimo:** label de entrada con `LONG 14.5pts [CHoCH-H1, Sweep, OB-H1, OTE, KZ-LDN]`, líneas SL (rojo) / TP1 (verde) / TPext (verde punteado). Registro: el Strategy Tester ya guarda cada trade con fecha/precio/resultado → exportable a CSV para el `smc-backtesting-analyst`. Adicionalmente, tabla "últimas 20 señales" opcional.
 

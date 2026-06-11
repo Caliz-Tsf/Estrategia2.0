@@ -235,7 +235,7 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 
 ## FASE 2
 - [ ] **F2-T01** Scoring direccional (42 confluencias §4.8, pesos input=1.0) — skill smc-pine-develop. Done: scoreLong/scoreShort visibles en panel.
-- [ ] **F2-T02** Filtros duros (spread ≤ `maxSpread`, R:R≥3 calculable, sin posición duplicada). La KZ NO es filtro: es confluencia #34 ponderada + input `sessionProfile`. `[ADR-001]`
+- [ ] **F2-T02** Filtros duros (R:R≥3 calculable, sin posición duplicada). La KZ NO es filtro: es confluencia #34 ponderada + input `sessionProfile`. El filtro de spread es **solo EA** (Pine no lee spread real; en TV los costes van por F2-T05). `[ADR-001]`
 - [ ] **F2-T03** Entradas/salidas strategy.* + SL/TP/TPext + parciales 50% + trailing estructural.
 - [ ] **F2-T04** alert_message detallado + registro/export de trades.
 - [ ] **F2-T05** Comisión+slippage realistas EURUSD configurados (D-PINE-05).
@@ -243,7 +243,7 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 
 ## FASE 3
 - [ ] **F3-T01** Definir y commitear corte IS/OOS antes de mirar nada — docs/scoring-weights-v1.md.
-- [ ] **F3-T02** Run completo histórico → export CSV → análisis con skill smc-backtesting-analyst (AGT-02).
+- [ ] **F3-T02** Run completo histórico → export CSV → análisis con skill smc-backtesting-analyst (AGT-02). Incluye **segmentación por sesión** (London/NY/Asia/fuera): detectar señales "rentables" solo porque el modelo de costes es constante — el spread real fuera de sesión es mayor. `[ADR-001]`
 - [ ] **F3-T03** Iteración de pesos SOLO en IS (optimizador + lift) hasta estabilizar. Cada versión = scoring-weights-vN.md.
 - [ ] **F3-T04** Validación OOS única por versión → veredicto del agente.
 - [ ] **F3-T05** Replay cualitativo 30-50 señales (smc-replay modo B) → 0 discrepancias sin explicar.
@@ -362,8 +362,9 @@ FASE 1-2 (por concepto):        FASE 3 (por iteración):          FASE 4 (por m�
 │ 26 FVG-CE tocado            │  └─────────────────────────────────────┘
 └─────────────────────────────┘
 SEÑAL: en vela confirmada, si score_dir ≥ threshold ∧ score_dir > score_opuesto
-       ∧ spread ≤ maxSpread ∧ SL/TP con R:R≥3 calculable → entrada. [ADR-001: KZ no
-       es precondición — aporta como confluencia #34]. Si no → nada (no hay "casi señal").
+       ∧ SL/TP con R:R≥3 calculable → entrada. Si no → nada (no hay "casi señal").
+       [ADR-001: KZ no es precondición — aporta como confluencia #34. El filtro
+       spread ≤ maxSpread se añade SOLO en el EA (Pine no lee spread real).]
 ```
 
 ### 4.9 Protocolo de sesión
