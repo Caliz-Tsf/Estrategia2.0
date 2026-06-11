@@ -15,7 +15,7 @@ Aplican a todos los conceptos salvo que la sección indique lo contrario.
 |---|---|
 | **Timeframes** | Contexto = D1 (`"D"`) · Bias = H1 (`"60"`) · Entrada/chart = M5 (`"5"`). "TF de evaluación" = el TF sobre el que corre la detección. |
 | **Vela confirmada** | Todo **evento** (BOS, CHoCH, MSS, sweep, displacement…) se evalúa SOLO al cierre (`barstate.isconfirmed`). Nunca intra-vela. Las **zonas** (OB, FVG…) pueden extenderse en vivo, pero su *creación* se confirma al cierre. `[D-PINE-03 — anti-repaint]` |
-| **ATR de referencia** | `ATR(14)` (Wilder) sobre el TF de evaluación. Todo umbral relativo a volatilidad se expresa en **múltiplos de este ATR**, nunca en pips fijos (un umbral en pips se rompe entre regímenes de volatilidad). |
+| **ATR de referencia** | Default = `ATR(14)` (Wilder) sobre el TF de evaluación, para umbrales de **corto plazo** (displacement, FVG, EQH). Conceptos que necesitan un baseline **largo** declaran su propio período: el filtro de Order Blocks usa `ATR(200)` o *Cumulative Mean Range* (`ta.cum(ta.tr)/bar_index`), heredado de LuxAlgo. **Regla:** todo umbral de volatilidad se expresa en múltiplos de un ATR, nunca en pips fijos (un umbral en pips se rompe entre regímenes de volatilidad). Cada concepto indica qué ATR usa. |
 | **Pip / point EURUSD** | 1 pip = `0.0001`. Broker de 5 decimales: 1 pip = 10 points. Spread típico EURUSD ≈ 0.8 pip. |
 | **Desigualdades** | Estrictas (`>`, `<`) salvo indicación expresa. Los empates exactos NO forman estructura → se derivan a EQH/EQL (§Liquidez). |
 | **Sesiones / horario** | Definidas en **hora local de mercado y convertidas a GMT con DST** (no GMT fijo) `[P-25]`. London open = 08:00 `Europe/London`; NY open = 08:30 (estándar de bonos: 08:30 ET) `America/New_York`. Detalle de Kill Zones en §3. |
@@ -182,4 +182,190 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 
 ---
 
-> **Tier 1 restante tras decidir MSS:** ninguno — Estructura quedaría completa (1.1 swings, 1.2 clasificación, 1.3 BOS, 1.4 CHoCH, 1.5 MSS, 1.6 impulso/corrección). Siguiente Tier a definir: **Tier 2 — Zonas** (OB, FVG, Premium/Discount, EQH/EQL) o **Liquidez** (pools, sweeps, Kill Zones), según prioridad.
+---
+
+## 2. TIER 2 — ZONAS
+
+Las zonas son las áreas donde se busca la **entrada**: donde el precio institucional dejó órdenes (OB), ineficiencias por rellenar (FVG), o niveles de valor (Premium/Discount). Todas portan algoritmos del LuxAlgo base (§9 PINE-PLAN).
+
+### 2.1 Order Block (OB) `f_detectOB` + `f_updateZoneMitigation`
+
+**Concepto.** La **última vela contraria antes del impulso** que rompe estructura (BOS/CHoCH). Representa el origen de las órdenes institucionales que movieron el precio. Un OB alcista nace de la última vela bajista antes de un tramo alcista que rompe estructura.
+
+**Definición cuantificada.**
+- **OB alcista:** la última vela **bajista** (`close < open`) dentro de la pierna que precede a un **BOS/CHoCH alcista**, siempre que esa pierna contenga al menos una **vela de alta volatilidad** (`(high-low) ≥ highVolFactor × volMeasure`, default 2× — filtra impulsos débiles). Zona = `[low, high]` de esa vela (default; alternativa: cuerpo `[min(o,c), max(o,c)]`).
+- **OB bajista:** simétrico — última vela **alcista** antes de un BOS/CHoCH bajista.
+- **Escala interna vs swing:** el OB se ancla a la ruptura que lo origina; OB interno (sobre estructura `internalLen`) y OB swing (sobre `swingLen`) se trackean por separado (confluencias #17 OB H1, #19 OB chart, #21 OB D1).
+
+**Mitigación e invalidación** (`f_updateZoneMitigation`, máquina de estados del UDT `SMC_Zone.state`):
+- `0 activa`: el precio no ha vuelto a la zona.
+- `1 parcial`: el precio entró en la zona pero no la cruzó del todo. `mitigatedPct` = profundidad de penetración / altura de la zona.
+- `2 mitigada`: el precio alcanzó el borde lejano (la zona "hizo su trabajo" como entrada).
+- `3 invalidada`: una vela **cierra** atravesando el borde protector (OB alcista: `close < OB.low`) → la tesis falló; candidato a **Breaker** (§Tier 2 breaker).
+- **Fuente de mitigación** (`obMitigation`): `HIGHLOW` (default, basta que la mecha toque) o `CLOSE` (exige cierre dentro). Igual que LuxAlgo.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `obFilter` | `ATR` → `ATR(200)` | alternativa `Cumulative Mean Range`. |
+| `highVolFactor` | **2.0** | rango de vela ≥ 2× volMeasure para contar como impulso. |
+| `obMitigation` | `HIGHLOW` | vs `CLOSE`. |
+| `obBounds` | `high/low` | ✓ decidido (vs `body`): vela completa, SL detrás de la mecha. Entrada fina refinable al CE. |
+
+**Confirmación / anti-repaint.** El OB solo se crea cuando el BOS/CHoCH que lo origina está **confirmado al cierre**. La zona puede extenderse a la derecha en vivo, pero su origen no repinta.
+
+**Contraejemplo.** Una vela bajista antes de una subida **débil** (sin ninguna vela ≥2×volMeasure y sin romper estructura): **NO** es OB — es ruido. El filtro de volatilidad + el requisito de ruptura estructural es lo que separa un OB real de "cualquier vela contraria".
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.2 Fair Value Gap (FVG) + CE `f_detectFVG`
+
+**Concepto.** Una **ineficiencia** de precio: un hueco de 3 velas donde el mercado se movió tan rápido que dejó un rango sin negociar. El precio tiende a volver a "rellenarlo". El nivel medio (CE, *Consequent Encroachment*, 50%) es el punto de equilibrio clave del gap.
+
+**Definición cuantificada** (evaluada en la vela central, al cierre de la 3.ª):
+- **FVG alcista:** `low[0] > high[2]` → gap `= [high[2], low[0]]` (hueco entre el techo de hace 2 velas y el suelo de la actual).
+- **FVG bajista:** `high[0] < low[2]` → gap `= [high[0], low[2]]`.
+- **Filtro de tamaño:** altura del gap `≥ fvgThreshold`. Dos modos:
+  - `fixed` (default): `≥ 0.25 × ATR(14)`.
+  - `auto` (LuxAlgo): umbral derivado del promedio acumulado del tamaño de gaps recientes.
+- **CE (50%):** `(top + bottom) / 2`. Nivel de mitigación/entrada principal (confluencia #26 *FVG-CE tocado*).
+
+**Mitigación.** Igual máquina de estados que el OB: `mitigatedPct` por penetración; `2 mitigada` cuando el precio rellena hasta el borde lejano; el toque del **CE** es el evento de entrada de referencia.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `fvgThresholdMode` | `fixed` | ✓ decidido (vs `auto`): umbral estable y optimizable, respeta disciplina IS/OOS. |
+| `fvgThreshold` | **0.25** | × ATR(14), solo en modo `fixed`. |
+| `ce` | **0.5** | nivel de equilibrio del gap. |
+
+**Confirmación / anti-repaint.** El FVG se confirma al **cierre de la 3.ª vela** (la que completa el patrón). No se marca antes.
+
+**Contraejemplo.** Un gap de `low[0] > high[2]` pero de tamaño `< 0.25×ATR`: ineficiencia trivial → **se descarta**. Marcar micro-FVGs llena el gráfico de ruido y degrada el scoring.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.3 Premium / Discount / Equilibrium `f_premiumDiscount`
+
+**Concepto.** El *dealing range* (rango de negociación entre el último **strong high** y **strong low**) dividido en zonas de valor. Vender en **premium** (caro), comprar en **discount** (barato), evitar el **equilibrium** (zona de chop sin ventaja).
+
+**Definición cuantificada.** Sea el rango `[L, H]` entre el strong low `L` y strong high `H` vigentes (los swings que delimitan el rango operativo actual):
+- `eq = (H + L) / 2` (nivel 50%).
+- **Discount:** precio `< eq` (mitad inferior) → favorece **long**.
+- **Premium:** precio `> eq` (mitad superior) → favorece **short**.
+- **Equilibrium (banda):** precio dentro de `[45%, 55%]` del rango → zona neutral. Confluencia #31: si el precio está en equilibrium, **resta** 50% del peso (no hay ventaja de localización).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `eqBand` | **45–55%** | ancho de la banda de equilibrium. |
+| rango | strong high / strong low vigentes | se actualiza con la estructura. |
+
+**Contraejemplo.** Comprar en **premium** (precio en el 80% del rango) porque "hay un OB alcista" es operar contra la localización — el OB en premium tiene mucha menor probabilidad. Premium/Discount es el filtro que evita entradas caras.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.4 Equal Highs / Equal Lows (EQH/EQL) `f_detectEQHL`
+
+**Concepto.** Dos o más swings al **mismo nivel** = doble (o triple) techo/suelo. Marcan **liquidez** acumulada (stops) que el precio tiende a barrer. (Es el Caso B de §1.1.)
+
+**Definición cuantificada.**
+- **EQH:** dos swing highs confirmados con `|high₁ − high₂| ≤ eqThreshold × ATR(14)`. Análogo EQL con lows.
+- `eqThreshold` default **0.1** (sensibilidad de LuxAlgo, rango 0–0.5). Más bajo = menos EQH pero más pertinentes.
+- **Confirmación:** swings detectados con `eqlLength = 3` barras a cada lado (igual que LuxAlgo).
+- Un EQH/EQL confirmado alimenta los **pools de liquidez** (§Liquidez) y es objetivo de **sweep**.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `eqThreshold` | **0.1** | × ATR(14). Tolerancia de "igualdad". |
+| `eqlLength` | **3** | barras de confirmación del swing. |
+
+**Contraejemplo.** Dos highs separados por `0.6×ATR`: **no** son EQH (demasiado distintos) — son simplemente dos swings, uno LH o HH del otro. El umbral evita llamar "equal" a niveles que no lo son.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.5 OTE / Golden Pocket `f_detectOTE`
+
+**Concepto.** Tras un impulso confirmado, la zona de **retroceso fib óptima** para entrar a favor del impulso. OTE (*Optimal Trade Entry*) es la zona "premium" del retroceso; el Golden Pocket es el corazón.
+
+**Definición cuantificada.** Sobre la última pierna impulsiva que produjo un BOS, fib con `0` en el origen de la pierna y `1` en el extremo:
+- **Golden Pocket (GP):** retroceso en `[50%, 61.8%]`. Confluencia #28.
+- **OTE:** retroceso en `[61.8%, 79%]`. Confluencia #27. (La zona más profunda = mejor precio, mayor R:R.)
+- **Dirección:** impulso alcista (low→high) → el retroceso a la baja hacia 61.8–79% es zona de **long**. Simétrico para short.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `gpRange` | 0.50–0.618 | Golden Pocket. |
+| `oteRange` | 0.618–0.79 | OTE. |
+| pierna | último impulso que produjo BOS | se redibuja con cada nuevo impulso. |
+
+**Contraejemplo.** Medir fib sobre una pierna **correctiva** (no impulsiva, sin BOS): el OTE resultante no tiene significado institucional. OTE/GP solo válidos sobre impulso confirmado.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.6 Breaker `f_detectBreaker`
+
+**Concepto.** Un OB que **falló** (fue invalidado) cambia de polaridad y pasa a actuar en sentido contrario. Un OB alcista roto a la baja se convierte en resistencia (breaker bajista) en el retest.
+
+**Definición cuantificada.** Cuando un OB pasa a `state = 3 invalidada` (§2.1: una vela cierra atravesando su borde protector) → se crea una `SMC_Zone` KIND_BREAKER en las mismas coordenadas con `dir` **invertido**. En el **retest** desde el otro lado, opera como zona en la nueva dirección. Hereda la máquina de mitigación del OB.
+
+**Parámetros default.** Heredados de OB (§2.1). Confluencia #22.
+
+**Contraejemplo.** Un OB simplemente **mitigado** (`state 2`, el precio lo testeó y respetó) **no** es breaker — sigue siendo OB válido en su dirección original. El breaker requiere **invalidación** (cierre a través), no un mero toque.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.7 Rejection `f_detectRejection`
+
+**Concepto.** Una vela de **rechazo** (mecha larga) en un nivel clave: el precio intentó penetrar y fue devuelto con fuerza. Señal de defensa de la zona.
+
+**Definición cuantificada.**
+- **Rejection alcista:** vela con **mecha inferior ≥ `rejWickFactor × cuerpo`** (default 2×) cuyo low toca una zona/nivel clave (OB, FVG, pool, EQH/EQL, borde de premium/discount, EMA) y cierra en la mitad superior de su rango.
+- **Rejection bajista:** simétrico con **mecha superior**.
+- `cuerpo = |close − open|`; `mecha inferior = min(open,close) − low`; `mecha superior = high − max(open,close)`.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `rejWickFactor` | **2.0** | mecha ≥ 2× cuerpo. |
+| nivel clave | OB/FVG/pool/EQHL/PD/EMA | la mecha debe tocar uno de estos. |
+
+**Contraejemplo.** Una vela con mecha larga **en medio de la nada** (sin tocar ningún nivel clave): es ruido, **no** rejection operable. El ancla a un nivel clave es lo que la hace significativa. Confluencia #23.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 2.8 Flip y Mitigation Block `f_detectFlip`
+
+**Concepto.** Dos refinamientos de cómo un nivel cambia de rol:
+- **Flip:** un nivel roto con **cierre limpio** y luego **retesteado desde el otro lado** → soporte que pasa a resistencia o viceversa (KIND_FLIP, confluencia #25).
+- **Mitigation block:** zona de la última vela contraria antes de un movimiento que mitiga un desequilibrio previo **sin** haber barrido liquidez (a diferencia del breaker, que sí invalida tras barrido). Confluencia #24.
+
+**Definición cuantificada.**
+- **Flip:** nivel `N` (swing/OB/EQHL) roto por `close` (limpio, no mecha); en una visita posterior el precio lo testea desde el lado opuesto y respeta (cierre que no lo vuelve a cruzar). Marca el cambio de rol.
+- **Mitigation block:** última vela contraria antes de un impulso que rompe estructura interna **pero** sin sweep previo de un pool (si hubo sweep → es contexto de breaker/OB, no mitigation block). Zona = high/low de esa vela.
+
+**Parámetros default.** Heredan de OB/estructura. Distinción operativa: `breaker` = falló tras barrido; `flip` = cambio de rol por retest; `mitigation block` = relleno de desequilibrio sin barrido.
+
+**Contraejemplo.** Un nivel roto solo por **mecha** (sin cierre limpio) que luego se retestea: no es flip — el cierre que define el flip nunca ocurrió.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+> **Tier 2 COMPLETO** (2.1–2.8). Restante de reglas-smc-ict.md: **§3 Liquidez** (pools, sweeps/grabs, Kill Zones con DST, Judas, IDM, false breakout, spring/raid) y **§4 Contexto/ICT/EMAs** (displacement formal, session opens, EMAs estado/cruces/rebotes). Luego: pasada TV MCP para poblar todos los casos ⏳PENDIENTE-TVMCP.

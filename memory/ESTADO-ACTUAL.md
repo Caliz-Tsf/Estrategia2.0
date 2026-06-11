@@ -2,12 +2,20 @@
 > Actualizar al cierre de CADA sesión (lo hace smc-doc-updater vía /smc-session-close cuando existan).
 
 ## Estado
-- **Fase actual:** FASE 0 — pendiente de iniciar
-- **Última tarea completada:** Generación del WORKPLAN-MAESTRO-V2.md + 5 anexos (docs/workplan/) — commit cff7fb9 (2026-06-10)
-- **Siguiente tarea:** SEC-01 (rotar API keys firecrawl/tavily — manual, usuario) → luego Fase 0 Bloque A: SEC-02 (.gitignore), GIT-01 (mover LuxAlgo a pine/reference/) → Bloque B: DOC-01 (reglas-smc-ict.md, la tarea más importante)
+- **Fase actual:** FASE 0 — EN CURSO
+- **Última tarea completada:** DOC-01 Tier 1 (Estructura) — reglas-smc-ict.md con convenciones globales + swings/clasificación/BOS/CHoCH/MSS/impulso, aprobado sección a sección — commit 414fa1b (2026-06-10)
+- **Bloque A COMPLETO:** SEC-01 (keys rotadas por usuario + viejas redactadas), SEC-02 (.gitignore), GIT-01 (LuxAlgo → pine/reference/LuxAlgo-SMC-base.pine) — commit 5970a10
+- **Siguiente tarea:** DOC-01 Tier 2 (Zonas: OB, FVG, Premium/Discount, EQH/EQL) → luego Liquidez → ICT/EMAs. PENDIENTE transversal: poblar casos de prueba EURUSD (marcados ⏳PENDIENTE-TVMCP) con una pasada de TradingView MCP cuando estén todas las definiciones.
 
 ## Bloqueos
-- SEC-01 pendiente: las keys expuestas en PLAN-MAESTRO-FASE0.md (histórico) siguen activas hasta que el usuario las rote.
+- Ninguno. (SEC-01 resuelto: usuario confirmó keys viejas revocadas; nuevas en .env/.mcp.json gitignored.)
+
+## Decisiones de esta sesión (DOC-01)
+- Umbrales SIEMPRE relativos a ATR(14), nunca pips fijos.
+- swingLen=5 / internalLen=3 (ajustable en pruebas Fase 3).
+- BOS/CHoCH por CIERRE, no mecha. Modelo bias = structure high/low (extensor vs protector).
+- MSS = CHoCH de nivel swing + displacement (≥1.5×ATR, cuerpo ≥70%) — lo distingue del CHoCH simple en el scoring.
+- Storage keys: .mcp.json + .env (ambos gitignored), sin migrar a env vars de Windows.
 
 ## Decisiones vigentes (no re-litigar)
 - Arquitectura Pine: 1 core compartido + SMC-Visual.pine (indicator) + SMC-Strategy.pine (strategy → Strategy Tester).
