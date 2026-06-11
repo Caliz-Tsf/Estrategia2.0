@@ -1,0 +1,346 @@
+name: smc-sprint
+description: |
+  Use when: implementar UN concepto SMC en Pine Script de Estrategia 2.0
+  (Fases 1 y 2), una corrida por concepto del orden de PINE-PLAN.md §7.
+  Triggers: "smc-sprint", "implementar concepto SMC", "nuevo concepto pine".
+  NOT for: features multi-archivo (usar archon-feature-development),
+           refactors de codigo ya validado (usar archon-refactor-safely),
+           traduccion MQL5 Fase 4 (usar archon-test-loop-dag).
+
+  Ciclo: check-rule -> (define-rule si falta) -> spec -> implement ->
+         validate (loop correccion x3) -> approve humano -> commit.
+
+  Entrada ($ARGUMENTS): "concepto=<nombre-kebab> sprint=<N.M>"
+    ej: "concepto=liquidity-sweep sprint=1.3"
+
+  NORMATIVO: la fuente de la LOGICA es docs/workplan/WORKFLOWS.md (WF-01).
+  Este YAML la adapta al schema real del Archon instalado (v0.4.x, nodos DAG).
+  Fallback: si Archon no esta operativo, Claude Code ejecuta estos nodos en
+  orden manualmente — el workflow es documentacion ejecutable, no dependencia dura.
+
+provider: claude
+interactive: true
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 1 · CHECK-RULE  (supervisor: claude-code)
+  # Verifica que la regla del concepto existe y esta cuantificada en
+  # docs/reglas-smc-ict.md: umbrales numericos + >=3 casos de prueba
+  # con fecha. Sin esto, smc-validator-agent no puede validar nada.
+  # ═══════════════════════════════════════════════════════════════
+  - id: check-rule
+    bash: |
+      set +e
+      CONCEPTO=$(echo "$ARGUMENTS" | grep -oE 'concepto=[a-zA-Z0-9_-]+' | head -1 | cut -d= -f2)
+      SPRINT=$(echo "$ARGUMENTS" | grep -oE 'sprint=[0-9.]+' | head -1 | cut -d= -f2)
+      RULES="docs/reglas-smc-ict.md"
+
+      echo "CONCEPTO=$CONCEPTO"
+      echo "SPRINT=$SPRINT"
+      echo "RULES_FILE=$RULES"
+
+      if [ -z "$CONCEPTO" ]; then
+        echo "RULE_STATUS=ERROR_NO_CONCEPTO"
+        echo "Falta 'concepto=<nombre>' en \$ARGUMENTS. Ej: concepto=liquidity-sweep sprint=1.3"
+        exit 0
+      fi
+      if [ ! -f "$RULES" ]; then
+        echo "RULE_STATUS=MISSING_RULES_FILE"
+        exit 0
+      fi
+
+      echo "=== Seccion del concepto en $RULES ==="
+      # Bloque desde el encabezado del concepto hasta el siguiente '## '
+      awk -v c="$CONCEPTO" '
+        BEGIN{IGNORECASE=1; found=0}
+        /^#{2,3} /{ if(found){exit} }
+        tolower($0) ~ tolower(c){found=1}
+        found{print}
+      ' "$RULES" | head -120 > /tmp/smc_rule_block.txt
+      cat /tmp/smc_rule_block.txt
+
+      # Heuristicas de completitud (informativas; el juez real es define-rule)
+      ATR_HITS=$(grep -ciE 'atr' /tmp/smc_rule_block.txt)
+      # Casos de prueba con fecha ISO (YYYY-MM-DD)
+      DATE_CASES=$(grep -coE '[0-9]{4}-[0-9]{2}-[0-9]{2}' /tmp/smc_rule_block.txt)
+      SECTION_LINES=$(wc -l < /tmp/smc_rule_block.txt)
+
+      echo ""
+      echo "=== Heuristicas ==="
+      echo "ATR_MENTIONS=$ATR_HITS"
+      echo "DATED_TEST_CASES=$DATE_CASES"
+      echo "SECTION_LINES=$SECTION_LINES"
+
+      if [ "$SECTION_LINES" -lt 3 ]; then
+        echo "RULE_STATUS=MISSING_SECTION"
+      elif [ "$DATE_CASES" -lt 3 ] || [ "$ATR_HITS" -lt 1 ]; then
+        echo "RULE_STATUS=INCOMPLETE"
+      else
+        echo "RULE_STATUS=LIKELY_COMPLETE"
+      fi
+    timeout: 30000
+
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 2 · DEFINE-RULE  (agente: smc-architect) — APROBACION HUMANA
+  # Si la regla esta completa, presenta y deja pasar. Si falta o esta
+  # incompleta, redacta definicion cuantificada + >=3 casos con fecha y
+  # NO continua hasta que el usuario apruebe. Sustituye el on_fail:goto
+  # write-rule del borrador WF-01 por un loop interactivo (in-node).
+  # ═══════════════════════════════════════════════════════════════
+  - id: define-rule
+    depends_on: [check-rule]
+    loop:
+      prompt: |
+        # smc-sprint — Verificacion/Redaccion de la regla SMC
+
+        Actuas como el agente **smc-architect**: guardian de la coherencia del
+        sistema y de docs/reglas-smc-ict.md (fuente de verdad SMC).
+
+        ## Contexto de check-rule
+        $check-rule.output
+
+        ## Feedback del usuario (iteraciones siguientes)
+        $LOOP_USER_INPUT
+
+        ---
+
+        ## Reglas duras del proyecto (innegociables — CLAUDE.md)
+        - Umbrales SIEMPRE relativos a ATR(14), NUNCA pips fijos. Cada concepto
+          declara que ATR usa.
+        - Scoring direccional (scoreLong/scoreShort), nunca score absoluto.
+        - Anti-repaint: eventos solo en barstate.isconfirmed.
+        - Un concepto = una seccion cuantificada + >=3 casos de prueba con fecha
+          ISO (YYYY-MM-DD) sobre EURUSD.
+
+        ## Que hacer
+
+        **Si RULE_STATUS=LIKELY_COMPLETE** (primera iteracion):
+        - Lee docs/reglas-smc-ict.md, la seccion del concepto.
+        - Verifica de verdad: umbral ATR-relativo presente? >=3 casos con fecha?
+          definicion sin ambiguedad para smc-validator-agent?
+        - Si esta solida, resume la regla en 5-8 lineas y pide confirmacion:
+          "Regla completa. Responde **ok** para pasar a spec, o indica que ajustar."
+        - NO emitas la senal en la primera iteracion.
+
+        **Si RULE_STATUS=INCOMPLETE / MISSING_SECTION / MISSING_RULES_FILE**:
+        - Redacta la definicion cuantificada del concepto: que detecta, umbral(es)
+          ATR-relativo(s), condiciones de confirmacion (cierre vs mecha), y como
+          aporta al scoring direccional.
+        - Anade >=3 casos de prueba con fecha ISO sobre EURUSD (los visuales se
+          poblaran en la pasada TV MCP; aqui basta la hipotesis con fecha).
+        - Escribe/edita la seccion en docs/reglas-smc-ict.md.
+        - Presenta el borrador y pide aprobacion explicita del usuario.
+
+        **Si RULE_STATUS=ERROR_NO_CONCEPTO**:
+        - Pide al usuario el nombre del concepto y el sprint. NO emitas la senal.
+
+        **Si el usuario aprueba EXPLICITAMENTE** ("ok", "aprobado", "listo",
+        "adelante"):
+        - Si hubo cambios, deja docs/reglas-smc-ict.md guardado.
+        - Emite: <promise>RULE_READY</promise>
+
+        CRITICO: NUNCA emitas <promise>RULE_READY</promise> salvo que el ultimo
+        mensaje del usuario sea una aprobacion explicita. Preguntas o pedidos de
+        cambio NO son aprobacion.
+      until: RULE_READY
+      max_iterations: 8
+      interactive: true
+      gate_message: |
+        Revisa la regla del concepto en docs/reglas-smc-ict.md.
+        Responde "ok"/"aprobado" para continuar, o indica que corregir.
+
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 3 · SPEC  (agente: smc-architect)
+  # Spec tecnica breve, inline (conceptos simples no necesitan doc).
+  # ═══════════════════════════════════════════════════════════════
+  - id: spec
+    depends_on: [define-rule]
+    context: fresh
+    allowed_tools: [Read, Grep, Glob]
+    prompt: |
+      # smc-sprint — Spec tecnica de implementacion
+
+      Actuas como **smc-architect**. La regla ya esta aprobada. Define la spec
+      MINIMA de implementacion del concepto (inline, sin crear archivo).
+
+      ## Regla aprobada / contexto
+      $define-rule.output
+
+      ## Entrega (texto, conciso)
+      1. Firma de la funcion pura: `f_detect{Concepto}(...)` — parametros y tipo
+         de retorno.
+      2. UDT(s) usados y arrays SMC_ afectados (declarar si crea uno nuevo).
+      3. Que ATR usa el umbral (segun la regla).
+      4. Impacto en **Visual**: dibujo (box/line/label) + fila de panel si aplica.
+      5. Impacto en **Strategy**: como entra al scoring direccional
+         (scoreLong/scoreShort) y con que peso tentativo.
+      6. Anti-repaint: confirmar que el evento se evalua en barstate.isconfirmed.
+
+      Recuerda la arquitectura: la deteccion vive en la seccion
+      `// === LIBRARY CORE ===` que debe ser BYTE-IDENTICA en SMC-Visual.pine y
+      SMC-Strategy.pine. No dibuja desde el core, no llama request.security desde
+      el core.
+
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 4 · IMPLEMENT  (skill: smc-pine-develop)
+  # Implementa en LIBRARY CORE (Visual y Strategy identicos) + dibujo en
+  # Visual + fila de panel. Compila via TV MCP hasta 0 errores 0 warnings.
+  # Si hay atasco de compilacion -> logica del agente pine-build-resolver.
+  # ═══════════════════════════════════════════════════════════════
+  - id: implement
+    depends_on: [spec]
+    context: fresh
+    idle_timeout: 600000
+    model: large
+    prompt: |
+      # smc-sprint — Implementacion (skill smc-pine-develop)
+
+      Implementa el concepto siguiendo la skill **smc-pine-develop**.
+
+      ## Spec aprobada
+      $spec.output
+
+      ## Procedimiento
+      1. Implementa la deteccion como funcion pura en la seccion
+         `// === LIBRARY CORE ===`. La MISMA implementacion debe quedar
+         byte-identica en SMC-Visual.pine y SMC-Strategy.pine.
+      2. En SMC-Visual.pine: anade el dibujo (box/line/label) y la fila de panel
+         si la spec lo indica. NO dibujes desde el core.
+      3. En SMC-Strategy.pine: conecta el concepto al scoring direccional.
+      4. Compila con el TV MCP (pine_smart_compile / pine_get_errors) hasta
+         **0 errores y 0 warnings**. Si te atascas en un error de compilacion,
+         aplica la logica del agente **pine-build-resolver**: cambio minimo,
+         sin alterar la logica SMC, diagnostica antes de reintentar.
+
+      ## Reglas duras
+      - 0 errores / 0 warnings o NO se continua.
+      - Anti-repaint: eventos solo en barstate.isconfirmed; request.security con
+        lookahead = barmerge.lookahead_off SIEMPRE.
+      - Umbrales ATR-relativos, nunca pips fijos.
+
+      Reporta: que se implemento, en que lineas de cada archivo, y el resultado
+      de compilacion (debe ser 0/0).
+
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 5 · VALIDATE  (agente: smc-validator-agent, skill: smc-validator)
+  # Validacion visual contra las reglas. Loop de correccion in-node:
+  # si el score < umbral, el agente re-implementa (fresh) y re-valida,
+  # hasta VALIDATE_PASS o max 3 intentos -> escala a humano.
+  # (Adapta el on_fail:goto implement ×3 del borrador WF-01.)
+  # ═══════════════════════════════════════════════════════════════
+  - id: validate
+    depends_on: [implement]
+    idle_timeout: 600000
+    model: large
+    loop:
+      prompt: |
+        # smc-sprint — Validacion visual (skill smc-validator)
+
+        Actuas como el agente **smc-validator-agent**. Validas que el concepto
+        implementado cumple EXACTAMENTE la definicion de docs/reglas-smc-ict.md,
+        usando screenshots de TradingView como evidencia.
+
+        ## Resultado de implementacion / iteracion previa
+        $implement.output
+
+        ## Procedimiento (skill smc-validator)
+        1. Para CADA caso de prueba con fecha de la regla: navega el grafico al
+           caso (TV MCP), captura screenshot, compara lo dibujado contra la
+           definicion cuantificada.
+        2. Asigna un **score por concepto (0-100)**. Umbral de aprobacion: **>=90**.
+        3. Si score >= 90:
+           - Reporta el score y las evidencias.
+           - Emite: <promise>VALIDATE_PASS</promise>
+        4. Si score < 90 (RECHAZADO):
+           - Explica EXACTAMENTE que diverge de la regla (caso, fecha, que se
+             esperaba vs que se dibujo).
+           - Aplica la correccion en el codigo (logica skill smc-pine-develop /
+             pine-build-resolver), recompila a 0/0, y vuelve a validar en la
+             siguiente iteracion. NO emitas la senal.
+
+        CRITICO: solo emite <promise>VALIDATE_PASS</promise> con score real >= 90
+        y evidencia. Si tras los intentos no llegas a 90, reporta el mejor score,
+        el bloqueo concreto, y termina SIN emitir la senal (escala a humano).
+      until: VALIDATE_PASS
+      max_iterations: 3
+      fresh_context: true
+
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 6 · APPROVE  (aprobacion humana)
+  # Muestra score + screenshot final + diff. Solo el humano aprueba el
+  # concepto. Si rechaza, su feedback guia una correccion antes de cerrar.
+  # ═══════════════════════════════════════════════════════════════
+  - id: approve
+    depends_on: [validate]
+    loop:
+      prompt: |
+        # smc-sprint — Aprobacion humana del concepto
+
+        El concepto fue validado automaticamente. Falta la aprobacion del usuario.
+
+        ## Resultado de validacion
+        $validate.output
+
+        ## Feedback del usuario
+        $LOOP_USER_INPUT
+
+        ---
+
+        **Primera iteracion** (sin feedback): presenta al usuario, para decidir:
+        - El score de validacion y las evidencias.
+        - `git diff` del codigo del concepto (Visual + Strategy).
+        - El/los screenshot(s) final(es) del caso principal.
+        Pide: "Responde **aprobado** para commitear, o indica que corregir."
+        NO emitas la senal en la primera iteracion.
+
+        **Si el usuario aprueba EXPLICITAMENTE** ("aprobado", "ok", "ship it"):
+        - Emite: <promise>CONCEPT_APPROVED</promise>
+
+        **Si da feedback concreto**: aplica la correccion en el codigo, recompila
+        a 0/0, re-valida brevemente, muestra el nuevo diff/score. NO emitas la senal.
+
+        CRITICO: NUNCA emitas <promise>CONCEPT_APPROVED</promise> sin aprobacion
+        explicita en el ultimo mensaje del usuario.
+      until: CONCEPT_APPROVED
+      max_iterations: 5
+      interactive: true
+      gate_message: |
+        Revisa score, diff y screenshot del concepto.
+        Responde "aprobado" para commitear, o indica que corregir.
+
+  # ═══════════════════════════════════════════════════════════════
+  # PASO 7 · COMMIT  (supervisor: claude-code)
+  # check-core-sync (Visual==Strategy en el core) -> commit individual ->
+  # registro en docs/sprint-runs/validaciones.md. Un commit = un concepto.
+  # ═══════════════════════════════════════════════════════════════
+  - id: commit
+    depends_on: [approve]
+    context: fresh
+    prompt: |
+      # smc-sprint — Commit del concepto
+
+      El concepto fue aprobado por el usuario. Cierra la corrida.
+
+      ## Contexto
+      - Concepto/sprint: ver $check-rule.output (CONCEPTO=, SPRINT=)
+      - Validacion: $validate.output
+      - Aprobacion: $approve.output
+
+      ## Procedimiento
+      1. **Sincronia del core (regla dura #2)**: ejecuta
+         `powershell -File scripts/check-core-sync.ps1`. La seccion
+         `// === LIBRARY CORE ===` de SMC-Visual.pine y SMC-Strategy.pine debe
+         ser identica. Si el script sale con exit 1 (divergencia) -> NO commitees;
+         corrige hasta que la seccion sea byte-identica.
+      2. **Commit individual** (Conventional Commits + ID de tarea). Stagea solo
+         los archivos del concepto (Pine + reglas-smc-ict.md si cambio), nunca
+         `git add -A`:
+         ```
+         git add pine/SMC-Visual.pine pine/SMC-Strategy.pine docs/reglas-smc-ict.md
+         git commit -m "feat(pine): {concepto} — validado {score}/100 [F{sprint}]"
+         ```
+      3. **Registro**: anade una entrada a docs/sprint-runs/validaciones.md con
+         concepto, sprint, score, fecha ISO y hash corto del commit. Crea el
+         archivo si no existe.
+
+      Reporta el hash del commit y la linea registrada.
