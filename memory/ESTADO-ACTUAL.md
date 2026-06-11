@@ -2,6 +2,7 @@
 > Actualizar al cierre de CADA sesión (lo hace smc-doc-updater vía /smc-session-close cuando existan).
 
 ## Estado
+- **Rama de trabajo:** **`pine/sistema-completo`** (creada Sesion-010, publicada en origin). Todo el código Pine (Fases 1-3) vive aquí; `main` queda estable hasta el gate de Fable pre-Fase 4. Ver **ADR-003**.
 - **Fase actual:** **FASE 1 — DESBLOQUEADA ✅** (VER-09 aprobado, ADR-002 registrado). Siguiente: F1-S1.1-T01 (esqueleto 3 archivos Pine + UDTs + arrays acotados) vía `/smc-session-startup` + workflow `smc-sprint`.
 - **Última tarea completada (Sesion-009):** **GATE VER-09 CERRADO — APROBADO POR FABLE.** Auditoría integral de Fase 0: reglas-smc-ict.md, DOC-01..07, MCPs/skills/agentes, workflows, scripts. Resolución de 3 decisiones de escasez (MSS swing ×1, Judas ×1, breaker retest): aceptados como composiciones de primitivos bien evidenciados; criterios de done convertidos en T12/T18/T19 de Fase 1. Umbrales congelados hasta calibración Fase 3 (anti-overfitting). MCP-06 (task-master) saltado definitivamente. Mejora: paridad Python↔Pine para golden tests. Correcciones aplicadas (C1–C5): alineación PINE-PLAN/WORKFLOWS/reglas-smc-ict.md. ADR-002 escrito y registrado. Tag `ver-09-aprobado` generado (supervisor). Handoff: `docs/VER-09-handoff-fable.md` + veredicto en sección final.
 - **Última tarea completada (Sesion-008):** **VER-01..08 PASE COMPLETO.** VER-01 tv_health_check ✅ · VER-02 startup 1⚠️ ✅ · VER-03 morning_brief ✅ · VER-04 ✅ (S007) · **VER-05 ✅ reglas-smc-ict.md poblado con casos reales de EURUSD (24 conceptos, TV MCP) + aprobado por Freddy** — 3 notas de escasez (MSS swing ×1, Judas ×1, breaker retest) derivadas a Fable (VER-09) para decisión · VER-06 ✅ (SCR-03) · VER-07 ✅ git limpio · VER-08 ✅. Extractor reproducible en `scripts/ver05/` (detect*.py sobre eurusd_h1.csv/eurusd_m5.csv; H1 25-may→11-jun, M5 10–11-jun). Handoff: `docs/VER-09-handoff-fable.md`. tag `fase-0-completa`.
@@ -39,6 +40,10 @@
 - Solo EURUSD hasta gate de Fase 3. R:R mínimo 1:3. Anti-repaint obligatorio.
 - Fuente de verdad del plan: WORKPLAN-MAESTRO-V2.md + docs/workplan/*.
 - **ADR-002 — VER-09 APROBADO (2026-06-11, Sesion-009).** MSS swing / Judas / Breaker aceptados como composiciones de primitivos evidenciados; criterios de done convertidos en T12/T18/T19 (Fase 1). Umbrales CONGELADOS hasta calibración Fase 3 (anti-overfitting). MCP-06 saltado. Paridad Python↔Pine anotada en Fase 1. Ningún código antes del gate (completado). Límite ~300 velas documentado; validación visual sin límite (chart_scroll_to_date/replay/screenshots).
+- **ADR-003 — ESTRATEGIA DE RAMAS (2026-06-11, Sesion-010, decisión Freddy).** Dos ramas largas, una por gran etapa de desarrollo:
+  - **`pine/sistema-completo`** = TODO el Pine (Fases 1-3, los 25+ conceptos + Strategy + calibración). Los commits de cierre de sesión (ESTADO-ACTUAL, Sesion-NNN, ADRs) fluyen **en esta rama**; `main` permanece estable. Se fusiona a `main` **SOLO** tras pasar el GATE DURO de entrada a Fase 4 (WORKPLAN §FASE 4, líneas 171-176): Fable revisa y aprueba explícitamente el sistema Pine completo.
+  - **`mql5/ea-nativo`** (nombre propuesto) = Fase 4, el Expert Advisor MT5. Se crea **al cerrar la última sesión de Pine**, después de la aprobación de Fable, partiendo de `main` ya fusionado.
+  - Regla: ningún MQL5 hasta cerrar la rama Pine + gate Fable. Cada rama = una gran etapa; main = hitos aprobados.
 
 ## Cómo arrancar la próxima sesión
 1. Leer este archivo + WORKPLAN-MAESTRO-V2.md Sección 3 (Fase 0).
@@ -53,4 +58,4 @@
 - **task-master (MCP-06):** **OPCIONAL — se puede saltar sin perder nada** (decisión usuario Sesion-005). No es pieza del sistema (el WORKPLAN ya es el backlog; teoría→indicador corre sobre reglas-smc-ict.md + smc-sprint/Archon + smc-validator-agent). Si se hiciera, es en VER-09 y **a criterio de Fable** decidir si vale la pena (probablemente no). CLI disponible (0.43.1).
 - **SCR-02 sync-obsidian.ps1** ✅: copia incremental (por hash) de `memory/sesiones/`, `docs/adrs/`, `memory/ESTADO-ACTUAL.md` → `D:\obsidian\boveda MENTE\Mente\Estrategia2.0\`. `-DryRun` para simular. Idempotente. Adelantado del Bloque F.
 
-*Última actualización: 2026-06-11 — Sesion-009: **VER-09 CERRADO — APROBADO.** ADR-002 aplicado, Fase 1 DESBLOQUEADA. Siguiente: F1-S1.1-T01 (esqueleto Pine).*
+*Última actualización: 2026-06-11 — Sesion-010: **Rama `pine/sistema-completo` abierta** (ADR-003). main sincronizado. Listo para F1-S1.1-T01 (esqueleto Pine).*
