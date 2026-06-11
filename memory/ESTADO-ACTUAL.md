@@ -3,9 +3,10 @@
 
 ## Estado
 - **Fase actual:** FASE 0 — EN CURSO
-- **Última tarea completada:** DOC-01 §3 Liquidez + ADR-001 (multi-símbolo, sin filtro horario duro). Tier 1, Tier 2 y §3 hechos.
-- **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR (este).
-- **Siguiente tarea:** DOC-01 §4 Contexto/ICT/EMAs (displacement formal, session opens, EMAs estado/cruces/rebotes/alineación). PENDIENTE transversal: poblar casos ⏳PENDIENTE-TVMCP con pasada TradingView MCP cuando estén todas las definiciones. PENDIENTE workplan: aplicar cambios de ADR-001 a §4.8/F2-T02/PINE-PLAN/MQL5-PLAN cuando se toque cada sección.
+- **Última tarea completada:** DOC-01 §4 Contexto/ICT/EMAs. **TODAS las definiciones de reglas-smc-ict.md escritas** (§1 Estructura, §2 Zonas, §3 Liquidez, §4 ICT/EMAs — 42 confluencias cubiertas).
+- **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 (este).
+- **Siguiente tarea — cerrar DOC-01 (gate VER-05):** (1) pasada TradingView MCP para poblar casos ⏳PENDIENTE-TVMCP con velas reales EURUSD (requiere TV abierto); (2) aprobación final del usuario. Luego DOC-02 (reglas-dev.md) y resto Bloque B.
+- **PENDIENTE workplan:** aplicar cambios de ADR-001 a §4.8/F2-T02/PINE-PLAN/MQL5-PLAN cuando se toque cada sección.
 
 ## Bloqueos
 - Ninguno. (SEC-01 resuelto: usuario confirmó keys viejas revocadas; nuevas en .env/.mcp.json gitignored.)

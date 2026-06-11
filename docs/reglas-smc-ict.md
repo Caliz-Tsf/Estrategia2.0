@@ -494,4 +494,85 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 ---
 
-> **§3 Liquidez COMPLETO** (3.1–3.7). Restante: **§4 Contexto/ICT/EMAs** (displacement formal como zona/evento, session opens, EMAs: estado/cruces/rebotes/alineación). Luego pasada TV MCP para poblar casos ⏳PENDIENTE-TVMCP.
+---
+
+## 4. CONTEXTO / ICT / EMAs
+
+Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la fuerza del movimiento (displacement), los niveles de apertura (session opens) y la tendencia media (EMAs). Todos símbolo-agnósticos.
+
+### 4.1 Displacement `f_detectDisplacement`
+
+**Concepto.** El movimiento **impulsivo** que delata intención institucional: una expansión brusca tras un periodo de calma. Es lo que crea FVGs y OBs, y el calificador de fuerza para MSS (§1.5) y Judas (§3.5).
+
+**Definición cuantificada.** Una vela (o tramo de 1–3 velas) es displacement si:
+- `rango ≥ dispFactor × ATR(14)` (default `dispFactor = 1.5`), **y**
+- `cuerpo ≥ bodyPct × rango` (default `bodyPct = 0.70`), **y**
+- (opcional, `requireContraction = true`) ocurre tras **≥3 velas** de `rango < ATR(14)` (expansión tras compresión).
+- `dir` = signo de la vela (`close > open` → `+1`). Confluencia #32.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `dispFactor` | **1.5** | × ATR(14) para el rango. |
+| `bodyPct` | **0.70** | cuerpo mínimo / rango. |
+| `requireContraction` | **true** | exige 3 velas previas de baja volatilidad. Relajable. |
+
+**Contraejemplo.** Una vela de rango grande pero con **cuerpo pequeño** (mecha dominante, `cuerpo < 70%`): NO es displacement → es indecisión/rechazo. La fuerza está en el cuerpo, no en el rango total.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 4.2 Session Opens `f_sessionOpens`
+
+**Concepto.** Los niveles de **apertura** (diaria/semanal/mensual) actúan como referencia institucional de valor: el precio por encima/debajo de la apertura semanal marca sesgo, y la apertura suele actuar como soporte/resistencia.
+
+**Definición cuantificada.**
+- Niveles: apertura **diaria** (frontera de día del broker — para 24h = medianoche del broker), **semanal** y **mensual**. Trazados como líneas horizontales.
+- **Confluencia #36 (session open cercano):** el precio está dentro de `openProx × ATR(14)` de un nivel de apertura → ese nivel es relevante como S/R inmediato. Direccional según de qué lado del nivel esté el precio.
+- Símbolo-agnóstico: cualquier instrumento tiene aperturas; en 24h la diaria usa la frontera de día del broker.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `openProx` | **0.5** | × ATR(14): distancia para contar como "cercano". |
+| niveles | diaria + semanal + mensual | toggles individuales. |
+
+**Contraejemplo.** El precio a 3×ATR de la apertura semanal: el nivel existe pero **no es confluencia activa** (demasiado lejos para influir la entrada ahora).
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 4.3 EMAs — estado, cruces, rebotes, alineación `f_emaState`
+
+**Concepto.** Las medias móviles exponenciales 20/50/200 dan **confirmación de tendencia**. Son la única familia no-puramente-SMC: confirman, no lideran → peso base bajo (se calibra en Fase 3). Colapsadas de 15 confluencias originales a **6** `[FIX P-05]` para evitar doble conteo de pares mutuamente excluyentes.
+
+**Definición cuantificada** (6 confluencias direccionales, #37–#42):
+- **#37 vs EMA200:** `close > EMA200` → +1 / `close < EMA200` → −1. **Una sola** confluencia direccional (no dos sumando al mismo score).
+- **#38 vs EMA50:** ídem con EMA50.
+- **#39 vs EMA20:** ídem con EMA20.
+- **#40 cruce reciente alineado:** un cruce de cualquier par (20×50, 50×200, 20×200) ocurrido en `≤ crossBars` velas (default 20) cuya dirección coincide con el sesgo. +peso al lado del cruce.
+- **#41 rebote en EMA alineado:** el precio toca una EMA y cierra de vuelta con mecha (`mecha ≥ rejWickFactor × cuerpo`, §2.7) en la dirección de la tendencia.
+- **#42 3 EMAs alineadas:** `EMA20 > EMA50 > EMA200` (→ +1 fuerte) o `EMA20 < EMA50 < EMA200` (→ −1). Tendencia limpia.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `emaFast/Mid/Slow` | **20 / 50 / 200** | periodos estándar. |
+| `crossBars` | **20** | antigüedad máxima de un cruce para contar. |
+| `rejWickFactor` | 2.0 | reusa el de Rejection (§2.7) para el rebote. |
+
+**Contraejemplo `[FIX P-05]`.** Contar "precio sobre EMA200" Y "precio bajo EMA200" como confluencias separadas que suman al mismo score: una de las dos está SIEMPRE activa → +peso garantizado a cualquier señal. Por eso #37–#39 son **direccionales únicas** (suman a long O short, nunca inflan el total).
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+> **DEFINICIONES DE reglas-smc-ict.md COMPLETAS** — Tier 1 Estructura (§1), Tier 2 Zonas (§2), Liquidez (§3), Contexto/ICT/EMAs (§4). Cubren los 42 confluencias canónicas (§4.8 del workplan) y todas las funciones de PINE-PLAN §3.
+>
+> **Falta para cerrar DOC-01 (gate VER-05):**
+> 1. **Pasada TradingView MCP:** poblar todos los casos ⏳PENDIENTE-TVMCP con velas reales de EURUSD (fecha-hora GMT + precio) — una sola sesión de gráfico.
+> 2. **Aprobación final del usuario** del documento completo.
+>
+> **Tier 3 (Wyckoff, PO3, Volume Surge):** fuera de este doc — experimental post-Fase 3 `[P-10]`.
