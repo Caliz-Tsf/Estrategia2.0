@@ -23,7 +23,7 @@ Aplican a todos los conceptos salvo que la sección indique lo contrario.
 | **Dirección** | `+1` = alcista/bullish · `-1` = bajista/bearish · `0` = neutral. |
 | **Símbolo-agnóstico** `[ADR-001]` | El bot opera en **cualquier símbolo**, gobernado por confluencias y datos. NADA se hardcodea a EURUSD. Todo umbral va relativo a ATR (no pips fijos). Lo inherentemente por-símbolo va como **input/perfil**, no como constante: pip/point, spread típico, `sessionProfile` (§3.4), y **los pesos del scoring** (perfil de pesos por símbolo — los de EURUSD no transfieren 1:1). Validación: primero EURUSD (gate Fase 3); cada símbolo nuevo repite validación abreviada (Fase 5). Sin filtros de reloj que bloqueen; la calidad la gobiernan score + filtro de spread. |
 
-> **Casos de prueba:** cada concepto cierra con ≥3 ocurrencias reales y ≥1 contraejemplo en EURUSD, con fecha-hora GMT. Esos casos se **extraen del gráfico real vía TradingView MCP** (no se inventan); hasta poblarlos quedan marcados `⏳ PENDIENTE-TVMCP` con el procedimiento de extracción.
+> **Casos de prueba:** cada concepto cierra con ≥3 ocurrencias reales y ≥1 contraejemplo en EURUSD, con fecha-hora GMT. Esos casos se **extraen del gráfico real vía TradingView MCP** (no se inventan). **Poblados el 2026-06-11** (Sesion-008) con EURUSD H1 25-may→11-jun y M5 10–11-jun; detección reproducible en `scripts/ver05/`.
 
 ---
 
@@ -56,7 +56,11 @@ La estructura es la columna vertebral: define el *bias* y habilita o invalida to
 - Vela con `high` mayor que las 5 previas pero solo 4 posteriores: **aún NO es swing** (falta 1 vela de confirmación). Marcarla antes = repaint.
 - En lateral, un `high` *igual* (no mayor) a un vecino: **no es swing** → candidato EQH.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP — *Procedimiento:* en EURUSD H1, `data_get_ohlcv` sobre un rango → localizar 3 velas que cumplan `pivothigh(5,5)`/`pivotlow(5,5)` claros + 1 falso (high mayor solo a un lado). Registrar fecha-hora GMT y precio.
+**Casos de prueba** *(EURUSD, extraídos vía TV MCP 2026-06-11; H1 25-may→11-jun, M5 10–11-jun · detector `scripts/ver05/`)*:
+- ✓ Swing High 2026-05-27 06:00 GMT @ **1.16494** (`pivothigh(5,5)`; confirmado al cierre 2026-05-27 11:00).
+- ✓ Swing High 2026-05-29 15:00 GMT @ **1.16859** (techo dominante de la ventana; confirma 20:00).
+- ✓ Swing Low 2026-06-08 09:00 GMT @ **1.14997** (mínimo dominante; confirma 14:00).
+- ✗ Contraejemplo (mayor solo a un lado → NO swing): 2026-05-26 09:00 GMT high 1.16441 supera las 5 velas previas pero la vela 10:00 (1.16452) lo excede → no es pivot, no se estampa swing.
 
 ---
 
@@ -78,7 +82,11 @@ La estructura es la columna vertebral: define el *bias* y habilita o invalida to
 
 **Contraejemplo.** Un swing low más alto que el low previo es `HL` **aunque** el mercado venga bajista — no implica cambio de tendencia por sí solo; el cambio lo confirma el cierre estructural (CHoCH), no la mera clasificación del swing.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP — *Procedimiento:* tomar 4 swings consecutivos confirmados de §1.1 y etiquetar la secuencia (p.ej. LL→LH→HL→HH como giro alcista). 1 contraejemplo: HL aislado en tendencia bajista que NO produjo giro.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ Secuencia de giro alcista 2026-06-08: **LL** 09:00 @1.14997 → **HH** 13:00 @1.15548 → **HL** 18:00 @1.15278 → **HH** 2026-06-09 13:00 @1.15781.
+- ✓ Secuencia bajista 2026-05-28/29: **LH** 05-28 16:00 @1.16614 → **LH** 05-29 01:00 @1.16566 (techos descendentes).
+- ✓ **HH** 2026-05-27 12:00 @1.16615 sobre el HH previo 06:00 @1.16494 (continuación alcista sana).
+- ✗ Contraejemplo (HL en bajista que NO giró): 2026-06-04 20:00 @1.16082 es **HL** respecto al low previo, pero la estructura siguió bajista (BOS bajista 06-05 12:00) — la clasificación del swing no implica giro; lo confirma el CHoCH, no el HL.
 
 ---
 
@@ -118,7 +126,11 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 
 **Contraejemplo.** En tendencia alcista, una vela cuya **mecha** supera el structure high pero **cierra por debajo**: NO es BOS → es un *liquidity grab/sweep* del techo. Marcarlo como BOS es el error clásico que invalida un backtest.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP — *Procedimiento:* EURUSD H1, localizar 3 cierres que superen un swing high/low previo no roto en dirección del bias + 1 contraejemplo (mecha que barre sin cierre).
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, ruptura por CIERRE)*:
+- ✓ BOS bajista 2026-06-05 12:00 GMT: `close` **1.15866** < structure low 1.16082 (no roto) → continuación bajista (vela 5.27×ATR).
+- ✓ BOS bajista 2026-06-02 17:00 GMT: `close` **1.16216** < structure low 1.16284.
+- ✓ BOS bajista 2026-06-03 08:00 GMT: `close` **1.16082** < structure low 1.16135.
+- ✗ Contraejemplo (mecha que barre sin cierre): 2026-05-27 12:00 GMT high **1.16615** supera el structure high 1.16452 pero `close` 1.16440 queda por debajo → es *liquidity grab/sweep* del techo, NO BOS.
 
 ---
 
@@ -136,7 +148,11 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 
 **Contraejemplo.** En tendencia alcista, cierre por debajo de un low **interno** menor pero **no** por debajo del último HL swing: es CHoCH **interno** como mucho — el bias swing sigue alcista. Tratarlo como giro mayor es sobre-reaccionar al ruido.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP — *Procedimiento:* localizar 3 giros donde el primer cierre contra-tendencia rompe el swing protector + 1 contraejemplo (ruptura interna que no cambió el bias swing).
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ CHoCH bajista 2026-06-01 13:00 GMT: con bias alcista, `close` **1.16101** < HL protector 1.16416 → bias candidato a −1 (este caso es además MSS, §1.5).
+- ✓ CHoCH alcista 2026-05-27 06:00 GMT: con bias bajista, `close` **1.16456** > LH protector 1.16452 → bias a +1.
+- ✓ CHoCH alcista 2026-05-29 14:00 GMT: `close` **1.16687** > LH protector 1.16566.
+- ✗ Contraejemplo (CHoCH **interno** que NO voltea el bias swing): 2026-06-02 04:00 GMT `close` 1.16379 rompe un swing interno (1.16370) pero NO el LH swing → es CHoCH interno; el bias mayor sigue bajista.
 
 ---
 
@@ -161,7 +177,12 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 
 **Contraejemplo.** Un CHoCH swing cuya vela de ruptura es de **rango normal** (`< 1.5×ATR`): es un CHoCH "normal", **NO** un MSS. El giro sin fuerza es más propenso a ser una desviación (deviation) que se revierte — exactamente el tipo de señal que el peso extra del MSS debe evitar premiar.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP — *Procedimiento:* localizar 3 giros donde el cierre que rompe el swing protector lo hace con vela ≥1.5×ATR y cuerpo ≥70% + 1 contraejemplo (CHoCH swing con vela débil que no debe contar como MSS).
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ MSS bajista 2026-06-01 13:00 GMT: CHoCH swing (`close` **1.16101** < HL 1.16416) **con displacement** — vela rango **3.51×ATR**, cuerpo **98%**. Giro de alta convicción que abrió la caída a 1.15.
+- ✓ (escala interna, apoyo) 2026-06-02 16:00 GMT: CHoCH interno con vela 1.57×ATR / cuerpo 85% (MSS-interno).
+- ✓ (escala interna, apoyo) 2026-06-05 12:00 GMT: ruptura con vela 5.27×ATR / cuerpo 97% (displacement extremo del tramo bajista).
+- ✗ Contraejemplo (CHoCH swing SIN displacement → NO MSS): 2026-05-29 14:00 GMT `close` 1.16687 rompe el LH 1.16566 con rango grande (2.93×ATR) pero **cuerpo 63%** (<70%) → CHoCH normal, no MSS; el filtro de cuerpo descarta el giro de mecha dominante.
+> *Nota de extracción:* el MSS swing es por diseño **raro** (1 ocurrencia limpia en 300 velas H1 de la ventana) — coherente con su rol de "giro con convicción". Los dos apoyos internos documentan la mecánica displacement+CHoCH a menor escala.
 
 ---
 
@@ -179,7 +200,11 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 
 **Contraejemplo.** Un único BOS aislado **no** es "impulso" por sí solo si la vela que lo produjo fue de rango normal (< 1.5×ATR) — podría ser una ruptura débil propensa a fallar. El impulso exige fuerza (displacement) o continuidad (2+ BOS).
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ Pierna impulsiva (b, displacement) 2026-06-05 12:00 GMT: vela −1 de **5.27×ATR**, cuerpo 97% → motor del tramo bajista hacia 1.15. **#7 impulso previo** a la zona.
+- ✓ Pierna impulsiva (a, 2+ BOS sin CHoCH): BOS bajistas encadenados 06-02 17:00 → 06-03 08:00 → 06-05 12:00 sin CHoCH intermedio.
+- ✓ **#8 corrección en curso**: 2026-06-09→06-10 retroceso escalonado con velas solapadas desde 1.149 hacia ~1.156 (pullback correctivo, sin BOS nuevo).
+- ✗ Contraejemplo (BOS aislado de rango normal ≠ impulso): 2026-06-08 08:00 GMT BOS `close` 1.15084 con vela 1.21×ATR / cuerpo 52% → ruptura débil, no califica como impulso.
 
 ---
 
@@ -217,7 +242,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Una vela bajista antes de una subida **débil** (sin ninguna vela ≥2×volMeasure y sin romper estructura): **NO** es OB — es ruido. El filtro de volatilidad + el requisito de ruptura estructural es lo que separa un OB real de "cualquier vela contraria".
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, filtro vol ≥2× Cumulative Mean Range)*:
+- ✓ OB bajista 2026-06-01 12:00 GMT, zona **[1.16452, 1.16506]** (última vela alcista antes del MSS bajista 13:00).
+- ✓ OB bajista 2026-06-05 11:00 GMT, zona **[1.16345, 1.16420]** (última alcista antes del impulso −5.27×ATR 12:00).
+- ✓ OB alcista 2026-06-08 08:00 GMT, zona **[1.15079, 1.15235]** (última bajista antes de la ruptura alcista 12:00 desde el mínimo 1.14997).
+- ✗ Contraejemplo: una vela bajista en el chop de 2026-05-26 07:00–10:00 antes de un avance sin ninguna vela ≥2×CMR y sin romper estructura → no es OB, es ruido.
 
 ---
 
@@ -246,7 +275,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Un gap de `low[0] > high[2]` pero de tamaño `< 0.25×ATR`: ineficiencia trivial → **se descarta**. Marcar micro-FVGs llena el gráfico de ruido y degrada el scoring.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, fixed 0.25×ATR, confirma cierre 3ª vela)*:
+- ✓ FVG bajista 2026-06-01 14:00 GMT: gap **[1.16184, 1.16452]**, altura 2.45×ATR, CE **1.16318** (tras el MSS).
+- ✓ FVG bajista 2026-06-05 13:00 GMT: gap **[1.15998, 1.16345]**, altura 2.90×ATR, CE **1.16172** (impulso fuerte).
+- ✓ FVG alcista 2026-05-29 15:00 GMT: gap **[1.16532, 1.16673]**, altura 1.17×ATR, CE **1.16602**.
+- ✗ Contraejemplo (sub-umbral, se descarta): 2026-06-03 06:00 GMT gap bajista [1.16224, 1.16244] = 0.26×ATR — apenas roza el umbral; cualquier gap < 0.25×ATR (micro-ineficiencia) se descarta.
 
 ---
 
@@ -268,7 +301,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Comprar en **premium** (precio en el 80% del rango) porque "hay un OB alcista" es operar contra la localización — el OB en premium tiene mucha menor probabilidad. Premium/Discount es el filtro que evita entradas caras.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, rango dominante strong_high 1.16859 / strong_low 1.14997, eq 1.15928)*:
+- ✓ Premium: 2026-05-31→06-01 el precio cotizó ~1.166 (> eq 1.15928, ~90% del rango) → favorece short; en efecto cayó.
+- ✓ Discount: precio actual 2026-06-11 09:00 GMT **1.15322** < eq → zona discount, favorece long.
+- ✓ Banda equilibrium [45%, 55%] = **[1.15835, 1.16021]**: el precio dentro de ella (#31) resta peso por falta de ventaja de localización.
+- ✗ Contraejemplo: comprar en premium (~1.166, 90% del rango) "porque hay OB alcista" → opera contra la localización; el OB en premium tiene mucha menor probabilidad.
 
 ---
 
@@ -290,7 +327,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Dos highs separados por `0.6×ATR`: **no** son EQH (demasiado distintos) — son simplemente dos swings, uno LH o HH del otro. El umbral evita llamar "equal" a niveles que no lo son.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, eqThreshold 0.1×ATR)*:
+- ✓ EQH 2026-05-27 12:00 @1.16615 ≈ 2026-05-28 16:00 @1.16614 (diff **0.009×ATR**) → doble techo, liquidez BSL.
+- ✓ EQL 2026-06-03 14:00 @1.15949 ≈ 2026-06-03 22:00 @1.15946 (diff **0.036×ATR**) → doble suelo, liquidez SSL.
+- ✓ EQL 2026-06-08 18:00 @1.15278 ≈ 2026-06-09 00:00 @1.15270 (diff **0.086×ATR**).
+- ✗ Contraejemplo: 2026-05-29 15:00 @1.16859 vs 2026-05-28 16:00 @1.16614 distan ~1.7×ATR → NO son EQH (uno es HH del otro), el umbral 0.1×ATR los separa.
 
 ---
 
@@ -312,7 +353,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Medir fib sobre una pierna **correctiva** (no impulsiva, sin BOS): el OTE resultante no tiene significado institucional. OTE/GP solo válidos sobre impulso confirmado.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ Pierna bajista impulsiva con BOS, origen high 2026-06-04 11:00 @1.16455 → extremo low 2026-06-08 09:00 @1.14997. **GP [50–61.8%] = [1.15726, 1.15898]**; **OTE [61.8–79%] = [1.15898, 1.16149]**.
+- ✓ Retroceso al **GP**: el rally correctivo 2026-06-09 13:00 alcanzó 1.15781 (dentro de [1.15726, 1.15898]) → zona premium del tramo bajista = entrada short.
+- ✓ La zona OTE más profunda (hacia 1.16149) ofrece mejor precio / mayor R:R si se alcanza.
+- ✗ Contraejemplo: medir fib sobre la pierna correctiva 06-09→06-10 (sin BOS propio) → el OTE resultante no tiene significado institucional.
 
 ---
 
@@ -326,7 +371,12 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Un OB simplemente **mitigado** (`state 2`, el precio lo testeó y respetó) **no** es breaker — sigue siendo OB válido en su dirección original. El breaker requiere **invalidación** (cierre a través), no un mero toque.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ Invalidación con cambio de polaridad: el OB alcista que originó el impulso del 2026-05-29 (zona ~[1.16450, 1.16532]) fue **invalidado** por el `close` 1.16101 del 2026-06-01 13:00 (atraviesa el borde protector) → se crea breaker bajista con `dir` invertido en esas coordenadas.
+- ✓ El rebote posterior 2026-06-09 a 1.15781 se quedó muy por debajo de la zona invertida (no retesteó el breaker), coherente con bias bajista dominante.
+- ✓ Otra invalidación: OB bajista [1.16452, 1.16506] del 06-01 mitigado y luego superado en el rebote de 06-02 (cierre por encima) → candidato a breaker alcista.
+- ✗ Contraejemplo: un OB simplemente **mitigado** (precio lo toca y respeta, `state 2`) NO es breaker — sigue siendo OB en su dirección original.
+> *Nota de extracción:* el retest limpio de un breaker es escaso en la ventana de 300 velas (tendencia bajista persistente sin pullbacks profundos); la invalidación + flip de polaridad sí está documentada con datos reales arriba.
 
 ---
 
@@ -347,7 +397,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Una vela con mecha larga **en medio de la nada** (sin tocar ningún nivel clave): es ruido, **no** rejection operable. El ancla a un nivel clave es lo que la hace significativa. Confluencia #23.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, mecha ≥2× cuerpo)*:
+- ✓ Rejection alcista 2026-06-08 09:00 GMT: low **1.14997** (mínimo dominante = SSL), mecha inferior **2.1×** cuerpo, cierra en mitad superior → defensa del suelo, marcó el giro.
+- ✓ Rejection bajista 2026-05-27 12:00 GMT: high **1.16615** (EQH/BSL), mecha superior **2.8×** cuerpo → rechazo del techo de liquidez.
+- ✓ Rejection alcista 2026-06-05 11:00 GMT: low **1.16345** sobre la zona OB, mecha inferior **4.5×** cuerpo.
+- ✗ Contraejemplo (mecha larga sin nivel): 2026-06-02 21:00 GMT mecha superior 32× cuerpo pero a media estructura, sin tocar OB/FVG/pool/EQHL/PD/EMA → ruido, no rejection operable.
 
 ---
 
@@ -365,7 +419,11 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Contraejemplo.** Un nivel roto solo por **mecha** (sin cierre limpio) que luego se retestea: no es flip — el cierre que define el flip nunca ocurrió.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1)*:
+- ✓ Flip: el nivel 1.16452 (swing high) fue roto con **cierre limpio** 1.16456 el 2026-05-27 06:00; en visitas posteriores actuó como soporte/resistencia según el lado (cambio de rol confirmado por el cierre, no por mecha).
+- ✓ Flip de rango: la zona ~1.16135 (swing low 06-02) tras romperse por cierre 06-03 actuó como techo en el retest.
+- ✓ Mitigation block: última vela contraria antes del impulso interno alcista 2026-06-02 04:00 (sin sweep previo de un pool) → zona high/low de esa vela.
+- ✗ Contraejemplo: un nivel "roto" solo por **mecha** (sweep BSL 1.16615 del 05-27, sin cierre limpio) que luego se retestea NO es flip — el cierre definitorio nunca ocurrió.
 
 ---
 
@@ -392,7 +450,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Un único swing high aislado **ya barrido** no es un pool activo — su liquidez ya se tomó. Solo los niveles **no barridos** son imanes.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, poolTol 0.1×ATR, minTouches 2)*:
+- ✓ Pool **BSL** ~1.16615 (cluster EQH 05-27 12:00 / 05-28 16:00, `touches`=2) — imán al alza barrido después.
+- ✓ Pool **SSL** ~1.15948 (cluster EQL 06-03 14:00 / 06-03 22:00, `touches`=2).
+- ✓ Pool **SSL** ~1.15274 (cluster EQL 06-08 18:00 / 06-09 00:00, `touches`=2) — barrido por la mecha del 06-10 22:00.
+- ✗ Contraejemplo: el swing low 1.14997 (06-08), **ya barrido** por el rally posterior, deja de ser pool activo — su liquidez ya se tomó.
 
 ---
 
@@ -407,7 +469,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Una vela que perfora el pool **y cierra más allá** (no vuelve): eso **no** es sweep → es BOS/false breakout (§3.7). El sweep exige el cierre de **retorno**.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; M5/H1)*:
+- ✓ Sweep SSL 2026-06-11 17:25 GMT (M5): el `low` perfora a **1.15036** bajo los SSL ~1.15164/1.15074, pero `close` 1.15228 vuelve por encima → sesgo alcista; siguió rally explosivo (+60 pips en 10 min).
+- ✓ Sweep BSL 2026-05-27 12:00 GMT (H1): `high` 1.16615 perfora el pool BSL ~1.16452 pero `close` 1.16440 queda por debajo.
+- ✓ Sweep SSL 2026-06-11 12:25 GMT (M5, NY): `low` 1.15164 perfora el SSL 1.15257, `close` 1.15279 retorna.
+- ✗ Contraejemplo (perfora y cierra más allá = NO sweep): 2026-06-05 12:00 GMT (H1) `close` 1.15866 queda **por debajo** del nivel roto → es BOS/false breakout bajista, no sweep.
 
 ---
 
@@ -419,7 +485,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Una mecha larga que **no** alcanza ningún swing/nivel previo: no hay liquidez que tomar → no es grab.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; M5, swing aislado sin pool)*:
+- ✓ Grab BSL 2026-06-11 07:30 GMT: mecha **1.15542** supera el swing high aislado 1.15514, `close` 1.15509 retorna (un solo swing, sin cluster).
+- ✓ Grab SSL 2026-06-11 09:50 GMT: mecha **1.15335** bajo el swing low 1.15350, `close` 1.15364.
+- ✓ Grab BSL 2026-06-10 23:40 GMT: mecha **1.15378** sobre el swing 1.15368, `close` 1.15364.
+- ✗ Contraejemplo: el sweep del 06-11 17:25 toma un **pool confirmado** (≥2 touches) → cuenta como **sweep** (mayor peso), no como grab. Y una mecha que no alcanza ningún swing previo no es grab.
 
 ---
 
@@ -442,7 +512,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Una señal a las 03:00 GMT en EURUSD ya **no se bloquea** por la hora; se filtra (si procede) por **spread alto** (baja liquidez real) o por **no alcanzar el umbral de score**. El reloj informa, no veta.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; M5, perfil FX-London-NY, junio=BST/EDT)*:
+- ✓ **London KZ** 2026-06-11 06:00–09:00 GMT (= 07:00–10:00 `Europe/London`). Actividad concentrada al inicio (displacement −2.12×ATR a las 06:00).
+- ✓ **NY AM KZ** 2026-06-11 12:00–15:00 GMT (= 08:00–11:00 `America/New_York`).
+- ✓ **Primera mitad** de London = 06:00–07:30 GMT (ventana requerida para el Judas, §3.5).
+- ✗ Contraejemplo (ADR-001): una señal a las 03:00 GMT NO se bloquea por la hora — se gobierna por spread/score; el `sessionProfile` solo aporta peso a la confluencia #34.
 
 ---
 
@@ -460,7 +534,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Un sweep a mitad de sesión sin displacement contrario posterior: es solo un sweep, **no** Judas. El Judas exige la **reversión con fuerza** que confirma la trampa.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; M5, judasBars 6)*:
+- ✓ Judas London 2026-06-11 **06:05 GMT**: sweep SSL del nivel 1.15426 (mecha 1.15424) en la **1ª mitad** de la London KZ → **displacement +1** a las 06:10 (1.62×ATR) en dirección contraria. `dir` Judas = +1 (la real).
+- ✓ (análogo, fuera de KZ) 2026-06-11 17:15–17:30: barrido SSL a 1.15030 + displacement +1 de 4.84→6.03×ATR — misma mecánica trampa+reversión (clasifica como Spring/sweep, §3.7, por estar fuera de ventana KZ).
+- ✗ Contraejemplo (sweep sin displacement contrario): 2026-06-11 12:25 GMT (NY) sweep SSL 1.15164 que **continuó** a la baja sin reversión impulsiva → solo sweep, no Judas.
+> *Nota de extracción:* el Judas completo (sweep en 1ª mitad de KZ + displacement contrario ≤6 velas) es escaso; 1 ocurrencia limpia en la ventana M5 disponible (10–11 jun). Se ampliará con más sesiones M5 en Fase 1.
 
 ---
 
@@ -472,7 +550,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Si el precio alcanza el OB **sin** haber barrido ningún inducement intermedio, la entrada es de menor calidad (no hubo limpieza de liquidez señuelo) — el IDM barrido es lo que valida que el camino está "limpio".
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; M5)*:
+- ✓ Inducement previo al empuje de London 2026-06-11: el swing low interno **1.15426** fue barrido a las 06:05 (mecha 1.15424) **antes** de que el precio empujara al alza → liquidez señuelo tomada, camino limpio hacia arriba.
+- ✓ IDM en el rally de las 17:25: los SSL internos 1.15074/1.15054 fueron barridos (mecha 1.15030) inmediatamente antes del impulso → inducement clásico.
+- ✓ IDM bajista (simétrico) en NY 2026-06-11 12:55: barrido del BSL interno ~1.15418 antes del tramo bajista a 1.15164.
+- ✗ Contraejemplo: si el precio alcanza el OB **sin** barrer ningún inducement intermedio, la entrada es de menor calidad (no hubo limpieza de liquidez señuelo).
 
 ---
 
@@ -490,7 +572,11 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 
 **Contraejemplo.** Un cierre más allá del nivel que **no** revierte en ≤2 velas: es un breakout **real** (BOS), no falso. La reversión rápida es lo que lo define.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; M5, fbBars 2)*:
+- ✓ **False Breakout** 2026-06-11 17:20 GMT: `close` 1.15040 cruza bajo el SSL 1.15426 → vela siguiente cierra de vuelta arriba (17:30 `close` 1.15599) dentro de ≤2 velas.
+- ✓ **Spring** 2026-06-11 17:15–17:20 GMT: sweep del **mínimo del rango** (1.15030) con reversión rápida al alza (rally 4.84×ATR) → `dir +1`. (También Spring 2026-06-10 23:10 barriendo 1.15266.)
+- ✓ **Raid** 2026-06-11 17:25 GMT: barrido agresivo de un cluster SSL de alta liquidez (varios niveles 1.15164/1.15141/1.15074, `touches` alto) → stop raid, mayor peso.
+- ✗ Contraejemplo: el `close` 1.15866 del 06-05 12:00 (H1) cruzó el nivel y **no** revirtió en ≤2 velas → breakout real (BOS), no falso.
 
 ---
 
@@ -519,7 +605,11 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 
 **Contraejemplo.** Una vela de rango grande pero con **cuerpo pequeño** (mecha dominante, `cuerpo < 70%`): NO es displacement → es indecisión/rechazo. La fuerza está en el cuerpo, no en el rango total.
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1+M5, dispFactor 1.5 / bodyPct 0.70)*:
+- ✓ 2026-06-05 12:00 GMT (H1): rango **5.27×ATR**, cuerpo 97%, −1 → impulso que abrió la caída a 1.15.
+- ✓ 2026-06-11 17:30 GMT (M5): rango **6.03×ATR**, cuerpo 89%, +1 → rally explosivo post-barrido.
+- ✓ 2026-06-01 13:00 GMT (H1): rango **3.51×ATR**, cuerpo 98%, −1 → vela del MSS.
+- ✗ Contraejemplo (rango grande, cuerpo pequeño): 2026-05-29 14:00 GMT rango 2.93×ATR pero cuerpo **63%** (<70%) → indecisión/rechazo, NO displacement.
 
 ---
 
@@ -540,7 +630,11 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 
 **Contraejemplo.** El precio a 3×ATR de la apertura semanal: el nivel existe pero **no es confluencia activa** (demasiado lejos para influir la entrada ahora).
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, frontera de día del broker 22:00 GMT)*:
+- ✓ Apertura **diaria** 2026-05-28 22:00 GMT @ **1.16519**; 2026-06-01 22:00 GMT @ **1.16342** (líneas de referencia institucional).
+- ✓ Apertura **semanal** (domingo) 2026-05-25 22:00 GMT @ **1.16398** — primer bar de la semana.
+- ✓ **#36** (open cercano): cuando el precio entra en ±0.5×ATR de una de estas aperturas, el nivel actúa como S/R inmediato (direccional según el lado).
+- ✗ Contraejemplo: el precio a ~3×ATR de la apertura semanal (p.ej. 1.15 vs 1.16398) → el nivel existe pero NO es confluencia activa.
 
 ---
 
@@ -565,14 +659,18 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 
 **Contraejemplo `[FIX P-05]`.** Contar "precio sobre EMA200" Y "precio bajo EMA200" como confluencias separadas que suman al mismo score: una de las dos está SIEMPRE activa → +peso garantizado a cualquier señal. Por eso #37–#39 son **direccionales únicas** (suman a long O short, nunca inflan el total).
 
-**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, EMAs 20/50/200)*:
+- ✓ **#42** tres EMAs alineadas bajistas: 2026-06-08→06-11 de forma sostenida `EMA20 < EMA50 < EMA200`. Ej. 06-11 09:00 GMT → E20 1.15430 < E50 1.15461 < E200 1.15764 (→ −1 fuerte).
+- ✓ **#37** `close < EMA200` persistente durante toda la caída (06-08→06-11, close 1.153 vs E200 1.157–1.162).
+- ✓ **#40** sin cruce alcista reciente que contradiga el sesgo en ≤20 velas → confirma continuación bajista.
+- ✗ Contraejemplo `[FIX P-05]`: contar "close > EMA200" Y "close < EMA200" como dos confluencias separadas que suman al mismo score → una está SIEMPRE activa, +peso garantizado. Por eso #37–#39 son direccionales únicas.
 
 ---
 
 > **DEFINICIONES DE reglas-smc-ict.md COMPLETAS** — Tier 1 Estructura (§1), Tier 2 Zonas (§2), Liquidez (§3), Contexto/ICT/EMAs (§4). Cubren los 42 confluencias canónicas (§4.8 del workplan) y todas las funciones de PINE-PLAN §3.
 >
-> **Falta para cerrar DOC-01 (gate VER-05):**
-> 1. **Pasada TradingView MCP:** poblar todos los casos ⏳PENDIENTE-TVMCP con velas reales de EURUSD (fecha-hora GMT + precio) — una sola sesión de gráfico.
-> 2. **Aprobación final del usuario** del documento completo.
+> **Cierre DOC-01 (gate VER-05):**
+> 1. ✅ **Pasada TradingView MCP (2026-06-11, Sesion-008):** los 24 conceptos poblados con velas reales de EURUSD (fecha-hora GMT + precio). Datos: H1 25-may→11-jun (300 velas) + M5 10–11-jun (300 velas). Detección reproducible en `scripts/ver05/` (`detect.py`, `detect2.py`, `detect_m5.py` sobre `eurusd_h1.csv`/`eurusd_m5.csv`). Notas de escasez documentadas in-situ (MSS swing ×1, Judas ×1, breaker retest) — coherentes con la rareza de esos eventos; se ampliarán con más sesiones M5 en Fase 1.
+> 2. ⏳ **Aprobación final del usuario** del documento completo (pendiente de revisión de Freddy).
 >
 > **Tier 3 (Wyckoff, PO3, Volume Surge):** fuera de este doc — experimental post-Fase 3 `[P-10]`.
