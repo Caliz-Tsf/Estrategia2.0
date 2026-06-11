@@ -21,6 +21,7 @@ Aplican a todos los conceptos salvo que la sección indique lo contrario.
 | **Sesiones / horario** | Definidas en **hora local de mercado y convertidas a GMT con DST** (no GMT fijo) `[P-25]`. London open = 08:00 `Europe/London`; NY open = 08:30 (estándar de bonos: 08:30 ET) `America/New_York`. Detalle de Kill Zones en §3. |
 | **Lookahead MTF** | `request.security(..., lookahead = barmerge.lookahead_off)` SIEMPRE. |
 | **Dirección** | `+1` = alcista/bullish · `-1` = bajista/bearish · `0` = neutral. |
+| **Símbolo-agnóstico** `[ADR-001]` | El bot opera en **cualquier símbolo**, gobernado por confluencias y datos. NADA se hardcodea a EURUSD. Todo umbral va relativo a ATR (no pips fijos). Lo inherentemente por-símbolo va como **input/perfil**, no como constante: pip/point, spread típico, `sessionProfile` (§3.4), y **los pesos del scoring** (perfil de pesos por símbolo — los de EURUSD no transfieren 1:1). Validación: primero EURUSD (gate Fase 3); cada símbolo nuevo repite validación abreviada (Fase 5). Sin filtros de reloj que bloqueen; la calidad la gobiernan score + filtro de spread. |
 
 > **Casos de prueba:** cada concepto cierra con ≥3 ocurrencias reales y ≥1 contraejemplo en EURUSD, con fecha-hora GMT. Esos casos se **extraen del gráfico real vía TradingView MCP** (no se inventan); hasta poblarlos quedan marcados `⏳ PENDIENTE-TVMCP` con el procedimiento de extracción.
 
@@ -368,4 +369,129 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 ---
 
-> **Tier 2 COMPLETO** (2.1–2.8). Restante de reglas-smc-ict.md: **§3 Liquidez** (pools, sweeps/grabs, Kill Zones con DST, Judas, IDM, false breakout, spring/raid) y **§4 Contexto/ICT/EMAs** (displacement formal, session opens, EMAs estado/cruces/rebotes). Luego: pasada TV MCP para poblar todos los casos ⏳PENDIENTE-TVMCP.
+---
+
+## 3. LIQUIDEZ
+
+El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve **hacia la liquidez** (los stops acumulados) y desde las **ineficiencias**. Toda la lógica de entrada gira en torno a *dónde está la liquidez* y *cuándo se barre*.
+
+### 3.1 Pools de liquidez — BSL / SSL `f_buildPools`
+
+**Concepto.** Zonas donde se acumulan órdenes stop. **BSL** (Buyside Liquidity) = stops de compra **por encima** de los highs (imán al alza). **SSL** (Sellside Liquidity) = stops de venta **por debajo** de los lows (imán a la baja).
+
+**Definición cuantificada.**
+- Un **pool** se forma clusterizando EQH/EQL (§2.4) + swings **no barridos** cuyos niveles están dentro de `poolTol × ATR(14)` entre sí (default `poolTol = 0.1`).
+- `SMC_Pool.level` = promedio de los extremos clusterizados · `dir` = `+1` BSL (sobre highs) / `-1` SSL (bajo lows) · `touches` = nº de extremos que lo confirman (≥2) · `swept` = false hasta ser barrido.
+- Cuantos más `touches`, más relevante el pool (más liquidez acumulada).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `poolTol` | **0.1** | × ATR(14). Tolerancia de clustering. |
+| `minTouches` | **2** | toques mínimos para formar pool. |
+
+**Contraejemplo.** Un único swing high aislado **ya barrido** no es un pool activo — su liquidez ya se tomó. Solo los niveles **no barridos** son imanes.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 3.2 Sweep (barrido) `f_detectSweep`
+
+**Concepto.** El precio **supera** un pool intra-vela (toma la liquidez) pero **cierra de vuelta** dentro del rango: la liquidez fue barrida sin continuación → suele preceder el movimiento contrario. Es la señal de "trampa" más importante del SMC.
+
+**Definición cuantificada** (al cierre):
+- **Sweep de SSL (alcista):** el `low` de la vela perfora por debajo de `pool.level` (SSL) pero el `close` queda **por encima** del nivel → `pool.swept := true`; sesgo alcista. Confluencia #10 (sweep contrario).
+- **Sweep de BSL (bajista):** el `high` perfora por encima de un pool BSL pero el `close` queda **por debajo**.
+- Requiere un **pool confirmado** (§3.1) como objetivo.
+
+**Contraejemplo.** Una vela que perfora el pool **y cierra más allá** (no vuelve): eso **no** es sweep → es BOS/false breakout (§3.7). El sweep exige el cierre de **retorno**.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 3.3 Grab `f_detectGrab`
+
+**Concepto.** Subconjunto del sweep: una **mecha** toma la liquidez de un nivel **sin** exigir un pool confirmado (un solo swing). Más fino y frecuente que el sweep.
+
+**Definición cuantificada.** La mecha de la vela supera un swing high/low no barrido y el `close` queda de vuelta dentro, **sin** requerir cluster/pool (≥2 touches). Si el nivel barrido ES un pool confirmado → cuenta como **sweep** (mayor peso); si es un swing aislado → **grab**. Confluencia #11.
+
+**Contraejemplo.** Una mecha larga que **no** alcanza ningún swing/nivel previo: no hay liquidez que tomar → no es grab.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 3.4 Kill Zones `f_killZone` `[ADR-001]`
+
+**Concepto.** Ventanas horarias de **alta actividad institucional**. En el diseño multi-símbolo NO son un filtro duro (un bloqueo por reloj sabotea símbolos con otras sesiones o sin sesiones —cripto/índices 24h—). Son una **confluencia ponderada** opcional + un **perfil configurable por símbolo**. El guardián universal de calidad de liquidez es el **filtro de spread** (§6 Strategy), no el reloj.
+
+**Definición cuantificada.**
+- `f_killZone(time, sessionProfile)` devuelve **qué sesión está activa** (o ninguna) + si estamos en la **primera mitad** de la ventana (necesario para Judas, §3.5).
+- Ventanas definidas en **hora local de mercado con DST automático** (no GMT fijo) `[P-25]`, vía `time(timeframe.period, session, timezone)` de Pine.
+- **Perfiles de sesión** (input `sessionProfile`, configurable por símbolo):
+  | Perfil | Sesiones | Para |
+  |---|---|---|
+  | `FX-London-NY` (default) | London `07:00–10:00` `Europe/London` + NY AM `08:00–11:00` `America/New_York` | EURUSD, GBPUSD, XAUUSD |
+  | `FX-Asia` | + Tokyo `09:00–11:00` `Asia/Tokyo` | USDJPY, AUDUSD, NZDUSD |
+  | `None` | sin sesiones | cripto / índices 24h |
+- **Uso en scoring:** la sesión activa suma su peso a la confluencia #34 (peso calibrado **por símbolo** en Fase 3 / Fase 5). NO bloquea la entrada. Si `sessionProfile = None`, la confluencia #34 simplemente no aporta.
+
+> **Por qué local+DST:** "London 08:00–10:00 GMT" solo es correcto en invierno; en verano (BST) la sesión real ocurre a las 07:00 GMT. Hora local → TradingView ajusta el DST solo y la ventana sigue pegada a la apertura real todo el año.
+
+**Contraejemplo.** Una señal a las 03:00 GMT en EURUSD ya **no se bloquea** por la hora; se filtra (si procede) por **spread alto** (baja liquidez real) o por **no alcanzar el umbral de score**. El reloj informa, no veta.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 3.5 Judas Swing `f_detectJudas`
+
+**Concepto.** El **movimiento falso** al inicio de una sesión: un barrido engañoso en la primera mitad de una KZ que atrapa traders, seguido del movimiento real en dirección contraria. El "beso de Judas".
+
+**Definición cuantificada.** Un **sweep/grab** (§3.2/3.3) en la **primera mitad** de una Kill Zone, seguido de un **displacement** (§4) en dirección **contraria** dentro de `≤ judasBars` velas (default **6** en M5). `dir` del Judas = dirección del displacement (la real). Confluencia #13.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `judasBars` | **6** | velas M5 máximo entre sweep y displacement contrario. |
+| ventana | primera mitad de la KZ | requiere §3.4. |
+
+**Contraejemplo.** Un sweep a mitad de sesión sin displacement contrario posterior: es solo un sweep, **no** Judas. El Judas exige la **reversión con fuerza** que confirma la trampa.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 3.6 IDM — Inducement `f_detectIDM`
+
+**Concepto.** La **liquidez señuelo**: un pullback menor cuya liquidez (interna) es barrida **antes** de que el precio alcance el OB/FVG objetivo. Es la liquidez que "induce" entradas tempranas que el smart money toma antes del movimiento real.
+
+**Definición cuantificada.** En una tendencia alcista hacia un OB/FVG objetivo, el IDM es el **swing low interno** (`internalLen`) más cercano por debajo del precio cuya liquidez se barre **antes** de que el precio toque el objetivo. Detección: pool/grab interno tomado entre el origen del impulso y la zona objetivo. Confluencia #33 (IDM barrido). Simétrico bajista.
+
+**Contraejemplo.** Si el precio alcanza el OB **sin** haber barrido ningún inducement intermedio, la entrada es de menor calidad (no hubo limpieza de liquidez señuelo) — el IDM barrido es lo que valida que el camino está "limpio".
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+### 3.7 False Breakout, Spring y Raid `f_detectFalseBreakout`
+
+**Concepto.** Variantes de ruptura fallida / barrido en extremos de rango.
+- **False Breakout:** cierre **más allá** de un nivel + reversión que cierra de vuelta dentro en `≤ fbBars` velas (default 2). Confluencia #14.
+- **Spring (Wyckoff):** sweep de **SSL bajo el mínimo de un rango** lateral con reversión rápida al alza. Confluencia #15 (subtipo de sweep en extremo de rango, dir alcista).
+- **Raid:** barrido **agresivo** de un pool de alta liquidez (stop raid). Confluencia #16 (sweep de pool con `touches` alto).
+
+**Definición cuantificada.**
+- False breakout: `close` cruza el nivel `N` (a diferencia del sweep, que es solo mecha) y dentro de `≤ fbBars` velas otra vela **cierra** de vuelta al lado original. `fbBars` default **2**.
+- Spring = sweep (§3.2) cuyo pool SSL coincide con el mínimo de un rango de consolidación → `dir +1`.
+- Raid = sweep cuyo pool tiene `touches ≥ raidTouches` (default 3) → mayor peso.
+
+**Contraejemplo.** Un cierre más allá del nivel que **no** revierte en ≤2 velas: es un breakout **real** (BOS), no falso. La reversión rápida es lo que lo define.
+
+**Casos de prueba.** ⏳ PENDIENTE-TVMCP.
+
+---
+
+> **§3 Liquidez COMPLETO** (3.1–3.7). Restante: **§4 Contexto/ICT/EMAs** (displacement formal como zona/evento, session opens, EMAs: estado/cruces/rebotes/alineación). Luego pasada TV MCP para poblar casos ⏳PENDIENTE-TVMCP.

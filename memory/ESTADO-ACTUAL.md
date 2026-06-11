@@ -3,9 +3,9 @@
 
 ## Estado
 - **Fase actual:** FASE 0 — EN CURSO
-- **Última tarea completada:** DOC-01 Tier 1 (Estructura) — reglas-smc-ict.md con convenciones globales + swings/clasificación/BOS/CHoCH/MSS/impulso, aprobado sección a sección — commit 414fa1b (2026-06-10)
-- **Bloque A COMPLETO:** SEC-01 (keys rotadas por usuario + viejas redactadas), SEC-02 (.gitignore), GIT-01 (LuxAlgo → pine/reference/LuxAlgo-SMC-base.pine) — commit 5970a10
-- **Siguiente tarea:** DOC-01 Tier 2 (Zonas: OB, FVG, Premium/Discount, EQH/EQL) → luego Liquidez → ICT/EMAs. PENDIENTE transversal: poblar casos de prueba EURUSD (marcados ⏳PENDIENTE-TVMCP) con una pasada de TradingView MCP cuando estén todas las definiciones.
+- **Última tarea completada:** DOC-01 §3 Liquidez + ADR-001 (multi-símbolo, sin filtro horario duro). Tier 1, Tier 2 y §3 hechos.
+- **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR (este).
+- **Siguiente tarea:** DOC-01 §4 Contexto/ICT/EMAs (displacement formal, session opens, EMAs estado/cruces/rebotes/alineación). PENDIENTE transversal: poblar casos ⏳PENDIENTE-TVMCP con pasada TradingView MCP cuando estén todas las definiciones. PENDIENTE workplan: aplicar cambios de ADR-001 a §4.8/F2-T02/PINE-PLAN/MQL5-PLAN cuando se toque cada sección.
 
 ## Bloqueos
 - Ninguno. (SEC-01 resuelto: usuario confirmó keys viejas revocadas; nuevas en .env/.mcp.json gitignored.)
@@ -16,6 +16,7 @@
 - BOS/CHoCH por CIERRE, no mecha. Modelo bias = structure high/low (extensor vs protector).
 - MSS = CHoCH de nivel swing + displacement (≥1.5×ATR, cuerpo ≥70%) — lo distingue del CHoCH simple en el scoring.
 - Storage keys: .mcp.json + .env (ambos gitignored), sin migrar a env vars de Windows.
+- **ADR-001 — Bot MULTI-SÍMBOLO, sin filtro horario duro.** Kill Zone = confluencia ponderada + sessionProfile configurable (FX-London-NY/FX-Asia/None), no bloqueo. Guardián universal = filtro de spread. Pesos del scoring por símbolo. Valida EURUSD primero, cada símbolo nuevo = Fase 5 abreviada. Umbrales ATR-relativo = base de portabilidad.
 
 ## Decisiones vigentes (no re-litigar)
 - Arquitectura Pine: 1 core compartido + SMC-Visual.pine (indicator) + SMC-Strategy.pine (strategy → Strategy Tester).
