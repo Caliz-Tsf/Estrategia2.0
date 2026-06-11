@@ -5,7 +5,9 @@
 - **Fase actual:** FASE 0 — EN CURSO
 - **Última tarea completada:** DOC-01 §4 Contexto/ICT/EMAs. **TODAS las definiciones de reglas-smc-ict.md escritas** (§1 Estructura, §2 Zonas, §3 Liquidez, §4 ICT/EMAs — 42 confluencias cubiertas).
 - **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 (este).
-- **Siguiente tarea — cerrar DOC-01 (gate VER-05):** (1) pasada TradingView MCP para poblar casos ⏳PENDIENTE-TVMCP con velas reales EURUSD (requiere TV abierto); (2) aprobación final del usuario. Luego DOC-02 (reglas-dev.md) y resto Bloque B.
+- **PLAN ACORDADO (Sesion-001):** adelantar TODO lo informativo (escribir/investigar/corregir/desglosar conceptos y estructuras) ANTES del gráfico. Freddy quiere validar todos los conceptos/reglas con Fable antes de la fase visual.
+- **Siguiente sesión — docs SIN gráfico:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-06 lecciones-estrategia-nueva.md + referencia-botbase.md · DOC-07 CLAUDE.md.
+- **DIFERIDO (necesita gráfico):** pasada TradingView MCP para poblar casos ⏳PENDIENTE-TVMCP de reglas-smc-ict.md + aprobación final (gate VER-05). Se hace cuando todo lo informativo esté escrito y validado con Fable.
 - **PENDIENTE workplan:** aplicar cambios de ADR-001 a §4.8/F2-T02/PINE-PLAN/MQL5-PLAN cuando se toque cada sección.
 
 ## Bloqueos
