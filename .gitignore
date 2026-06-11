@@ -13,8 +13,12 @@
 .context-mode/
 .claude-mem/
 
-# Archon clonado (repo externo, no anidar en git)
-.archon/
+# Archon: la APP vive fuera del repo (D:\CODE\Archon). En el proyecto, .archon/
+# guarda workflows/commands/config RASTREABLES (WF-01 smc-sprint.yaml va ahi).
+# Solo se ignora el estado local y artefactos que Archon genera por-run.
+.archon/state/
+.archon/artifacts/
+.archon/*.local.yaml
 
 # Node
 node_modules/

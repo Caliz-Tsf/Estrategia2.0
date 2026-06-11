@@ -3,8 +3,9 @@
 
 ## Estado
 - **Fase actual:** FASE 0 — EN CURSO
-- **Última tarea completada:** **Bloque C (MCPs) cerrado** (Sesion-004). MCP-01 ✅ 6 MCPs en `.mcp.json` (code-review-graph ⚠️ no registró tools, no-bloqueante). MCP-02 ✅ merge upstream del fork TV MCP + `tv_health_check` OK. MCP-04 ✅ claude-mem instalado. MCP-05 ✅ `rules.json` EURUSD + `morning_brief` OK. MCP-03 (Archon) y MCP-06 (task-master parse) ⏳ DIFERIDOS (no-bloqueante/opcional).
-- **SIGUIENTE PASO:** Bloque D (skills SKL-01..09) → E (agentes AGT-01..08) → F (workflows) → VER-01..08 → gate VER-09 REVISIÓN-FABLE.
+- **Última tarea completada:** **Pendientes no-bloqueantes del Bloque C cerrados + SCR-02 adelantado** (Sesion-005). code-review-graph ✅ reconstruido (binario v2.3.2 OK, repo registrado `estrategia2`, `serve` arranca; grafo vacío por naturaleza: sin código parseable aún y Pine no soportado = P-12; tools deberían registrar al reiniciar sesión). claude-mem dashboard ✅ responde 200. **MCP-03 Archon ✅ INSTALADO** (ver abajo, cambió de arquitectura). MCP-06 task-master → decisión: se ejecuta en VER-09 (Fable genera el plan tras revisar todo). SCR-02 sync-obsidian.ps1 ✅ creado + sync real al vault (adelantado del Bloque F a pedido del usuario).
+- **Bloque C previo (Sesion-004):** MCP-01 ✅ 6 MCPs en `.mcp.json`. MCP-02 ✅ merge upstream fork TV MCP + `tv_health_check`. MCP-04 ✅ claude-mem. MCP-05 ✅ `rules.json` + `morning_brief`.
+- **SIGUIENTE PASO:** Bloque D (skills SKL-01..09) → E (agentes AGT-01..08) → F (workflows + scripts restantes WF-01/SCR-01/03/04) → VER-01..08 → gate VER-09 REVISIÓN-FABLE.
 - **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 f2b9b57 · Sesion-002 (DOC-02/03/04/07 + gate VER-09 + eliminación DOC-06).
 - **PLAN ACORDADO (Sesion-001):** adelantar TODO lo informativo (escribir/investigar/corregir/desglosar conceptos y estructuras) ANTES del gráfico. Freddy quiere validar todos los conceptos/reglas con Fable antes de la fase visual.
 - **Docs informativos (Sesion-002) ✅ COMPLETOS:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-07 CLAUDE.md. **DOC-06 ELIMINADO** (proyecto nuevo, sin BotBase ni Estrategia-Nueva; única ref externa = LuxAlgo SMC — ver [[proyecto-nuevo-solo-luxalgo]]).
@@ -35,10 +36,12 @@
 2. Confirmar SEC-01 hecho por el usuario.
 3. Ejecutar Fase 0 en orden: Bloque A → B → C → D → E → F → VER-01..08.
 
-## Notas de herramientas (Sesion-004)
-- **TV MCP:** lanzar SIEMPRE por `mcp__tradingview__tv_launch` (CDP 9222), nunca manual. Fork en `D:\CODE\BOT\Bot\tradingview-mcp-jackson` ahora +4 ahead de origin (merge upstream sin pushear).
-- **rules.json** (morning_brief) vive en la raíz del repo-herramienta TV MCP (de ahí lo lee por defecto). Config EURUSD/H1/SMC. Si futuros merges de upstream lo tocan, re-aplicar.
-- **code-review-graph** ⚠️: binario OK pero no registró tools; grafo con 0 nodos (sin código aún). Reintentar/construir grafo en Fase 1.
-- **Archon (MCP-03)** y **task-master parse (MCP-06)** diferidos — retomar en Bloque F si se necesitan.
+## Notas de herramientas (Sesion-005)
+- **TV MCP:** lanzar SIEMPRE por `mcp__tradingview__tv_launch` (CDP 9222), nunca manual. Fork en `D:\CODE\BOT\Bot\tradingview-mcp-jackson` +4 ahead de origin (merge upstream sin pushear).
+- **rules.json** (morning_brief) vive en la raíz del repo-herramienta TV MCP. Config EURUSD/H1/SMC. Si merges de upstream lo tocan, re-aplicar.
+- **code-review-graph** v2.3.2: binario OK, repo registrado como `estrategia2`, `serve` arranca. Grafo vacío *por naturaleza* (P-12: no parsea Pine; el resto es .md). Útil de verdad desde Fase 1 SOLO si se le da código en lenguaje soportado — Pine NO lo es, así que su valor real es limitado. Los tools del MCP deberían registrar al reiniciar la sesión.
+- **Archon (MCP-03) ✅ INSTALADO — OJO: cambió de arquitectura.** El Archon real (v0.4.1) NO es el RAG/Docker que asumía el workplan: es una **"Remote Agentic Coding Platform"** (Bun+SQLite, controla Claude Code/Codex vía Slack/Telegram/GitHub) con **motor de workflows DAG** (lo que sí usamos para `smc-sprint`). App clonada en `D:\CODE\Archon` (NO dentro del repo). `bun run cli doctor` = All checks passed; 20 workflows default visibles (archon-architect, archon-validate-pr, etc. — coinciden con refs del workplan). Sin Docker, sin Slack/Telegram (no se necesitan). Invocar con `scripts/archon.ps1 <args>` desde el proyecto. ⚠️ NO correr workflows que invoquen Claude dentro de una sesión Claude Code (CLAUDECODE=1 → cuelgue, issue #1067) — usar terminal normal. Ver [[estrategia2-archon-remote-agent-platform]].
+- **task-master (MCP-06):** decisión usuario Sesion-005 — NO generar backlog ahora (divergiría). Se corre en **VER-09**: tras construir todo (skills+agentes+MCP+workflows), Fable revisa, y task-master convierte el workplan ya validado en el plan de escritura de Fase 1. CLI disponible (0.43.1).
+- **SCR-02 sync-obsidian.ps1** ✅: copia incremental (por hash) de `memory/sesiones/`, `docs/adrs/`, `memory/ESTADO-ACTUAL.md` → `D:\obsidian\boveda MENTE\Mente\Estrategia2.0\`. `-DryRun` para simular. Idempotente. Adelantado del Bloque F.
 
-*Última actualización: 2026-06-11 — Sesion-004: Bloque C (MCPs) cerrado*
+*Última actualización: 2026-06-11 — Sesion-005: pendientes no-bloqueantes cerrados, Archon instalado, SCR-02 adelantado*
