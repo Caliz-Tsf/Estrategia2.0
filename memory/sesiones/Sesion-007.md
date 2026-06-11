@@ -149,15 +149,15 @@ Pipeline de transcripción: **yt-dlp → FFmpeg → Whisper → .md con frontmat
 
 ## Siguiente paso (próxima sesión)
 
-**VER-01..08** (verificación de Fase 0 — ver detalle en WORKPLAN-MAESTRO-V2 §3):
-- VER-01: Fase 0 — lista de entregables
-- VER-02: DOC-01..07 — contenido completo y validación interna
-- VER-03: .mcp.json / rules.json — sintaxis + herramientas registradas
-- VER-04: ✅ Skills y agentes — YA SUPERADO
-- VER-05: Workflow smc-sprint — esquema validado (ya hecho: `archon validate` = ok)
-- VER-06: Scripts SCR-01..04 — funcionamiento end-to-end (al menos 2 scripts probados)
-- VER-07: Criterios gate VER-09 — preparar paquete para Fable
-- VER-08: Checklist Fase 0 antes de gate final
+**VER-01..08** (verificación de Fase 0 — definiciones EXACTAS del WORKPLAN-MAESTRO-V2 §3, línea 221):
+- VER-01: `tv_health_check` OK — ⏳ pendiente (sesión TV)
+- VER-02: `/smc-session-startup` completa con ≤2 ⚠️ — ⏳ pendiente
+- VER-03: `morning_brief` con rules.json OK — ⏳ pendiente
+- VER-04: 9 skills + 8 agentes listados — ✅ **SUPERADO esta sesión**
+- VER-05: `reglas-smc-ict.md` aprobado por el usuario — ⏳ pendiente. **OJO:** tiene una parte DIFERIDA que necesita gráfico (pase TV MCP para poblar casos ⏳PENDIENTE-TVMCP). NO confundir con la validación de `archon` del smc-sprint (eso fue el Done de WF-01, no VER-05).
+- VER-06: `check-core-sync.ps1` funcional — ✅ **ya satisfecho** por SCR-03 (probado SKIP/OK/DIVERGENT esta sesión). Re-confirmar en el pase VER.
+- VER-07: git limpio, todo commiteado — ✅ al cierre de esta sesión (re-confirmar en el pase).
+- VER-08: ESTADO-ACTUAL.md dice "Fase 0 COMPLETADA → siguiente: F1-S1.1-T01" — ⏳ se marca al final, cuando VER-01..07 pasen.
 
 **GATE VER-09 REVISIÓN-FABLE (bloqueante antes de Fase 1):**
 Al terminar todas las verificaciones VER-01..08, se entrega el paquete completo — DOC-01..07, .mcp.json/rules.json, 9 skills, 8 agentes, workflow smc-sprint, scripts, proofs — **a Fable para revisión integral ANTES de escribir una sola línea de Pine Script**. Esto fue una decisión explícita de Freddy (Sesion-001): validar conceptos y arquitectura con Fable antes de código.
@@ -166,7 +166,7 @@ Al terminar todas las verificaciones VER-01..08, se entrega el paquete completo 
 
 - **Skills y agentes operativos.** Los 8 agentes están en el runtime; las 9 skills son invocables. No hay defectos de los archivos; el comportamiento en Sesion-006 (fallo en caliente) fue por carga diferida del registro, no por problemas de sintaxis.
 - **Bloque F: tooling estable.** Workflow Archon validado; scripts probados end-to-end. Sistema de sincronización obsidian + transcripción video funcionando.
-- **VER-04 y VER-05 ya completos.** Las siguientes verificaciones (VER-01..03, VER-06..08) quedan para arrancar la próxima sesión.
+- **VER-04 ya completo** (skills+agentes). De paso, **VER-06** (check-core-sync funcional) quedó satisfecho por SCR-03 y **VER-07** (git limpio) se cumple al cierre. **VER-05 NO está hecho** (reglas-smc-ict.md aprobado por el usuario; además tiene parte diferida que necesita gráfico). Las verificaciones VER-01..03, VER-05 y VER-08 quedan para la próxima sesión.
 
 ## Cambios en archivos (esta sesión)
 
@@ -180,4 +180,4 @@ Al terminar todas las verificaciones VER-01..08, se entrega el paquete completo 
 
 ## Cierre
 
-**Fase 0 funcional.** Bloques A-F (6/6) construidos y verificados. El sistema está completo en documentación, configuración de MCPs, skills, agentes, workflow y tooling. Ningún bloqueo. Working tree limpio. Listo para pasar al siguiente nivel: VER-01..08 (verificación de cierre) → VER-09 (gate Fable) → Fase 1 (desarrollo Pine).
+**Fase 0 — construcción terminada, verificación de cierre pendiente.** Los bloques A-F (6/6) están construidos: documentación, MCPs, skills, agentes, workflow y tooling. **Fase 0 NO está "COMPLETADA" todavía** — falta el pase de verificación VER-01..08 (de los cuales VER-04 ✅, VER-06 ✅ vía SCR-03, VER-07 ✅ al cierre; faltan VER-01..03, VER-05, VER-08). Ningún bloqueo. Working tree limpio. Siguiente: VER-01..08 → VER-09 (gate Fable) → Fase 1 (desarrollo Pine).
