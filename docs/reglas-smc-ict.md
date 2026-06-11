@@ -1,6 +1,6 @@
 # reglas-smc-ict.md — Fuente de verdad SMC/ICT
 > Estrategia 2.0 · Bot SMC/ICT EURUSD · DOC-01 del WORKPLAN-MAESTRO-V2
-> Estado: **EN CONSTRUCCIÓN** — se aprueba sección por sección con el usuario.
+> Estado: **POBLADO Y APROBADO** — VER-05 cerrado (Sesion-008, aprobado por Freddy) · gate VER-09 cerrado por Fable (2026-06-11, ver `docs/VER-09-handoff-fable.md` y ADR-002). Umbrales congelados hasta calibración de Fase 3.
 > Regla de oro: cada concepto se define con **números, no prosa**. Si no se puede medir, no se puede codificar ni validar.
 
 Este documento es la spec que valida TANTO el Pine Script (Fases 1-2) COMO el MQL5 (Fase 4). `smc-validator-agent` puntúa cada implementación contra estas definiciones. Si una definición cambia aquí, cambia en todo el sistema.
@@ -671,6 +671,6 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 >
 > **Cierre DOC-01 (gate VER-05):**
 > 1. ✅ **Pasada TradingView MCP (2026-06-11, Sesion-008):** los 24 conceptos poblados con velas reales de EURUSD (fecha-hora GMT + precio). Datos: H1 25-may→11-jun (300 velas) + M5 10–11-jun (300 velas). Detección reproducible en `scripts/ver05/` (`detect.py`, `detect2.py`, `detect_m5.py` sobre `eurusd_h1.csv`/`eurusd_m5.csv`). Notas de escasez documentadas in-situ (MSS swing ×1, Judas ×1, breaker retest) — coherentes con la rareza de esos eventos; se ampliarán con más sesiones M5 en Fase 1.
-> 2. ⏳ **Aprobación final del usuario** del documento completo (pendiente de revisión de Freddy).
+> 2. ✅ **Aprobación final del usuario** (Freddy, Sesion-008) + **veredicto VER-09 de Fable (2026-06-11): APROBADO** — las 3 notas de escasez aceptadas como deuda controlada con criterios de done en Fase 1 (T12 ≥3 MSS · T18 ≥3 Judas · T19 ≥1 retest breaker). Ver ADR-002.
 >
 > **Tier 3 (Wyckoff, PO3, Volume Surge):** fuera de este doc — experimental post-Fase 3 `[P-10]`.

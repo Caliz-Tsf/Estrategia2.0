@@ -109,7 +109,7 @@ Cada función es pura respecto a su entrada (recibe series/arrays, devuelve dete
 | `f_classifySwing` | `(swing, prevSwings[]) → kind` | HH/HL/LH/LL según swing previo del mismo tipo |
 | `f_detectBOS` | `(close, swings[], bias) → SMC_Event` | Cierre más allá del último swing en dirección del bias |
 | `f_detectCHoCH` | `(close, swings[], bias) → SMC_Event` | Cierre más allá del último swing CONTRA el bias |
-| `f_detectMSS` | `(swings[]) → SMC_Event` | Secuencia HH+HL → LH+LL confirmada (o inversa) — requiere CHoCH + nuevo swing confirmado |
+| `f_detectMSS` | `(swings[], atr) → SMC_Event` | CHoCH de nivel **swing** cuya vela de ruptura es displacement (rango ≥1.5×ATR14, cuerpo ≥70%). Solo escala swing — nunca interno `[def. canónica: reglas-smc-ict §1.5]` |
 | `f_detectDisplacement` | `(atr, factor) → SMC_Event` | Vela con rango ≥ `factor`×ATR14 (default 1.5) y cuerpo ≥70% del rango, tras ≥3 velas de rango < ATR |
 | `f_isImpulsive` | `(events[]) → bool` | ≥2 BOS consecutivos misma dirección sin CHoCH intermedio |
 
@@ -140,7 +140,7 @@ Cada función es pura respecto a su entrada (recibe series/arrays, devuelve dete
 |---|---|
 | `f_premiumDiscount` | Rango entre último strong high y strong low → Premium (>50%), Discount (<50%), Equilibrium (45–55%) |
 | `f_killZone` | `f_killZone(time, sessionProfile)` → qué sesión está activa (o ninguna) + si es la primera mitad de la ventana (para Judas). Ventanas en **hora local de mercado con DST** vía `time(timeframe.period, session, timezone)`: London 07:00–10:00 `Europe/London` · NY AM 08:00–11:00 `America/New_York` · Tokyo 09:00–11:00 `Asia/Tokyo`. Perfiles: `FX-London-NY` / `FX-Asia` / `None` `[ADR-001, P-25; def. en reglas-smc-ict §3.4]` |
-| `f_sessionOpens` | Apertura semanal/mensual/trimestral como niveles |
+| `f_sessionOpens` | Aperturas **diaria + semanal + mensual** como niveles (confluencia #36 si precio a ≤0.5×ATR) `[def.: reglas-smc-ict §4.2]` |
 | `f_emaState` | EMAs 20/50/200: posición del precio, cruces (20×50, 50×200, 20×200), rebotes (toque + cierre de vuelta con wick), alineación de las 3 |
 
 ### 3.5 Scoring (→ SMC_Scoring.mqh) — usado solo por SMC-Strategy
@@ -219,7 +219,7 @@ Filas con toggle individual (panel compacto vs completo). Colores: verde/rojo/gr
 **Declaración:** `strategy("SMC Engine — Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1, commission_type=strategy.commission.cash_per_contract, process_orders_on_close=true)`
 (commission/slippage configurados con valores realistas de EURUSD: spread ~0.8 pips → modelar como slippage 1 tick + comisión)
 
-**Scoring direccional (`[FIX: #4]`):** cada confluencia activa suma su peso a `scoreLong` O a `scoreShort` (nunca "score absoluto"). Las ~50 confluencias rediseñadas y agrupadas (lista completa y pesos default en WORKPLAN-MAESTRO-V2 §4.8):
+**Scoring direccional (`[FIX: #4]`):** cada confluencia activa suma su peso a `scoreLong` O a `scoreShort` (nunca "score absoluto"). Las **42 confluencias canónicas** agrupadas (lista completa y pesos default en WORKPLAN-MAESTRO-V2 §4.8):
 
 - **Estructura (8):** CHoCH H1 / BOS H1 / CHoCH chart / BOS chart / MSS / secuencia HH-HL o LL-LH / impulso previo / corrección en curso — cada una direccional.
 - **Liquidez (8):** pool objetivo en dirección / sweep contrario ejecutado / grab / EQH-EQL barridos / Judas / false breakout / spring / raid.

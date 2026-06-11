@@ -2,7 +2,7 @@
 > Anexo 4 del WORKPLAN-MAESTRO-V2.md | Estrategia 2.0 | 2026-06-10
 > Cubre el Paso 4 del PROMPT-FABLE. El workflow custom `smc-sprint.yaml` se entrega completo; los `archon-*` default se usan tal como vienen en `.archon/workflows/defaults/`, con la adaptación SMC indicada.
 
-**Nota de instalación:** Archon v2 se clona en Fase 0 (tarea ARCHON-01): `git clone https://github.com/coleam00/Archon .archon` y se verifica que los 18 workflows default existen. Si la estructura del repo upstream difiere de lo descrito aquí (el proyecto evoluciona), adaptar los campos del YAML al schema real del Archon instalado — la LÓGICA de los steps es lo normativo de este documento.
+**Nota de instalación `[actualizada VER-09, 2026-06-11]`:** Archon v0.4.x ya está instalado (MCP-03, Sesion-005) en `D:\CODE\Archon` (fuera del repo) — es una "Remote Agentic Coding Platform" Bun+SQLite con motor de workflows DAG, NO el RAG/Docker del plan original. Se invoca con `scripts/archon.ps1 <args>`. Workflows visibles: 20 default + `smc-sprint` (WF-01, en `.archon/workflows/` del proyecto, validado ok en Sesion-007). ⚠️ NO correr workflows que invoquen Claude DENTRO de una sesión Claude Code (CLAUDECODE=1 → cuelgue, issue #1067) — usar terminal normal. La LÓGICA de los steps descritos aquí es lo normativo; el YAML real está adaptado al schema v0.4.x (`nodes`/`depends_on`/`loop`+`until`).
 
 **Regla general:** los workflows orquestan; los agentes ejecutan; las skills definen protocolos. Cuando Archon no esté disponible o falle, cada workflow es ejecutable manualmente por Claude Code siguiendo sus steps en orden (los workflows son documentación ejecutable, no dependencia dura). `[FIX: el plan original hacía de Archon un single point of failure]`
 
