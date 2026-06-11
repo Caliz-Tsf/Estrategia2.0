@@ -189,12 +189,12 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 
 ### Bloque B — Documentos fuente de verdad
 - [ ] **DOC-01** `docs/reglas-smc-ict.md` — Claude Code + smc-architect, con investigación vía firecrawl/tavily si hace falta y **aprobación del usuario sección a sección** → para CADA concepto Tier 1 y 2: definición cuantificada (ej.: "Swing High: high mayor que los highs de las 5 velas anteriores y 5 posteriores; interno: 3"), parámetros default, ≥3 casos de prueba EURUSD con fecha-hora GMT, ≥1 contraejemplo. Done: todos los conceptos de PINE-PLAN §3 cubiertos, usuario aprobó. **Esta tarea puede tomar 1-2 sesiones completas — es la inversión más rentable del proyecto.**
-- [ ] **DOC-02** `docs/reglas-dev.md` — Claude Code → convenciones de PINE-PLAN (§2 naming, D-PINE-01..06), ciclo de commit, branching `fase-N/<sprint>`, cuándo ADR. Done: existe y SKL-01 lo referencia.
-- [ ] **DOC-03** `docs/WORKFLOW-ARQUITECTURA.md` — Claude Code → workflow 3 agentes para Fase 4 + orquestación agentes/skills (tabla de AGENTES.md). Done: existe.
-- [ ] **DOC-04** `docs/TV-SMC-WORKFLOW.md` — Claude Code → protocolo TV: startup → desarrollo → validación → backtesting → cierre, referenciando skills. Done: existe.
-- [ ] **DOC-05** `memory/ESTADO-ACTUAL.md` — Claude Code → plantilla: fase/sprint, última tarea (ID), siguiente tarea (ID), bloqueos, decisiones pendientes, fecha. Done: refleja "Fase 0 en curso".
-- [ ] **DOC-06** `docs/lecciones-estrategia-nueva.md` + `docs/referencia-botbase.md` — Claude Code, leyendo `D:\CODE\BOT\Bot\` y el vault Obsidian → ADRs históricos relevantes + algoritmos BotBase reutilizables (OB, FVG dual-box+CE, EQH/EQL, formato de los 175 golden tests). Done: ambos existen.
-- [ ] **DOC-07** `CLAUDE.md` del proyecto — Claude Code → contexto, arquitectura (1 core + 2 consumidores), reglas duras (anti-repaint, core sync, R:R 1:3, solo EURUSD), protocolo de sesión, qué no comprimir en sesiones largas. Done: existe, <150 líneas.
+- [x] **DOC-02** `docs/reglas-dev.md` — Claude Code → convenciones de PINE-PLAN (§2 naming, D-PINE-01..06), ciclo de commit, branching `fase-N/<sprint>`, cuándo ADR. Done: existe y SKL-01 lo referencia. ✅ Sesion-002.
+- [x] **DOC-03** `docs/WORKFLOW-ARQUITECTURA.md` — Claude Code → workflow 3 agentes para Fase 4 + orquestación agentes/skills (tabla de AGENTES.md). Done: existe. ✅ Sesion-002.
+- [x] **DOC-04** `docs/TV-SMC-WORKFLOW.md` — Claude Code → protocolo TV: startup → desarrollo → validación → backtesting → cierre, referenciando skills. Done: existe. ✅ Sesion-002.
+- [x] **DOC-05** `memory/ESTADO-ACTUAL.md` — Claude Code → plantilla: fase/sprint, última tarea (ID), siguiente tarea (ID), bloqueos, decisiones pendientes, fecha. Done: refleja "Fase 0 en curso". ✅ existe.
+- [ ] ~~**DOC-06**~~ **ELIMINADO (2026-06-10)** — el plan original lo definía leyendo el EA `BotBase v3.0` y el vault `Estrategia-Nueva`. **Estrategia2.0 es un proyecto nuevo desde cero; la única referencia externa es el indicador LuxAlgo SMC.** No se leen ni referencian esas carpetas. Los golden tests de Fase 4 se construyen frescos desde TradingView (no heredados). `[decisión usuario]`
+- [x] **DOC-07** `CLAUDE.md` del proyecto — Claude Code → contexto, arquitectura (1 core + 2 consumidores), reglas duras (anti-repaint, core sync, R:R 1:3, solo EURUSD), protocolo de sesión, qué no comprimir en sesiones largas. Done: existe, <150 líneas. ✅ Sesion-002.
 
 ### Bloque C — MCPs y herramientas (decisión del usuario: instalar todo)
 - [ ] **MCP-01** `.mcp.json` con los 6 MCPs — Claude Code → tradingview (node local, ruta verificada ✓), firecrawl-mcp (npx + env var), task-master-ai (npx, claude-code/sonnet), tavily-mcp (npx + env var), context-mode, code-review-graph (5 tools). Keys SOLO por env var `[FIX: P-07]`. Done: `claude mcp list` muestra los 6; los que fallen quedan anotados como ⚠️ no-bloqueantes.
@@ -219,6 +219,11 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 
 ### Verificación Fase 0 (gate)
 - [ ] **VER-01** `tv_health_check` OK · **VER-02** `/smc-session-startup` completa con ≤2 ⚠️ · **VER-03** `morning_brief` con rules.json OK · **VER-04** 9 skills + 8 agentes listados · **VER-05** reglas-smc-ict.md aprobado por el usuario · **VER-06** check-core-sync.ps1 funcional · **VER-07** git limpio, todo commiteado · **VER-08** ESTADO-ACTUAL.md dice "Fase 0 COMPLETADA → siguiente: F1-S1.1-T01".
+
+### Gate de revisión integral con Fable (antes de escribir CÓDIGO) `[decisión usuario 2026-06-10]`
+- [ ] **VER-09 · REVISIÓN-FABLE** Al completar **todo el Bloque F** (es decir, toda la Fase 0: documentos + MCPs + skills + agentes + workflows + scripts), entregar a **Fable el paquete completo, estructurado e informado** — todos los DOC-01..05 + DOC-07, los .mcp.json/rules.json, las 9 skills, los 8 agentes y los workflows — para que **revise el sistema entero ANTES de que se escriba una sola línea de Pine Script (Fase 1)**. Objetivo: validar conceptos, reglas, arquitectura, scoring y la coherencia entre todas las piezas. Done: Fable revisó y aprobó (o devolvió correcciones aplicadas); recién entonces se desbloquea F1-S1.1-T01. **Ningún código se escribe antes de pasar este gate.**
+
+  > **📌 NOTA PARA FABLE — por qué ya no existe DOC-06:** El plan original incluía un DOC-06 (`lecciones-estrategia-nueva.md` + `referencia-botbase.md`) que se construía **leyendo dos fuentes externas**: el EA antiguo `D:\CODE\BOT\Bot\` (BotBase v3.0) y el vault Obsidian del proyecto anterior `Estrategia-Nueva`. **Freddy decidió (2026-06-10) que Estrategia2.0 es un proyecto totalmente nuevo desde cero, y que la ÚNICA referencia externa permitida es el indicador SMC de LuxAlgo** (`pine/reference/LuxAlgo-SMC-base.pine`). En consecuencia DOC-06 se eliminó (no aporta nada que no derive del propio workplan v2 y de reglas-smc-ict.md) y se limpiaron todos los *namedrops* al BotBase: los golden tests de Fase 4 **no se heredan** de ningún proyecto previo — se construyen frescos, función a función, con casos reales extraídos de TradingView. Si en tu revisión ves alguna mención a BotBase, los "175 golden tests" o Estrategia-Nueva, es un residuo a eliminar.
 
 ## FASE 1 *(por cada concepto: workflow smc-sprint — los IDs siguen PINE-PLAN §7)*
 - [ ] **F1-S1.1** Fundación: T01 esqueleto 3 archivos + UDTs + arrays acotados · T02 swings+clasificación (migración v5→v6 del LuxAlgo) · T03 BOS+CHoCH · T04 bias por TF. Done: validados ≥90 + commit cada uno.
@@ -408,7 +413,7 @@ STARTUP (/smc-session-startup)                 CIERRE (/smc-session-close)
 4. **Agente pine-build-resolver** — errores de compilación sin quemar contexto del supervisor.
 5. **check-core-sync.ps1** — guardia automática del invariante más frágil de la arquitectura.
 6. **Fase 5 explícita** — operación, expansión multi-par, régimen de re-calibración trimestral.
-7. **Golden tests de paridad con runner MT5** — formato heredado de los 175 de BotBase v3.0.
+7. **Golden tests de paridad con runner MT5** — set propio construido función a función desde TradingView (no heredado de ningún proyecto previo).
 8. **Gestión DST en Kill Zones** (P-25).
 
 ## Preguntas abiertas (decidir cuando toquen — no bloquean)

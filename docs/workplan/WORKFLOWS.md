@@ -128,7 +128,7 @@ steps:
 **Adaptación SMC:** el "test suite" que protege el refactor = re-validación de los conceptos afectados con smc-validator-agent + comparación de señales del Strategy Tester antes/después del refactor sobre el mismo periodo (deben ser **idénticas**: mismo número de trades, mismas fechas). Cualquier diferencia = el refactor cambió semántica → revertir.
 
 ## WF-04 · archon-test-loop-dag (default)
-**Cuándo:** Fase 4 — loop hasta que los golden tests MQL5 pasen (el set se construye función a función durante la traducción; benchmark heredado: los 175 golden tests de BotBase v3.0 como referencia de formato).
+**Cuándo:** Fase 4 — loop hasta que los golden tests MQL5 pasen (el set se construye función a función durante la traducción, con casos reales extraídos de TradingView; tantos como hagan falta para cobertura).
 **Adaptación SMC:** runner = script de tests MQL5 (Strategy Tester en modo matemático o script de test custom en MT5); cada test rojo genera entrada al loop con: caso fallido → mql5-translator-agent re-analiza → fix → recompilar → re-run. DAG de dependencias: Structures → Liquidity → MTF → Scoring → RiskManager (los tests de un módulo no corren hasta que su dependencia esté verde).
 
 ## WF-05 · archon-validate-pr (default)

@@ -3,10 +3,10 @@
 
 ## Estado
 - **Fase actual:** FASE 0 — EN CURSO
-- **Última tarea completada:** DOC-01 §4 Contexto/ICT/EMAs. **TODAS las definiciones de reglas-smc-ict.md escritas** (§1 Estructura, §2 Zonas, §3 Liquidez, §4 ICT/EMAs — 42 confluencias cubiertas).
-- **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 (este).
+- **Última tarea completada:** Bloque B documentos informativos (Sesion-002). DOC-01 sigue con casos ⏳PENDIENTE-TVMCP + aprobación.
+- **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 f2b9b57 · Sesion-002 (DOC-02/03/04/07 + gate VER-09 + eliminación DOC-06).
 - **PLAN ACORDADO (Sesion-001):** adelantar TODO lo informativo (escribir/investigar/corregir/desglosar conceptos y estructuras) ANTES del gráfico. Freddy quiere validar todos los conceptos/reglas con Fable antes de la fase visual.
-- **Siguiente sesión — docs SIN gráfico:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-06 lecciones-estrategia-nueva.md + referencia-botbase.md · DOC-07 CLAUDE.md.
+- **Docs informativos (Sesion-002) ✅ COMPLETOS:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-07 CLAUDE.md. **DOC-06 ELIMINADO** (proyecto nuevo, sin BotBase ni Estrategia-Nueva; única ref externa = LuxAlgo SMC — ver [[proyecto-nuevo-solo-luxalgo]]).
 - **DIFERIDO (necesita gráfico):** pasada TradingView MCP para poblar casos ⏳PENDIENTE-TVMCP de reglas-smc-ict.md + aprobación final (gate VER-05). Se hace cuando todo lo informativo esté escrito y validado con Fable.
 - **PENDIENTE workplan:** aplicar cambios de ADR-001 a §4.8/F2-T02/PINE-PLAN/MQL5-PLAN cuando se toque cada sección.
 
@@ -27,6 +27,7 @@
 - 42 confluencias direccionales; pesos en Fase 3 con split IS/OOS 70/30.
 - Solo EURUSD hasta gate de Fase 3. R:R mínimo 1:3. Anti-repaint obligatorio.
 - Fuente de verdad del plan: WORKPLAN-MAESTRO-V2.md + docs/workplan/*.
+- **GATE VER-09 REVISIÓN-FABLE (decisión usuario 2026-06-10):** al terminar TODO el Bloque F (toda la Fase 0), se entrega el paquete completo, estructurado e informado a Fable para que revise el sistema entero ANTES de escribir código Pine (Fase 1). Ningún código antes de pasar este gate. Registrado en WORKPLAN-MAESTRO-V2 §3 Fase 0.
 
 ## Cómo arrancar la próxima sesión
 1. Leer este archivo + WORKPLAN-MAESTRO-V2.md Sección 3 (Fase 0).
