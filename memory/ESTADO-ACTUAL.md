@@ -3,8 +3,8 @@
 
 ## Estado
 - **Fase actual:** FASE 0 — EN CURSO
-- **Última tarea completada:** Revisión Fable de lo informativo ✅ PASADA (Sesion-003) + 4 correcciones aplicadas (ADR-001 al workplan, excepción TV-MCP en CLAUDE.md, aclaración KZ≠open en DOC-01, banners históricos). DOC-01 sigue con casos ⏳PENDIENTE-TVMCP + aprobación.
-- **SIGUIENTE PASO:** Bloque C (MCP-01..06) → D (skills) → E (agentes) → F (workflows) → VER-01..08 → gate VER-09.
+- **Última tarea completada:** **Bloque C (MCPs) cerrado** (Sesion-004). MCP-01 ✅ 6 MCPs en `.mcp.json` (code-review-graph ⚠️ no registró tools, no-bloqueante). MCP-02 ✅ merge upstream del fork TV MCP + `tv_health_check` OK. MCP-04 ✅ claude-mem instalado. MCP-05 ✅ `rules.json` EURUSD + `morning_brief` OK. MCP-03 (Archon) y MCP-06 (task-master parse) ⏳ DIFERIDOS (no-bloqueante/opcional).
+- **SIGUIENTE PASO:** Bloque D (skills SKL-01..09) → E (agentes AGT-01..08) → F (workflows) → VER-01..08 → gate VER-09 REVISIÓN-FABLE.
 - **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 f2b9b57 · Sesion-002 (DOC-02/03/04/07 + gate VER-09 + eliminación DOC-06).
 - **PLAN ACORDADO (Sesion-001):** adelantar TODO lo informativo (escribir/investigar/corregir/desglosar conceptos y estructuras) ANTES del gráfico. Freddy quiere validar todos los conceptos/reglas con Fable antes de la fase visual.
 - **Docs informativos (Sesion-002) ✅ COMPLETOS:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-07 CLAUDE.md. **DOC-06 ELIMINADO** (proyecto nuevo, sin BotBase ni Estrategia-Nueva; única ref externa = LuxAlgo SMC — ver [[proyecto-nuevo-solo-luxalgo]]).
@@ -35,4 +35,10 @@
 2. Confirmar SEC-01 hecho por el usuario.
 3. Ejecutar Fase 0 en orden: Bloque A → B → C → D → E → F → VER-01..08.
 
-*Última actualización: 2026-06-11 — Sesion-003: revisión Fable de lo informativo PASADA + correcciones (Fable)*
+## Notas de herramientas (Sesion-004)
+- **TV MCP:** lanzar SIEMPRE por `mcp__tradingview__tv_launch` (CDP 9222), nunca manual. Fork en `D:\CODE\BOT\Bot\tradingview-mcp-jackson` ahora +4 ahead de origin (merge upstream sin pushear).
+- **rules.json** (morning_brief) vive en la raíz del repo-herramienta TV MCP (de ahí lo lee por defecto). Config EURUSD/H1/SMC. Si futuros merges de upstream lo tocan, re-aplicar.
+- **code-review-graph** ⚠️: binario OK pero no registró tools; grafo con 0 nodos (sin código aún). Reintentar/construir grafo en Fase 1.
+- **Archon (MCP-03)** y **task-master parse (MCP-06)** diferidos — retomar en Bloque F si se necesitan.
+
+*Última actualización: 2026-06-11 — Sesion-004: Bloque C (MCPs) cerrado*
