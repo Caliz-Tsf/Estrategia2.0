@@ -168,7 +168,12 @@ Sprints 2.1-2.2 según PINE-PLAN §7.
 **Salida (gate):** expectancy OOS > 0 · profit factor OOS ≥ 1.3 · ≥100 trades IS y ≥30 OOS · degradación IS→OOS < 40% en PF · paper trading coherente con backtest · 0 discrepancias señal↔visual sin explicar. Pesos finales → **docs/scoring-weights-final.md**.
 
 ## FASE 4 — Expert Advisor MT5 *(est. 15-25 sesiones + 60 días demo + 30 días live mínimo)*
-**Entrada:** Fase 3 gate. **Salida:** los 4 gates secuenciales de MQL5-PLAN §4 (golden tests → Strategy Tester MT5 → 60 días demo → live 0.01).
+> ⛔ **GATE DURO DE ENTRADA A FASE 4 `[decisión Freddy 2026-06-11]` — innegociable.** No se escribe **ni una línea de MQL5** hasta que se cumplan TODAS estas condiciones:
+> 1. **Todo lo anterior 100% listo:** Fases 0, 1, 2 y 3 completas, con sus gates respectivos pasados (sin atajos, sin criterios ajustados).
+> 2. **Revisión y visto bueno de Fable:** Fable revisa el sistema completo (Pine validado + Strategy + calibración Fase 3) y **confirma explícitamente que todo está bien**. Si Fable devuelve correcciones, se aplican y se re-revisa antes de avanzar.
+> 3. **Pruebas en TradingView Desktop al 100% positivas:** validación visual, anti-repaint, Strategy Tester y paper trading deben dar resultados **100% correctos y positivos** en TV Desktop, sin discrepancias señal↔visual sin explicar. El EA MT5 replica un sistema **ya probado y verde en TV**, nunca uno con dudas pendientes.
+>
+> **Entrada formal:** Fase 3 gate **+** este gate duro. **Salida:** los 4 gates secuenciales de MQL5-PLAN §4 (golden tests → Strategy Tester MT5 → 60 días demo → live 0.01).
 Pipeline de 3 agentes por módulo (MQL5-PLAN §4), orden: Types → Structures → Liquidity → MTF → Scoring → Risk → Display → EA.
 
 ## FASE 5 `[NUEVO]` — Operación y expansión *(continua)*
@@ -251,6 +256,7 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 - [ ] **F3-GATE** Criterios de §2 Fase 3 → docs/scoring-weights-final.md + ADR de cierre + tag `fase-3-completa`.
 
 ## FASE 4 *(por módulo: skill mql5-translator — pipeline MQL5-PLAN §4)*
+> ⛔ **No iniciar sin el GATE DURO DE ENTRADA A FASE 4** (ver §3 arriba): Fases 0-3 100% completas + Fable confirma que todo está bien + pruebas en TV Desktop 100% positivas. Ninguna línea de MQL5 antes de eso.
 - [ ] **F4-T00** archon-architect sweep: validar mapeo §3 contra el Pine final + setup repo MT5 + elegir broker (criterio: D1 17:00 NY, spread EURUSD <1 pip).
 - [ ] **F4-T01..08** Types → Structures → Liquidity → MTF → Scoring → Risk → Display → EA, cada uno: traducir → review → compilar 0/0 → golden tests verdes → commit.
 - [ ] **F4-GATE-A** Golden tests 100% · **F4-GATE-B** Strategy Tester MT5 2 años comparable a TV (±20% PF) · **F4-GATE-C** demo 60 días expectancy>0 · **F4-GATE-D** live 0.01 30 días OK → escalar gradualmente.
