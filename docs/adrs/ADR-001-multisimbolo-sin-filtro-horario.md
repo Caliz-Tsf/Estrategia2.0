@@ -44,7 +44,7 @@ Componentes:
 - Riesgo de operar mercados thin si el filtro de spread está mal calibrado → mitigado validando spread por símbolo.
 - **Disciplina obligatoria:** se valida EURUSD primero (gate Fase 3); cada símbolo nuevo repite validación abreviada (Fase 5). NO se optimiza para N símbolos a la vez (overfitting).
 
-## Items del workplan afectados (a actualizar)
+## Items del workplan afectados — ✅ TODOS APLICADOS (2026-06-11, Sesion-003, revisión Fable)
 
 - **§4.8 regla de señal:** quitar `KZ activa ∧` como precondición dura; KZ pasa a confluencia #34 ponderada. La señal = `score_dir ≥ threshold ∧ score_dir > score_opuesto ∧ R:R≥3 ∧ spread ≤ máx`.
 - **F2-T02 "Filtros duros":** sustituir "KZ obligatoria" por "spread ≤ máx" + "R:R≥3" + "sin posición duplicada". KZ ya no es filtro.
@@ -54,4 +54,4 @@ Componentes:
 - **Fase 5:** ya contempla expansión par a par — se confirma como el mecanismo de validación por símbolo.
 - **reglas-smc-ict.md:** §0 (principio símbolo-agnóstico) y §3.4 (Kill Zones) ya actualizados.
 
-> Estos cambios al WORKPLAN se aplican cuando se toque cada sección; este ADR es la fuente de verdad de la decisión hasta entonces.
+> ~~Estos cambios al WORKPLAN se aplican cuando se toque cada sección.~~ **Aplicados en Sesion-003** (revisión Fable pre-Bloque C): WORKPLAN §4.8 + F2-T02 + descripción DOC-07, PINE-PLAN §3.4/§6, MQL5-PLAN (inputs EA, OnTick guard, flujo, tabla de mapeo). Este ADR sigue siendo la fuente de verdad de la decisión.

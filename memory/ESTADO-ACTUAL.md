@@ -3,12 +3,13 @@
 
 ## Estado
 - **Fase actual:** FASE 0 — EN CURSO
-- **Última tarea completada:** Bloque B documentos informativos (Sesion-002). DOC-01 sigue con casos ⏳PENDIENTE-TVMCP + aprobación.
+- **Última tarea completada:** Revisión Fable de lo informativo ✅ PASADA (Sesion-003) + 4 correcciones aplicadas (ADR-001 al workplan, excepción TV-MCP en CLAUDE.md, aclaración KZ≠open en DOC-01, banners históricos). DOC-01 sigue con casos ⏳PENDIENTE-TVMCP + aprobación.
+- **SIGUIENTE PASO:** Bloque C (MCP-01..06) → D (skills) → E (agentes) → F (workflows) → VER-01..08 → gate VER-09.
 - **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 f2b9b57 · Sesion-002 (DOC-02/03/04/07 + gate VER-09 + eliminación DOC-06).
 - **PLAN ACORDADO (Sesion-001):** adelantar TODO lo informativo (escribir/investigar/corregir/desglosar conceptos y estructuras) ANTES del gráfico. Freddy quiere validar todos los conceptos/reglas con Fable antes de la fase visual.
 - **Docs informativos (Sesion-002) ✅ COMPLETOS:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-07 CLAUDE.md. **DOC-06 ELIMINADO** (proyecto nuevo, sin BotBase ni Estrategia-Nueva; única ref externa = LuxAlgo SMC — ver [[proyecto-nuevo-solo-luxalgo]]).
 - **DIFERIDO (necesita gráfico):** pasada TradingView MCP para poblar casos ⏳PENDIENTE-TVMCP de reglas-smc-ict.md + aprobación final (gate VER-05). Se hace cuando todo lo informativo esté escrito y validado con Fable.
-- **PENDIENTE workplan:** aplicar cambios de ADR-001 a §4.8/F2-T02/PINE-PLAN/MQL5-PLAN cuando se toque cada sección.
+- ~~PENDIENTE workplan: aplicar cambios de ADR-001~~ ✅ APLICADO en Sesion-003 (§4.8, F2-T02, DOC-07 desc., PINE-PLAN §3.4/§6, MQL5-PLAN).
 
 ## Bloqueos
 - Ninguno. (SEC-01 resuelto: usuario confirmó keys viejas revocadas; nuevas en .env/.mcp.json gitignored.)
@@ -34,4 +35,4 @@
 2. Confirmar SEC-01 hecho por el usuario.
 3. Ejecutar Fase 0 en orden: Bloque A → B → C → D → E → F → VER-01..08.
 
-*Última actualización: 2026-06-10 — sesión de generación del workplan (Fable)*
+*Última actualización: 2026-06-11 — Sesion-003: revisión Fable de lo informativo PASADA + correcciones (Fable)*

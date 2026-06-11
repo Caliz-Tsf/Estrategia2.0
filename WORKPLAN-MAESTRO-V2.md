@@ -194,7 +194,7 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 - [x] **DOC-04** `docs/TV-SMC-WORKFLOW.md` — Claude Code → protocolo TV: startup → desarrollo → validación → backtesting → cierre, referenciando skills. Done: existe. ✅ Sesion-002.
 - [x] **DOC-05** `memory/ESTADO-ACTUAL.md` — Claude Code → plantilla: fase/sprint, última tarea (ID), siguiente tarea (ID), bloqueos, decisiones pendientes, fecha. Done: refleja "Fase 0 en curso". ✅ existe.
 - [ ] ~~**DOC-06**~~ **ELIMINADO (2026-06-10)** — el plan original lo definía leyendo el EA `BotBase v3.0` y el vault `Estrategia-Nueva`. **Estrategia2.0 es un proyecto nuevo desde cero; la única referencia externa es el indicador LuxAlgo SMC.** No se leen ni referencian esas carpetas. Los golden tests de Fase 4 se construyen frescos desde TradingView (no heredados). `[decisión usuario]`
-- [x] **DOC-07** `CLAUDE.md` del proyecto — Claude Code → contexto, arquitectura (1 core + 2 consumidores), reglas duras (anti-repaint, core sync, R:R 1:3, solo EURUSD), protocolo de sesión, qué no comprimir en sesiones largas. Done: existe, <150 líneas. ✅ Sesion-002.
+- [x] **DOC-07** `CLAUDE.md` del proyecto — Claude Code → contexto, arquitectura (1 core + 2 consumidores), reglas duras (anti-repaint, core sync, R:R 1:3, símbolo-agnóstico `[ADR-001]`), protocolo de sesión, qué no comprimir en sesiones largas. Done: existe, <150 líneas. ✅ Sesion-002.
 
 ### Bloque C — MCPs y herramientas (decisión del usuario: instalar todo)
 - [ ] **MCP-01** `.mcp.json` con los 6 MCPs — Claude Code → tradingview (node local, ruta verificada ✓), firecrawl-mcp (npx + env var), task-master-ai (npx, claude-code/sonnet), tavily-mcp (npx + env var), context-mode, code-review-graph (5 tools). Keys SOLO por env var `[FIX: P-07]`. Done: `claude mcp list` muestra los 6; los que fallen quedan anotados como ⚠️ no-bloqueantes.
@@ -235,7 +235,7 @@ Solo tras Fase 4 live OK: monitoreo (journal CSV + revisión semanal con smc-bac
 
 ## FASE 2
 - [ ] **F2-T01** Scoring direccional (42 confluencias §4.8, pesos input=1.0) — skill smc-pine-develop. Done: scoreLong/scoreShort visibles en panel.
-- [ ] **F2-T02** Filtros duros (KZ obligatoria, R:R≥3 calculable, sin posición duplicada). 
+- [ ] **F2-T02** Filtros duros (spread ≤ `maxSpread`, R:R≥3 calculable, sin posición duplicada). La KZ NO es filtro: es confluencia #34 ponderada + input `sessionProfile`. `[ADR-001]`
 - [ ] **F2-T03** Entradas/salidas strategy.* + SL/TP/TPext + parciales 50% + trailing estructural.
 - [ ] **F2-T04** alert_message detallado + registro/export de trades.
 - [ ] **F2-T05** Comisión+slippage realistas EURUSD configurados (D-PINE-05).
@@ -361,8 +361,9 @@ FASE 1-2 (por concepto):        FASE 3 (por iteración):          FASE 4 (por m�
 │ 24 mitigation block 25 flip │  │ 42 3 EMAs alineadas                 │
 │ 26 FVG-CE tocado            │  └─────────────────────────────────────┘
 └─────────────────────────────┘
-SEÑAL: en vela confirmada, si KZ activa ∧ score_dir ≥ threshold ∧ score_dir > score_opuesto
-       ∧ SL/TP con R:R≥3 calculable → entrada. Si no → nada (no hay "casi señal").
+SEÑAL: en vela confirmada, si score_dir ≥ threshold ∧ score_dir > score_opuesto
+       ∧ spread ≤ maxSpread ∧ SL/TP con R:R≥3 calculable → entrada. [ADR-001: KZ no
+       es precondición — aporta como confluencia #34]. Si no → nada (no hay "casi señal").
 ```
 
 ### 4.9 Protocolo de sesión

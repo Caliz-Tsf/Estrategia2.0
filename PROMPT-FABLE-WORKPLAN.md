@@ -1,3 +1,5 @@
+> ⚠️ **HISTÓRICO (2026-06-10):** este prompt ya cumplió su función — el workplan que pedía existe: [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). No usar como fuente vigente. Las menciones a BotBase, Estrategia-Nueva o DOC-06 están OBSOLETAS: la única referencia externa del proyecto es el indicador LuxAlgo SMC (ver CLAUDE.md §Referencias externas).
+
 # PROMPT MAESTRO — FABLE: Arquitecto del Bot SMC/ICT
 > Instrucciones completas para que Fable genere el Workplan definitivo de Estrategia 2.0
 > Versión: 1.0 | Fecha: 2026-06-10

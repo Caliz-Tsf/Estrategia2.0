@@ -139,7 +139,7 @@ Cada función es pura respecto a su entrada (recibe series/arrays, devuelve dete
 | Función | Detecta |
 |---|---|
 | `f_premiumDiscount` | Rango entre último strong high y strong low → Premium (>50%), Discount (<50%), Equilibrium (45–55%) |
-| `f_killZone` | `time` dentro de London 08:00–10:00, NY 13:00–15:00, Tokyo 00:00–02:00 (GMT, ajustable; sesiones via `time("", session, "GMT")`) |
+| `f_killZone` | `f_killZone(time, sessionProfile)` → qué sesión está activa (o ninguna) + si es la primera mitad de la ventana (para Judas). Ventanas en **hora local de mercado con DST** vía `time(timeframe.period, session, timezone)`: London 07:00–10:00 `Europe/London` · NY AM 08:00–11:00 `America/New_York` · Tokyo 09:00–11:00 `Asia/Tokyo`. Perfiles: `FX-London-NY` / `FX-Asia` / `None` `[ADR-001, P-25; def. en reglas-smc-ict §3.4]` |
 | `f_sessionOpens` | Apertura semanal/mensual/trimestral como niveles |
 | `f_emaState` | EMAs 20/50/200: posición del precio, cruces (20×50, 50×200, 20×200), rebotes (toque + cierre de vuelta con wick), alineación de las 3 |
 
@@ -232,7 +232,7 @@ Filas con toggle individual (panel compacto vs completo). Colores: verde/rojo/gr
 
 **Lógica de entrada (solo en vela confirmada):**
 ```
-si killZoneActiva y scoreLong ≥ threshold y scoreLong > scoreShort:
+si scoreLong ≥ threshold y scoreLong > scoreShort y spread ≤ maxSpread:   // [ADR-001] KZ no es precondición
     [sl, tp1, tpExt, ok] = f_computeSLTP(...)
     si ok:  // R:R 1:3 calculable
         strategy.entry("L", strategy.long, alert_message = jsonDetalle)
@@ -241,7 +241,7 @@ si killZoneActiva y scoreLong ≥ threshold y scoreLong > scoreShort:
 (espejo para short)
 ```
 **Trailing estructural:** mientras la posición esté abierta, al confirmarse un nuevo HL (long) / LH (short) en el chart TF → mover stop de "L-ext" a ese swing ± buffer.
-**Filtros duros (no-score):** dentro de Kill Zone obligatorio · R:R ≥ 3 calculable · sin posición abierta del mismo lado · spread filter opcional.
+**Filtros duros (no-score):** spread ≤ `maxSpread` (input, guardián universal de liquidez `[ADR-001]`) · R:R ≥ 3 calculable · sin posición abierta del mismo lado. La Kill Zone NO filtra: aporta como confluencia #34 ponderada; inputs `sessionProfile` (FX-London-NY/FX-Asia/None) y `maxSpread` en el grupo Sesiones/Filtros.
 
 **Visual mínimo:** label de entrada con `LONG 14.5pts [CHoCH-H1, Sweep, OB-H1, OTE, KZ-LDN]`, líneas SL (rojo) / TP1 (verde) / TPext (verde punteado). Registro: el Strategy Tester ya guarda cada trade con fecha/precio/resultado → exportable a CSV para el `smc-backtesting-analyst`. Adicionalmente, tabla "últimas 20 señales" opcional.
 

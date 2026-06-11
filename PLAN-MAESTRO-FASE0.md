@@ -1,4 +1,4 @@
-> ⚠️ **SUPERSEDED (2026-06-10):** este documento fue reemplazado por [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). Se conserva solo como histórico. ⚠️ Las API keys que aparecen abajo están comprometidas y deben rotarse (tarea SEC-01 del workplan v2).
+> ⚠️ **SUPERSEDED (2026-06-10):** este documento fue reemplazado por [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). Se conserva solo como histórico. ⚠️ Las API keys que aparecen abajo están comprometidas y deben rotarse (tarea SEC-01 del workplan v2). Las menciones a BotBase, Estrategia-Nueva o DOC-06 están OBSOLETAS: la única referencia externa del proyecto es el indicador LuxAlgo SMC (ver CLAUDE.md §Referencias externas).
 
 # PLAN MAESTRO — Estrategia2.0
 > Bot SMC/ICT para Forex EURUSD | TradingView Pine Script → MetaTrader 5 MQL5

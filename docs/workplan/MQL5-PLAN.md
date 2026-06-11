@@ -81,7 +81,7 @@ public:
    bool   Init();                                  // crea CSMCStructures+CSMCLiquidity internos para D1 y H1
    void   OnNewBar();                              // detecta nuevas velas D1/H1 cerradas y actualiza snapshots
    bool   GetTFState(ENUM_TIMEFRAMES tf, SMC_TFState &out);
-   bool   InKillZone(string &zoneName);            // London/NY/Tokyo en GMT (¡convertir desde hora del broker!)
+   bool   InKillZone(string &zoneName);            // según input sessionProfile (FX-London-NY/FX-Asia/None) [ADR-001]; hora local de mercado con DST → convertir desde hora del broker. NO es guard: alimenta la confluencia #34
    double GetSessionOpen(int which);               // W / M / Q
 };
 ```
@@ -124,9 +124,9 @@ public:
 
 ### EA_SMC_ICT.mq5 — orquestador
 ```cpp
-// Inputs: pesos (grupo por categoría), threshold, riesgo (%/trade, % diario máx),
-//         Kill Zones on/off, magic, símbolo lock EURUSD, modo (live/demo/test)
-int OnInit():    valida símbolo == EURUSD (hasta expansión) → Init de los 6 módulos
+// Inputs: pesos (grupo por categoría — perfil POR SÍMBOLO [ADR-001]), threshold, riesgo (%/trade, % diario máx),
+//         sessionProfile (FX-London-NY/FX-Asia/None), maxSpread, magic, símbolo de validación, modo (live/demo/test)
+int OnInit():    valida símbolo == el del perfil cargado (EURUSD hasta expansión Fase 5 [ADR-001]) → Init de los 6 módulos
                  → RECOVERY: escanear posiciones abiertas con nuestro magic y re-adoptarlas
 void OnTick():
    1. if (!isNewBar(PERIOD_CURRENT)) { gestionar trailing intra-vela si hay posición; return; }
@@ -134,7 +134,7 @@ void OnTick():
    3. chartStructures.OnNewBar(rates)      // detección en el TF del chart (M5)
    4. chartLiquidity.OnNewBar(rates, inKZ)
    5. display.Update(...)
-   6. if (!mtf.InKillZone() || !risk.RiskBudgetOK() || hayPosicion()) return;
+   6. if (spreadActual > maxSpread || !risk.RiskBudgetOK() || hayPosicion()) return;   // KZ NO bloquea [ADR-001]; su estado entra al scoring como confluencia #34
    7. if (scoring.Evaluate(...) == señal):
         risk.ComputeSLTP → risk.ComputeLots → OrderSend (verificar retcode,
         reintentos con backoff) → journal CSV → display.ShowSignal
@@ -142,7 +142,7 @@ void OnTrade():  registrar fills/cierres en journal (docs/sprint-runs/mt5-journa
 void OnDeinit(): liberar objetos del display
 ```
 
-**Flujo por tick:** `tick → ¿vela nueva? —no→ trailing y salir | —sí→ MTF → Structures → Liquidity → Display → guards (KZ, riesgo, posición) → Scoring → Risk → OrderSend`.
+**Flujo por tick:** `tick → ¿vela nueva? —no→ trailing y salir | —sí→ MTF → Structures → Liquidity → Display → guards (spread, riesgo, posición) → Scoring → Risk → OrderSend`. `[ADR-001]`
 Todo el trabajo pesado ocurre solo en vela nueva (en M5: una vez cada 5 min) → el target <50ms/tick es holgado; el tick promedio hace solo el guard isNewBar + trailing (µs).
 
 ---
@@ -156,7 +156,7 @@ Todo el trabajo pesado ocurre solo en vela nueva (en M5: una vez cada 5 min) →
 | f_detectOB / f_detectFVG / f_updateZoneMitigation | SMC_Structures | OnNewBar interno | ta.atr → implementar EMA-Wilder exacta, validar numéricamente vs TV |
 | f_detectBreaker / Rejection / Flip / OTE | SMC_Structures | OnNewBar interno | |
 | f_detectEQHL / f_buildPools / f_detectSweep / Grab / Judas / IDM / FalseBreakout | SMC_Liquidity | OnNewBar interno | |
-| f_premiumDiscount / f_killZone / f_sessionOpens / f_emaState | SMC_MTF | OnNewBar/getters | KZ: convertir hora broker→GMT con TimeGMT(); ta.ema → seed SMA + alpha 2/(n+1), NO iMA directo sin validar |
+| f_premiumDiscount / f_killZone / f_sessionOpens / f_emaState | SMC_MTF | OnNewBar/getters | KZ: sessionProfile + hora local de mercado con DST [ADR-001]; convertir hora broker→GMT con TimeGMT(); ta.ema → seed SMA + alpha 2/(n+1), NO iMA directo sin validar |
 | snapshots request.security("D"/"60") | SMC_MTF | CopyRates(PERIOD_D1/H1) | usar solo velas cerradas (shift 1); la vela diaria del broker puede abrir a otra hora que TV → documentar offset del broker elegido |
 | f_scoreConfluences | SMC_Scoring | Evaluate | pesos = inputs, default = scoring-weights-final.md de Fase 3 |
 | f_computeSLTP | SMC_RiskManager | ComputeSLTP | + normalización tick size / stops level del broker |

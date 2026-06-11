@@ -1,4 +1,4 @@
-> ⚠️ **SUPERSEDED (2026-06-10):** este documento fue reemplazado por [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). Se conserva solo como histórico.
+> ⚠️ **SUPERSEDED (2026-06-10):** este documento fue reemplazado por [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md). Se conserva solo como histórico. Las menciones a BotBase, Estrategia-Nueva o DOC-06 están OBSOLETAS: la única referencia externa del proyecto es el indicador LuxAlgo SMC (ver CLAUDE.md §Referencias externas).
 
 # Plan: Bot SMC/ICT — TradingView → MetaTrader 5
 
