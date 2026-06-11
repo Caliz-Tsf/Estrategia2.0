@@ -2,7 +2,8 @@
 > Actualizar al cierre de CADA sesión (lo hace smc-doc-updater vía /smc-session-close cuando existan).
 
 ## Estado
-- **Fase actual:** FASE 0 — EN CURSO
+- **Fase actual:** **FASE 0 — COMPLETADA ✅** (Bloques A–F + VER-01..08). Siguiente: **gate VER-09 REVISIÓN-FABLE** → luego F1-S1.1-T01.
+- **Última tarea completada (Sesion-008):** **VER-01..08 PASE COMPLETO.** VER-01 tv_health_check ✅ · VER-02 startup 1⚠️ ✅ · VER-03 morning_brief ✅ · VER-04 ✅ (S007) · **VER-05 ✅ reglas-smc-ict.md poblado con casos reales de EURUSD (24 conceptos, TV MCP) + aprobado por Freddy** — 3 notas de escasez (MSS swing ×1, Judas ×1, breaker retest) derivadas a Fable (VER-09) para decisión · VER-06 ✅ (SCR-03) · VER-07 ✅ git limpio · VER-08 ✅. Extractor reproducible en `scripts/ver05/` (detect*.py sobre eurusd_h1.csv/eurusd_m5.csv; H1 25-may→11-jun, M5 10–11-jun). Handoff: `docs/VER-09-handoff-fable.md`. tag `fase-0-completa`.
 - **Última tarea completada (Sesion-007):** **GATE VER-04 SUPERADO** — verificación en frío de skills y agentes. Las 9 skills y los 8 agentes confirmados en disco Y en el registro del runtime al arrancar en frío (lo que falló en caliente en Sesion-006). Prueba real del Done de Bloque E ejecutada: `smc-code-explorer` respondió con anclas `archivo:línea` exactas sobre `pine/reference/LuxAlgo-SMC-base.pine` (swings :337-457, OB :507-540, FVG :634-649, BOS/CHoCH :551-612) y detectó por su cuenta el `lookahead_on` en :635 como riesgo de repaint vs D-PINE-03. Segundo agente `smc-architect` (opus) también operativo. Diagnóstico Sesion-006 confirmado: el registro de subagentes carga al arrancar la sesión, no en caliente. — *Sesion-006:* SKL-01..09 ✅ (commit 7bd74d3) + AGT-01..08 ✅ (commit 66ef51c). *Sesion-005:* code-review-graph, claude-mem, MCP-03 Archon, SCR-02 sync-obsidian.
 - **Bloque C previo (Sesion-004):** MCP-01 ✅ 6 MCPs en `.mcp.json`. MCP-02 ✅ merge upstream fork TV MCP + `tv_health_check`. MCP-04 ✅ claude-mem. MCP-05 ✅ `rules.json` + `morning_brief`.
 - **✅ VER-04 CERRADO (Sesion-007).** Verificación en frío superada (ver "Última tarea completada"). Despejada la prioridad #1 de Freddy.
@@ -12,7 +13,7 @@
   - **SCR-02** `sync-obsidian.ps1` — ✅ ya estaba (Sesion-005).
   - **SCR-03** `check-core-sync.ps1` [NUEVO] — compara LIBRARY CORE Visual/Strategy por SHA-256. Probado: SKIP/OK/DIVERGENT(exit 1+diff). commit 768fde5.
   - **SCR-04** `process-video.ps1` — pipeline yt-dlp→FFmpeg→Whisper→.md al vault Teoria-SMC. Probado end-to-end con video real 19s. commit (este).
-- **SIGUIENTE PASO:** **VER-01..08** (verificación Fase 0) → **gate VER-09 REVISIÓN-FABLE** (entregar TODO a Fable antes de escribir Pine). VER-04 ya ✅.
+- **SIGUIENTE PASO:** **GATE VER-09 REVISIÓN-FABLE** — entregar el paquete completo a Fable (ver `docs/VER-09-handoff-fable.md`) para que apruebe, resuelva las 3 decisiones de escasez y diga la mejor opción global ANTES de escribir Pine. Ningún código antes del gate. VER-01..08 ya ✅.
 - **Commits:** Bloque A 5970a10 · Tier 1 414fa1b · Tier 2 3a17b79 · §3+ADR-001 429de10 · §4 f2b9b57 · Sesion-002 (DOC-02/03/04/07 + gate VER-09 + eliminación DOC-06).
 - **PLAN ACORDADO (Sesion-001):** adelantar TODO lo informativo (escribir/investigar/corregir/desglosar conceptos y estructuras) ANTES del gráfico. Freddy quiere validar todos los conceptos/reglas con Fable antes de la fase visual.
 - **Docs informativos (Sesion-002) ✅ COMPLETOS:** DOC-02 reglas-dev.md · DOC-03 WORKFLOW-ARQUITECTURA.md · DOC-04 TV-SMC-WORKFLOW.md · DOC-07 CLAUDE.md. **DOC-06 ELIMINADO** (proyecto nuevo, sin BotBase ni Estrategia-Nueva; única ref externa = LuxAlgo SMC — ver [[proyecto-nuevo-solo-luxalgo]]).
@@ -51,4 +52,4 @@
 - **task-master (MCP-06):** **OPCIONAL — se puede saltar sin perder nada** (decisión usuario Sesion-005). No es pieza del sistema (el WORKPLAN ya es el backlog; teoría→indicador corre sobre reglas-smc-ict.md + smc-sprint/Archon + smc-validator-agent). Si se hiciera, es en VER-09 y **a criterio de Fable** decidir si vale la pena (probablemente no). CLI disponible (0.43.1).
 - **SCR-02 sync-obsidian.ps1** ✅: copia incremental (por hash) de `memory/sesiones/`, `docs/adrs/`, `memory/ESTADO-ACTUAL.md` → `D:\obsidian\boveda MENTE\Mente\Estrategia2.0\`. `-DryRun` para simular. Idempotente. Adelantado del Bloque F.
 
-*Última actualización: 2026-06-11 — Sesion-007: Bloque F (5 ítems) completado. VER-04 CERRADO. Siguiente: VER-01..08 (verificación Fase 0) → VER-09 (gate Fable) → Fase 1.*
+*Última actualización: 2026-06-11 — Sesion-008: VER-01..08 PASE COMPLETO, **Fase 0 COMPLETADA**. VER-05 poblado con casos reales + aprobado (3 notas de escasez a Fable). Siguiente: gate VER-09 REVISIÓN-FABLE → Fase 1.*
