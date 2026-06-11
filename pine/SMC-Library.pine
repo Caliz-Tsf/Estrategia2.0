@@ -1,0 +1,132 @@
+// © Estrategia 2.0 — SMC_Library. Porta algoritmos del indicador
+// "Smart Money Concepts [LuxAlgo]" (CC BY-NC-SA 4.0, © LuxAlgo) — atribucion
+// obligatoria [D-PINE-06]. https://creativecommons.org/licenses/by-nc-sa/4.0/
+//
+// Version publicable equivalente del CORE [D-PINE-01]. Durante el desarrollo
+// (Fases 1-2) el core operativo vive como seccion "// === LIBRARY CORE ==="
+// copiada byte-identica en SMC-Visual.pine y SMC-Strategy.pine; este archivo
+// es la version exportable de referencia y se migra a library publicada al
+// cerrar la Fase 2. Esqueleto F1-S1.1-T01: tipos + constantes + arrays acotados.
+//@version=6
+library("SMC_Library", overlay = true)
+
+// --- Constantes 'kind' por categoria [reglas-dev §1.2 · PINE-PLAN §2] ---
+// Zonas (SMC_Zone.kind)
+export const int KIND_OB          = 1
+export const int KIND_FVG         = 2
+export const int KIND_BREAKER     = 3
+export const int KIND_REJECTION   = 4
+export const int KIND_MITIGATION  = 5
+export const int KIND_OTE         = 6
+export const int KIND_GP          = 7
+// Eventos (SMC_Event.kind)
+export const int KIND_BOS          = 20
+export const int KIND_CHOCH        = 21
+export const int KIND_MSS          = 22
+export const int KIND_SWEEP        = 23
+export const int KIND_GRAB         = 24
+export const int KIND_JUDAS        = 25
+export const int KIND_DISPLACEMENT = 26
+export const int KIND_IDM          = 27
+export const int KIND_EMACROSS     = 28
+export const int KIND_EMABOUNCE    = 29
+export const int KIND_FLIP         = 30
+// Swings (SMC_Swing.kind)
+export const int KIND_HH = 40
+export const int KIND_HL = 41
+export const int KIND_LH = 42
+export const int KIND_LL = 43
+
+// --- Direccion canonica y estados de zona ---
+export const int DIR_BULL     = 1
+export const int DIR_BEAR     = -1
+export const int ZS_ACTIVE    = 0
+export const int ZS_PARTIAL   = 1
+export const int ZS_MITIGATED = 2
+export const int ZS_INVALID   = 3
+
+// --- Limites de arrays por TF (performance, reglas-dev §1.6) ---
+export const int MAX_ZONES  = 50
+export const int MAX_EVENTS = 100
+export const int MAX_SWINGS = 100
+export const int MAX_POOLS  = 50
+
+// --- UDTs (PINE-PLAN §2) ---
+// Zona con extension espacial (OB, FVG, Breaker, Rejection, OTE, Premium/Discount...)
+export type SMC_Zone
+    float  top
+    float  bottom
+    int    dir
+    int    barIdx
+    int    barTime
+    int    state        = 0
+    float  mitigatedPct = 0.0
+    string tf           = ""
+    int    kind         = 0
+
+// Evento puntual (BOS, CHoCH, MSS, Sweep, Judas, Displacement, IDM, EMA cross/bounce...)
+export type SMC_Event
+    float  price
+    int    dir
+    int    barIdx
+    int    barTime
+    string tf   = ""
+    int    kind = 0
+
+// Punto de swing estructural
+export type SMC_Swing
+    float  price
+    int    barIdx
+    int    barTime
+    int    kind  = 0
+    bool   swept = false
+
+// Pool de liquidez (EQH/EQL clusterizados)
+export type SMC_Pool
+    float  level
+    int    dir
+    int    touches  = 1
+    int    barTime
+    bool   swept    = false
+    string tf       = ""
+
+// Snapshot de estado por timeframe (campos planos: lo que cruza request.security)
+export type SMC_TFState
+    int    bias           = 0
+    float  lastBOSPrice   = na
+    int    lastBOSDir     = 0
+    int    lastBOSTime    = 0
+    float  lastCHoCHPrice = na
+    int    lastCHoCHDir   = 0
+    int    lastCHoCHTime  = 0
+    float  pdHigh         = na
+    float  pdLow          = na
+    float  ema20          = na
+    float  ema50          = na
+    float  ema200         = na
+
+// --- Helpers de arrays acotados [reglas-dev §1.6] ---
+// Tras cada push, si se supera el limite se descarta el mas antiguo (FIFO).
+export f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
+    array.push(a, z)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+
+export f_pushEvent(array<SMC_Event> a, SMC_Event e, int maxN) =>
+    array.push(a, e)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+
+export f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN) =>
+    array.push(a, s)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+
+export f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
+    array.push(a, p)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)

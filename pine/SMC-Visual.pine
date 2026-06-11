@@ -1,0 +1,154 @@
+// © Estrategia 2.0 — SMC Engine (Visual). Porta algoritmos del indicador
+// "Smart Money Concepts [LuxAlgo]" (CC BY-NC-SA 4.0, © LuxAlgo) — atribucion
+// obligatoria [D-PINE-06]. https://creativecommons.org/licenses/by-nc-sa/4.0/
+//@version=6
+indicator("SMC Engine — Visual", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500)
+
+// === INPUTS ===
+// Grupos canonicos (reglas-dev §1.3). Esqueleto: solo toggles base; cada
+// concepto añade su grupo en su tarea (T02+).
+GRP_STRUCT = "Estructura"
+GRP_PANEL  = "Panel"
+i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
+i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
+i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
+
+// === LIBRARY CORE ===
+// ---------------------------------------------------------------------------
+// Nucleo de deteccion SMC/ICT. BYTE-IDENTICO en SMC-Visual y SMC-Strategy
+// (lo vigila scripts/check-core-sync.ps1 — regla dura #2). El core NO dibuja y
+// NO llama request.security(): solo tipos, constantes y funciones puras
+// (entradas -> detecciones). La version exportable equivalente vive en
+// SMC-Library.pine [D-PINE-01]. Esqueleto F1-S1.1-T01: tipos + constantes +
+// arrays acotados; las f_detect*/f_compute* se añaden en T02+.
+// ---------------------------------------------------------------------------
+// Constantes 'kind' por categoria [reglas-dev §1.2 · PINE-PLAN §2]
+KIND_OB          = 1
+KIND_FVG         = 2
+KIND_BREAKER     = 3
+KIND_REJECTION   = 4
+KIND_MITIGATION  = 5
+KIND_OTE         = 6
+KIND_GP          = 7
+KIND_BOS          = 20
+KIND_CHOCH        = 21
+KIND_MSS          = 22
+KIND_SWEEP        = 23
+KIND_GRAB         = 24
+KIND_JUDAS        = 25
+KIND_DISPLACEMENT = 26
+KIND_IDM          = 27
+KIND_EMACROSS     = 28
+KIND_EMABOUNCE    = 29
+KIND_FLIP         = 30
+KIND_HH = 40
+KIND_HL = 41
+KIND_LH = 42
+KIND_LL = 43
+DIR_BULL     = 1
+DIR_BEAR     = -1
+ZS_ACTIVE    = 0
+ZS_PARTIAL   = 1
+ZS_MITIGATED = 2
+ZS_INVALID   = 3
+MAX_ZONES  = 50
+MAX_EVENTS = 100
+MAX_SWINGS = 100
+MAX_POOLS  = 50
+type SMC_Zone
+    float  top
+    float  bottom
+    int    dir
+    int    barIdx
+    int    barTime
+    int    state        = 0
+    float  mitigatedPct = 0.0
+    string tf           = ""
+    int    kind         = 0
+type SMC_Event
+    float  price
+    int    dir
+    int    barIdx
+    int    barTime
+    string tf   = ""
+    int    kind = 0
+type SMC_Swing
+    float  price
+    int    barIdx
+    int    barTime
+    int    kind  = 0
+    bool   swept = false
+type SMC_Pool
+    float  level
+    int    dir
+    int    touches  = 1
+    int    barTime
+    bool   swept    = false
+    string tf       = ""
+type SMC_TFState
+    int    bias           = 0
+    float  lastBOSPrice   = na
+    int    lastBOSDir     = 0
+    int    lastBOSTime    = 0
+    float  lastCHoCHPrice = na
+    int    lastCHoCHDir   = 0
+    int    lastCHoCHTime  = 0
+    float  pdHigh         = na
+    float  pdLow          = na
+    float  ema20          = na
+    float  ema50          = na
+    float  ema200         = na
+f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
+    array.push(a, z)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+f_pushEvent(array<SMC_Event> a, SMC_Event e, int maxN) =>
+    array.push(a, e)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN) =>
+    array.push(a, s)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
+    array.push(a, p)
+    if array.size(a) > maxN
+        array.shift(a)
+    array.size(a)
+
+// === DETECCIÓN TF PROPIO ===
+// Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
+// Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
+var array<SMC_Swing> SMC_swings = array.new<SMC_Swing>()
+var array<SMC_Event> SMC_events = array.new<SMC_Event>()
+var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
+var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
+
+// === MTF ===
+// request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
+
+// === DIBUJO ===
+// f_draw<Concepto>() por concepto, cada uno con su cuota de objetos
+// [PINE-PLAN §5]. Pendiente T02+.
+
+// === PANEL ===
+// Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
+// globales. El panel completo (PINE-PLAN §5) llega en T14.
+if i_showPanel and barstate.islast
+    var table panel = table.new(position.top_right, 2, 5, border_width = 1)
+    table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "esqueleto T01",       text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 0, 1, "Swings",  text_color = color.gray)
+    table.cell(panel, 1, 1, str.tostring(array.size(SMC_swings)), text_color = color.gray)
+    table.cell(panel, 0, 2, "Eventos", text_color = color.gray)
+    table.cell(panel, 1, 2, str.tostring(array.size(SMC_events)), text_color = color.gray)
+    table.cell(panel, 0, 3, "Zonas",   text_color = color.gray)
+    table.cell(panel, 1, 3, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
+    table.cell(panel, 0, 4, "Pools",   text_color = color.gray)
+    table.cell(panel, 1, 4, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
+
+// === ALERTAS ===
+// alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).
