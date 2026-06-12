@@ -78,8 +78,9 @@ export type SMC_Swing
     float  price
     int    barIdx
     int    barTime
-    int    kind  = 0
-    bool   swept = false
+    int    kind   = 0
+    bool   swept  = false
+    bool   isHigh = false
 
 // Pool de liquidez (EQH/EQL clusterizados)
 export type SMC_Pool
@@ -130,3 +131,43 @@ export f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
+
+// --- Deteccion / clasificacion de swings [reglas-smc-ict §1.1/§1.2] ---
+// Espejo exacto del detector golden scripts/ver05/detect.py (ADR-002). Pivote
+// ESTRICTO a ambos lados; igualdad => no swing. Anti-repaint: el llamador
+// evalua bajo barstate.isconfirmed. Polaridad en isHigh; kind (HH/HL/LH/LL) lo
+// pone f_classifySwing (0 si no hay previo del mismo tipo o hay empate exacto).
+export f_detectSwings(int len) =>
+    SMC_Swing s = na
+    bool isH = not na(high[len])
+    bool isL = not na(low[len])
+    float ch = high[len]
+    float cl = low[len]
+    for k = 1 to len
+        if na(high[len + k]) or na(high[len - k]) or ch <= high[len + k] or ch <= high[len - k]
+            isH := false
+        if na(low[len + k]) or na(low[len - k]) or cl >= low[len + k] or cl >= low[len - k]
+            isL := false
+    if isH
+        s := SMC_Swing.new(price = high[len], barIdx = bar_index[len], barTime = time[len], isHigh = true)
+    else if isL
+        s := SMC_Swing.new(price = low[len], barIdx = bar_index[len], barTime = time[len], isHigh = false)
+    s
+
+export f_classifySwing(SMC_Swing swing, array<SMC_Swing> prevSwings) =>
+    int kind = 0
+    if not na(swing)
+        float prevPrice = na
+        int n = array.size(prevSwings)
+        if n > 0
+            for i = n - 1 to 0
+                SMC_Swing p = array.get(prevSwings, i)
+                if p.isHigh == swing.isHigh
+                    prevPrice := p.price
+                    break
+        if not na(prevPrice)
+            if swing.isHigh
+                kind := swing.price > prevPrice ? KIND_HH : swing.price < prevPrice ? KIND_LH : 0
+            else
+                kind := swing.price > prevPrice ? KIND_HL : swing.price < prevPrice ? KIND_LL : 0
+    kind
