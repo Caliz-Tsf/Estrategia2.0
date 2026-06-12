@@ -12,6 +12,7 @@ GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
+i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -119,6 +120,43 @@ f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
         array.shift(a)
     array.size(a)
 
+// --- Swings + clasificacion HH/HL/LH/LL [reglas-smc-ict §1.1/§1.2] · T02 ---
+// f_detectSwings: pivote simetrico estricto. high[len] > high de las len velas a
+// cada lado (low simetrico). Equivale a ta.pivothigh/low(len, len). Confirmado al
+// cierre de la vela t+len -> latencia len velas, cero repaint [§1.1]. Devuelve
+// [precioHigh, precioLow] del pivote centrado len velas atras; na si no hay.
+f_detectSwings(int len) =>
+    [ta.pivothigh(len, len), ta.pivotlow(len, len)]
+
+// f_classifySwing: etiqueta el swing recien confirmado contra el swing previo del
+// MISMO tipo (high vs high, low vs low) [§1.2]. isHigh = true si es swing high.
+// Recorre los swings almacenados de atras hacia adelante hasta el ultimo del mismo
+// tipo. Igualdad exacta de precio: no reclasifica -> hereda el kind previo
+// (candidato EQH/EQL). Primer swing del tipo (sin referencia): seed HH/LL.
+// INVARIANTE [T02 · obs. validador 97/100]: la clasificacion filtra por tipo
+// (sHigh == isHigh), asi que un swing high y un swing low confirmados en la MISMA
+// vela t (caso spike, casi imposible con swingLen=5 en H1) se etiquetan de forma
+// independiente y NO interfieren. No se asume alternancia high/low aguas abajo:
+// BOS/CHoCH/MSS/EQH/EQL leen por tipo. Anotado para revision Fable pre-Fase 4
+// (docs/notas-revision-fable.md) por paridad MQL5 (golden tests, ADR-002).
+f_classifySwing(bool isHigh, float price, array<SMC_Swing> swings) =>
+    int   prevKind  = na
+    float prevPrice = na
+    if array.size(swings) > 0
+        for i = array.size(swings) - 1 to 0
+            SMC_Swing s = array.get(swings, i)
+            bool sHigh = s.kind == KIND_HH or s.kind == KIND_LH
+            if sHigh == isHigh
+                prevKind  := s.kind
+                prevPrice := s.price
+                break
+    int kind = na
+    if isHigh
+        kind := na(prevPrice) ? KIND_HH : price > prevPrice ? KIND_HH : price < prevPrice ? KIND_LH : prevKind
+    else
+        kind := na(prevPrice) ? KIND_LL : price > prevPrice ? KIND_HL : price < prevPrice ? KIND_LL : prevKind
+    kind
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -127,12 +165,45 @@ var array<SMC_Event> SMC_events = array.new<SMC_Event>()
 var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 
+// --- Swings [T02] ---
+// pivothigh/low(len,len) recien confirma len velas tras el pivote -> el guard
+// barstate.isconfirmed evita actuar sobre la vela en formacion (anti-repaint
+// [§1.1]). El swing pertenece a la vela t = bar_index - len; clasificar ANTES de
+// hacer push (f_classifySwing lee el swing previo del mismo tipo ya almacenado).
+[swingHigh, swingLow] = f_detectSwings(i_swingLen)
+newSwingHigh = barstate.isconfirmed and not na(swingHigh)
+newSwingLow  = barstate.isconfirmed and not na(swingLow)
+int swingHighKind = na
+int swingLowKind  = na
+if newSwingHigh
+    swingHighKind := f_classifySwing(true, swingHigh, SMC_swings)
+    f_pushSwing(SMC_swings, SMC_Swing.new(swingHigh, bar_index - i_swingLen, time[i_swingLen], swingHighKind, false), MAX_SWINGS)
+if newSwingLow
+    swingLowKind := f_classifySwing(false, swingLow, SMC_swings)
+    f_pushSwing(SMC_swings, SMC_Swing.new(swingLow, bar_index - i_swingLen, time[i_swingLen], swingLowKind, false), MAX_SWINGS)
+
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
 
 // === DIBUJO ===
-// f_draw<Concepto>() por concepto, cada uno con su cuota de objetos
-// [PINE-PLAN §5]. Pendiente T02+.
+// f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
+// f_drawSwing: etiqueta flotante HH/HL/LH/LL en la vela del pivote. Estructura
+// alcista (HH/HL) en verde-azulado, bajista (LH/LL) en rojo. style_label_down
+// sobre swing highs (texto colgando bajo el techo), style_label_up bajo lows.
+f_drawSwing(int barIdx, float price, int kind) =>
+    bool isHigh = kind == KIND_HH or kind == KIND_LH
+    [txt, col] = switch kind
+        KIND_HH => ["HH", color.teal]
+        KIND_HL => ["HL", color.teal]
+        KIND_LH => ["LH", color.red]
+        KIND_LL => ["LL", color.red]
+        => ["?", color.gray]
+    label.new(barIdx, price, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.gray, 100), textcolor = col, size = size.small)
+
+if i_showSwings and newSwingHigh
+    f_drawSwing(bar_index - i_swingLen, swingHigh, swingHighKind)
+if i_showSwings and newSwingLow
+    f_drawSwing(bar_index - i_swingLen, swingLow, swingLowKind)
 
 // === PANEL ===
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
@@ -140,7 +211,7 @@ var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 if i_showPanel and barstate.islast
     var table panel = table.new(position.top_right, 2, 5, border_width = 1)
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "esqueleto T01",       text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "swings T02",          text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Swings",  text_color = color.gray)
     table.cell(panel, 1, 1, str.tostring(array.size(SMC_swings)), text_color = color.gray)
     table.cell(panel, 0, 2, "Eventos", text_color = color.gray)

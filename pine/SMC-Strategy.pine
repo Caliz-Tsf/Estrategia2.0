@@ -119,6 +119,43 @@ f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
         array.shift(a)
     array.size(a)
 
+// --- Swings + clasificacion HH/HL/LH/LL [reglas-smc-ict §1.1/§1.2] · T02 ---
+// f_detectSwings: pivote simetrico estricto. high[len] > high de las len velas a
+// cada lado (low simetrico). Equivale a ta.pivothigh/low(len, len). Confirmado al
+// cierre de la vela t+len -> latencia len velas, cero repaint [§1.1]. Devuelve
+// [precioHigh, precioLow] del pivote centrado len velas atras; na si no hay.
+f_detectSwings(int len) =>
+    [ta.pivothigh(len, len), ta.pivotlow(len, len)]
+
+// f_classifySwing: etiqueta el swing recien confirmado contra el swing previo del
+// MISMO tipo (high vs high, low vs low) [§1.2]. isHigh = true si es swing high.
+// Recorre los swings almacenados de atras hacia adelante hasta el ultimo del mismo
+// tipo. Igualdad exacta de precio: no reclasifica -> hereda el kind previo
+// (candidato EQH/EQL). Primer swing del tipo (sin referencia): seed HH/LL.
+// INVARIANTE [T02 · obs. validador 97/100]: la clasificacion filtra por tipo
+// (sHigh == isHigh), asi que un swing high y un swing low confirmados en la MISMA
+// vela t (caso spike, casi imposible con swingLen=5 en H1) se etiquetan de forma
+// independiente y NO interfieren. No se asume alternancia high/low aguas abajo:
+// BOS/CHoCH/MSS/EQH/EQL leen por tipo. Anotado para revision Fable pre-Fase 4
+// (docs/notas-revision-fable.md) por paridad MQL5 (golden tests, ADR-002).
+f_classifySwing(bool isHigh, float price, array<SMC_Swing> swings) =>
+    int   prevKind  = na
+    float prevPrice = na
+    if array.size(swings) > 0
+        for i = array.size(swings) - 1 to 0
+            SMC_Swing s = array.get(swings, i)
+            bool sHigh = s.kind == KIND_HH or s.kind == KIND_LH
+            if sHigh == isHigh
+                prevKind  := s.kind
+                prevPrice := s.price
+                break
+    int kind = na
+    if isHigh
+        kind := na(prevPrice) ? KIND_HH : price > prevPrice ? KIND_HH : price < prevPrice ? KIND_LH : prevKind
+    else
+        kind := na(prevPrice) ? KIND_LL : price > prevPrice ? KIND_HL : price < prevPrice ? KIND_LL : prevKind
+    kind
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -126,6 +163,19 @@ var array<SMC_Swing> SMC_swings = array.new<SMC_Swing>()
 var array<SMC_Event> SMC_events = array.new<SMC_Event>()
 var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
+
+// --- Swings [T02] ---
+// Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_swings
+// para el scoring (Sprint 2.1). Guard barstate.isconfirmed = anti-repaint [§1.1].
+[swingHigh, swingLow] = f_detectSwings(i_swingLen)
+newSwingHigh = barstate.isconfirmed and not na(swingHigh)
+newSwingLow  = barstate.isconfirmed and not na(swingLow)
+if newSwingHigh
+    int k = f_classifySwing(true, swingHigh, SMC_swings)
+    f_pushSwing(SMC_swings, SMC_Swing.new(swingHigh, bar_index - i_swingLen, time[i_swingLen], k, false), MAX_SWINGS)
+if newSwingLow
+    int k = f_classifySwing(false, swingLow, SMC_swings)
+    f_pushSwing(SMC_swings, SMC_Swing.new(swingLow, bar_index - i_swingLen, time[i_swingLen], k, false), MAX_SWINGS)
 
 // === MTF ===
 // request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
@@ -147,7 +197,7 @@ var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 if barstate.islastconfirmedhistory
     var label lbl = na
     label.delete(lbl)
-    lbl := label.new(bar_index, high, "SMC Strategy — esqueleto T01\nswings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    lbl := label.new(bar_index, high, "SMC Strategy — swings T02\nswings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.
