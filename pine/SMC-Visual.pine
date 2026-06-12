@@ -223,6 +223,26 @@ f_detectStructure(SMC_Structure st, int breakBarIdx, int breakTime, bool okHigh,
         ev := SMC_Event.new(st.lowLevel, DIR_BEAR, breakBarIdx, breakTime, "", tag)
     ev
 
+// f_updateTFState: consolida la ultima ruptura estructural de escala SWING en el
+// snapshot SMC_TFState (bias headline + ultimo BOS y ultimo CHoCH). Es el formato
+// PLANO que cruzara request.security al MTF [Sprint 1.4] y alimentara el scoring
+// [Sprint 2.1] (los UDT no viajan por security; ver PINE-PLAN §4). Solo entra el
+// evento de escala SWING -> una ruptura INTERNA no toca el bias mayor [§1.4]. El
+// bias = ev.dir (ya sincronizado con structSwing.bias tras f_detectStructure). ev =
+// evento swing (na si no hubo ruptura en la barra). Devuelve el state mutado.
+f_updateTFState(SMC_TFState state, SMC_Event ev) =>
+    if not na(ev)
+        state.bias := ev.dir
+        if ev.kind == KIND_BOS
+            state.lastBOSPrice := ev.price
+            state.lastBOSDir   := ev.dir
+            state.lastBOSTime  := ev.barTime
+        else if ev.kind == KIND_CHOCH
+            state.lastCHoCHPrice := ev.price
+            state.lastCHoCHDir   := ev.dir
+            state.lastCHoCHTime  := ev.barTime
+    state
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -254,6 +274,11 @@ if newSwingLow
 var SMC_Structure structSwing    = SMC_Structure.new()
 var SMC_Structure structInternal = SMC_Structure.new()
 
+// Snapshot consolidado del bias del TF propio [T04]. Se alimenta SOLO del evento de
+// escala swing (structSwing) -> el bias mayor; lo que el MTF exporta [Sprint 1.4] y
+// el scoring lee [Sprint 2.1]. structInternal queda fuera (no voltea el bias, §1.4).
+var SMC_TFState chartState = SMC_TFState.new()
+
 // Pivotes internos (los swing ya se calcularon arriba). Mismo guard anti-repaint.
 [internalHigh, internalLow] = f_detectSwings(i_internalLen)
 newInternalHigh = barstate.isconfirmed and not na(internalHigh)
@@ -283,6 +308,8 @@ if barstate.isconfirmed
         f_pushEvent(SMC_events, evStructSwing, MAX_EVENTS)
     if not na(evStructInt)
         f_pushEvent(SMC_events, evStructInt, MAX_EVENTS)
+    // Consolidar el bias del TF tras la posible ruptura swing de esta barra [T04].
+    f_updateTFState(chartState, evStructSwing)
 
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
@@ -330,10 +357,10 @@ if i_showInternal and not na(evStructInt)
 // globales. El panel completo (PINE-PLAN §5) llega en T14.
 if i_showPanel and barstate.islast
     var table panel = table.new(position.top_right, 2, 6, border_width = 1)
-    string biasTxt = structSwing.bias == DIR_BULL ? "Alcista" : structSwing.bias == DIR_BEAR ? "Bajista" : "—"
-    color  biasCol = structSwing.bias == DIR_BULL ? color.teal : structSwing.bias == DIR_BEAR ? color.red : color.gray
+    string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
+    color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "estructura T03",      text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "bias TF T04",         text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Bias",    text_color = color.gray)
     table.cell(panel, 1, 1, biasTxt, text_color = biasCol)
     table.cell(panel, 0, 2, "Swings",  text_color = color.gray)

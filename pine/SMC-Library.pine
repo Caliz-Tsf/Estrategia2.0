@@ -215,3 +215,19 @@ export f_detectStructure(SMC_Structure st, int breakBarIdx, int breakTime, bool 
         st.bias        := DIR_BEAR
         ev := SMC_Event.new(st.lowLevel, DIR_BEAR, breakBarIdx, breakTime, "", tag)
     ev
+
+// Consolida la ultima ruptura SWING en el snapshot plano SMC_TFState (bias + ultimo
+// BOS/CHoCH): lo que cruza request.security al MTF y alimenta el scoring. Solo el
+// evento swing -> la ruptura interna no voltea el bias mayor [§1.4].
+export f_updateTFState(SMC_TFState state, SMC_Event ev) =>
+    if not na(ev)
+        state.bias := ev.dir
+        if ev.kind == KIND_BOS
+            state.lastBOSPrice := ev.price
+            state.lastBOSDir   := ev.dir
+            state.lastBOSTime  := ev.barTime
+        else if ev.kind == KIND_CHOCH
+            state.lastCHoCHPrice := ev.price
+            state.lastCHoCHDir   := ev.dir
+            state.lastCHoCHTime  := ev.barTime
+    state
