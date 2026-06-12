@@ -13,6 +13,8 @@ i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
+i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
+i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -157,6 +159,70 @@ f_classifySwing(bool isHigh, float price, array<SMC_Swing> swings) =>
         kind := na(prevPrice) ? KIND_LL : price > prevPrice ? KIND_HL : price < prevPrice ? KIND_LL : prevKind
     kind
 
+// --- Estructura de mercado: BOS / CHoCH [reglas-smc-ict §1.3/§1.4] · T03 ---
+// Modelo de bias estructural (reglas, seccion "Modelo de bias estructural"): por
+// escala se mantiene el ultimo swing high y el ultimo swing low confirmados
+// (highLevel/lowLevel) con un flag 'crossed' que evita re-disparar sobre el mismo
+// nivel, y un 'bias' (+1/-1) fijado por la ultima ruptura. La distincion BOS vs
+// CHoCH la da el bias vigente al romper [reglas §1.3/§1.4]:
+//   - close rompe el nivel que EXTIENDE la tendencia -> BOS  (continuacion).
+//   - close rompe el nivel que PROTEGE  la tendencia -> CHoCH (cambio de caracter).
+// Ruptura por CIERRE estricto (close > highLevel / close < lowLevel), NO por mecha
+// [§1.3]; el flag 'crossed' replica el 'topBroken/btmBroken' del oraculo de paridad
+// scripts/ver05/detect.py (ADR-002) y el 'pivot.crossed' de LuxAlgo displayStructure
+// (ref :551-612, v5->v6). El guard barstate.isconfirmed (en DETECCION) hace que el
+// cierre que rompe sea definitivo -> anti-repaint [D-PINE-03]. Escala swing
+// (swingLen) y escala interna (internalLen) se trackean en SMC_Structure separados;
+// el bias mayor es el de la escala swing: una ruptura INTERNA no voltea el bias swing
+// [§1.4]. okHigh/okLow permiten el guard de nivel-distinto del interno (no duplicar
+// la senal swing cuando el pivote interno coincide, cf. LuxAlgo extraCondition
+// internalHigh.currentLevel != swingHigh.currentLevel).
+type SMC_Structure
+    float highLevel   = na
+    int   highBarIdx  = na
+    int   highTime    = na
+    bool  highCrossed = false
+    float lowLevel    = na
+    int   lowBarIdx   = na
+    int   lowTime     = na
+    bool  lowCrossed  = false
+    int   bias        = 0
+
+// f_setStructureHigh/Low: fija un swing recien confirmado como nivel estructural
+// vigente y resetea 'crossed' (nivel fresco, aun no roto). Por construccion del
+// pivote, el close de la barra de confirmacion nunca rompe el nivel recien fijado.
+f_setStructureHigh(SMC_Structure st, float price, int barIdx, int barTime) =>
+    st.highLevel   := price
+    st.highBarIdx  := barIdx
+    st.highTime    := barTime
+    st.highCrossed := false
+
+f_setStructureLow(SMC_Structure st, float price, int barIdx, int barTime) =>
+    st.lowLevel   := price
+    st.lowBarIdx  := barIdx
+    st.lowTime    := barTime
+    st.lowCrossed := false
+
+// f_detectStructure: evalua ruptura por cierre del nivel estructural vigente y, si
+// hay, muta el estado (crossed + bias) y devuelve el SMC_Event (na si no hay).
+// Prioriza el lado alcista (else-if): un mismo close no puede superar el highLevel y
+// perforar el lowLevel salvo niveles invertidos, caso que no ocurre con estructura
+// sana; el oraculo ver05 usa dos if separados y produce la misma lista en la ventana
+// validada. price = nivel roto; barIdx/barTime = barra de ruptura; kind = BOS|CHoCH.
+f_detectStructure(SMC_Structure st, int breakBarIdx, int breakTime, bool okHigh, bool okLow) =>
+    SMC_Event ev = na
+    if okHigh and not na(st.highLevel) and not st.highCrossed and close > st.highLevel
+        int tag = st.bias == DIR_BEAR ? KIND_CHOCH : KIND_BOS
+        st.highCrossed := true
+        st.bias        := DIR_BULL
+        ev := SMC_Event.new(st.highLevel, DIR_BULL, breakBarIdx, breakTime, "", tag)
+    else if okLow and not na(st.lowLevel) and not st.lowCrossed and close < st.lowLevel
+        int tag = st.bias == DIR_BULL ? KIND_CHOCH : KIND_BOS
+        st.lowCrossed := true
+        st.bias        := DIR_BEAR
+        ev := SMC_Event.new(st.lowLevel, DIR_BEAR, breakBarIdx, breakTime, "", tag)
+    ev
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -182,6 +248,42 @@ if newSwingLow
     swingLowKind := f_classifySwing(false, swingLow, SMC_swings)
     f_pushSwing(SMC_swings, SMC_Swing.new(swingLow, bar_index - i_swingLen, time[i_swingLen], swingLowKind, false), MAX_SWINGS)
 
+// --- Estructura BOS/CHoCH [T03] ---
+// Estado estructural persistente por escala. structSwing = bias mayor (headline);
+// structInternal = estructura fina (internalLen), no voltea el bias swing [§1.4].
+var SMC_Structure structSwing    = SMC_Structure.new()
+var SMC_Structure structInternal = SMC_Structure.new()
+
+// Pivotes internos (los swing ya se calcularon arriba). Mismo guard anti-repaint.
+[internalHigh, internalLow] = f_detectSwings(i_internalLen)
+newInternalHigh = barstate.isconfirmed and not na(internalHigh)
+newInternalLow  = barstate.isconfirmed and not na(internalLow)
+
+// Fijar el swing recien confirmado como nivel estructural vigente (anclado a t).
+if newSwingHigh
+    f_setStructureHigh(structSwing, swingHigh, bar_index - i_swingLen, time[i_swingLen])
+if newSwingLow
+    f_setStructureLow(structSwing, swingLow, bar_index - i_swingLen, time[i_swingLen])
+if newInternalHigh
+    f_setStructureHigh(structInternal, internalHigh, bar_index - i_internalLen, time[i_internalLen])
+if newInternalLow
+    f_setStructureLow(structInternal, internalLow, bar_index - i_internalLen, time[i_internalLen])
+
+// Ruptura estructural solo al cierre confirmado (anti-repaint [D-PINE-03]). El
+// interno usa guard de nivel-distinto: no duplica la senal cuando su pivote coincide
+// con el del swing (cf. LuxAlgo extraCondition).
+SMC_Event evStructSwing = na
+SMC_Event evStructInt   = na
+if barstate.isconfirmed
+    evStructSwing := f_detectStructure(structSwing, bar_index, time, true, true)
+    bool okIntHigh = structInternal.highLevel != structSwing.highLevel
+    bool okIntLow  = structInternal.lowLevel  != structSwing.lowLevel
+    evStructInt   := f_detectStructure(structInternal, bar_index, time, okIntHigh, okIntLow)
+    if not na(evStructSwing)
+        f_pushEvent(SMC_events, evStructSwing, MAX_EVENTS)
+    if not na(evStructInt)
+        f_pushEvent(SMC_events, evStructInt, MAX_EVENTS)
+
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
 
@@ -200,26 +302,48 @@ f_drawSwing(int barIdx, float price, int kind) =>
         => ["?", color.gray]
     label.new(barIdx, price, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.gray, 100), textcolor = col, size = size.small)
 
+// f_drawStructure: linea del nivel roto (origen pivote -> barra de ruptura) +
+// etiqueta BOS/CHoCH centrada sobre la linea (punto medio). Direccional: ruptura
+// alcista por ENCIMA del nivel (style_label_down), bajista por DEBAJO
+// (style_label_up). Alcista teal / bajista rojo; swing solido / interno punteado.
+f_drawStructure(int pivotBarIdx, float level, int breakBarIdx, int kind, int dir, bool internal) =>
+    col = dir == DIR_BULL ? color.teal : color.red
+    txt = kind == KIND_CHOCH ? "CHoCH" : "BOS"
+    line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = internal ? line.style_dashed : line.style_solid, width = internal ? 1 : 2)
+    int midIdx = math.round((pivotBarIdx + breakBarIdx) / 2.0)
+    label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 85), textcolor = col, size = internal ? size.tiny : size.small)
+
 if i_showSwings and newSwingHigh
     f_drawSwing(bar_index - i_swingLen, swingHigh, swingHighKind)
 if i_showSwings and newSwingLow
     f_drawSwing(bar_index - i_swingLen, swingLow, swingLowKind)
 
+if i_showStruct and not na(evStructSwing)
+    int originIdx = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
+    f_drawStructure(originIdx, evStructSwing.price, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, false)
+if i_showInternal and not na(evStructInt)
+    int originIdx = evStructInt.dir == DIR_BULL ? structInternal.highBarIdx : structInternal.lowBarIdx
+    f_drawStructure(originIdx, evStructInt.price, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, true)
+
 // === PANEL ===
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
 // globales. El panel completo (PINE-PLAN §5) llega en T14.
 if i_showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 5, border_width = 1)
+    var table panel = table.new(position.top_right, 2, 6, border_width = 1)
+    string biasTxt = structSwing.bias == DIR_BULL ? "Alcista" : structSwing.bias == DIR_BEAR ? "Bajista" : "—"
+    color  biasCol = structSwing.bias == DIR_BULL ? color.teal : structSwing.bias == DIR_BEAR ? color.red : color.gray
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "swings T02",          text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 0, 1, "Swings",  text_color = color.gray)
-    table.cell(panel, 1, 1, str.tostring(array.size(SMC_swings)), text_color = color.gray)
-    table.cell(panel, 0, 2, "Eventos", text_color = color.gray)
-    table.cell(panel, 1, 2, str.tostring(array.size(SMC_events)), text_color = color.gray)
-    table.cell(panel, 0, 3, "Zonas",   text_color = color.gray)
-    table.cell(panel, 1, 3, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
-    table.cell(panel, 0, 4, "Pools",   text_color = color.gray)
-    table.cell(panel, 1, 4, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
+    table.cell(panel, 1, 0, "estructura T03",      text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 0, 1, "Bias",    text_color = color.gray)
+    table.cell(panel, 1, 1, biasTxt, text_color = biasCol)
+    table.cell(panel, 0, 2, "Swings",  text_color = color.gray)
+    table.cell(panel, 1, 2, str.tostring(array.size(SMC_swings)), text_color = color.gray)
+    table.cell(panel, 0, 3, "Eventos", text_color = color.gray)
+    table.cell(panel, 1, 3, str.tostring(array.size(SMC_events)), text_color = color.gray)
+    table.cell(panel, 0, 4, "Zonas",   text_color = color.gray)
+    table.cell(panel, 1, 4, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
+    table.cell(panel, 0, 5, "Pools",   text_color = color.gray)
+    table.cell(panel, 1, 5, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).

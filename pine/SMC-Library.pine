@@ -167,3 +167,51 @@ export f_classifySwing(bool isHigh, float price, array<SMC_Swing> swings) =>
     else
         kind := na(prevPrice) ? KIND_LL : price > prevPrice ? KIND_HL : price < prevPrice ? KIND_LL : prevKind
     kind
+
+// --- Estructura de mercado: BOS / CHoCH [reglas-smc-ict §1.3/§1.4] · T03 ---
+// Modelo de bias estructural: por escala se mantiene el ultimo swing high y low
+// confirmados (highLevel/lowLevel) con flag 'crossed' (evita re-disparo sobre el
+// mismo nivel) y un 'bias' (+1/-1) fijado por la ultima ruptura. BOS vs CHoCH lo da
+// el bias vigente al romper [§1.3/§1.4]: romper el nivel que EXTIENDE -> BOS; el que
+// PROTEGE -> CHoCH. Ruptura por CIERRE estricto (no mecha); el flag 'crossed' replica
+// el oraculo de paridad scripts/ver05/detect.py (ADR-002) y LuxAlgo displayStructure
+// (:551-612, v5->v6). Anti-repaint [D-PINE-03] via barstate.isconfirmed en el consumidor.
+export type SMC_Structure
+    float highLevel   = na
+    int   highBarIdx  = na
+    int   highTime    = na
+    bool  highCrossed = false
+    float lowLevel    = na
+    int   lowBarIdx   = na
+    int   lowTime     = na
+    bool  lowCrossed  = false
+    int   bias        = 0
+
+// Fija un swing confirmado como nivel estructural vigente y resetea 'crossed'.
+export f_setStructureHigh(SMC_Structure st, float price, int barIdx, int barTime) =>
+    st.highLevel   := price
+    st.highBarIdx  := barIdx
+    st.highTime    := barTime
+    st.highCrossed := false
+
+export f_setStructureLow(SMC_Structure st, float price, int barIdx, int barTime) =>
+    st.lowLevel   := price
+    st.lowBarIdx  := barIdx
+    st.lowTime    := barTime
+    st.lowCrossed := false
+
+// Evalua ruptura por cierre del nivel vigente; muta estado (crossed+bias) y devuelve
+// el SMC_Event (na si no hay). okHigh/okLow = guard de nivel-distinto del interno.
+export f_detectStructure(SMC_Structure st, int breakBarIdx, int breakTime, bool okHigh, bool okLow) =>
+    SMC_Event ev = na
+    if okHigh and not na(st.highLevel) and not st.highCrossed and close > st.highLevel
+        int tag = st.bias == DIR_BEAR ? KIND_CHOCH : KIND_BOS
+        st.highCrossed := true
+        st.bias        := DIR_BULL
+        ev := SMC_Event.new(st.highLevel, DIR_BULL, breakBarIdx, breakTime, "", tag)
+    else if okLow and not na(st.lowLevel) and not st.lowCrossed and close < st.lowLevel
+        int tag = st.bias == DIR_BULL ? KIND_CHOCH : KIND_BOS
+        st.lowCrossed := true
+        st.bias        := DIR_BEAR
+        ev := SMC_Event.new(st.lowLevel, DIR_BEAR, breakBarIdx, breakTime, "", tag)
+    ev
