@@ -8,9 +8,12 @@ strategy("SMC Engine — Strategy", overlay = true, initial_capital = 10000, def
 // Grupos canonicos (reglas-dev §1.3). Esqueleto: solo inputs base; el resto
 // (toggles por concepto, pesos w_* del scoring) llega en sus tareas.
 GRP_STRUCT = "Estructura"
+GRP_OB     = "Order Blocks"
 GRP_SCORE  = "Scoring"
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
+i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
+i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
 
 // === LIBRARY CORE ===
@@ -55,6 +58,7 @@ MAX_ZONES  = 50
 MAX_EVENTS = 100
 MAX_SWINGS = 100
 MAX_POOLS  = 50
+MAX_BARBUF = 500
 type SMC_Zone
     float  top
     float  bottom
@@ -240,6 +244,94 @@ f_updateTFState(SMC_TFState state, SMC_Event ev) =>
             state.lastCHoCHTime  := ev.barTime
     state
 
+// --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
+// Porta el algoritmo de Order Blocks de LuxAlgo (storeOrdeBlock :502-525,
+// deleteOrderBlocks :478-500; v5->v6). El OB es la vela origen del impulso que rompe
+// estructura: en ruptura ALCISTA, la vela de MINIMO de la pierna [pivote roto ->
+// ruptura]; en BAJISTA, la de MAXIMO. El SWAP high<->low en barras de alta
+// volatilidad ((hi-lo) >= highVolFactor*vol) excluye la vela de impulso -> el OB es la
+// ultima consolidacion ANTES del impulso. Zona = [low, high] de esa vela (obBounds
+// high/low, §2.1). En vez de referencia historica dinamica de series (fragil: RE10045
+// fuera de la historia cargada + sin equivalente MQL5), recorre buffers ROLLING de
+// barras (bHighs/bLows/bIdxs/bTimes/bVols, que el consumidor puebla cada barra
+// confirmada) -> runtime-safe y portable a golden tests MQL5 (ADR-002). Recorre el
+// buffer de atras hacia adelante incluyendo barras con originBarIdx <= barIdx <
+// ev.barIdx (excluye la barra de ruptura, igual que el slice de LuxAlgo). Solo con
+// ruptura CONFIRMADA -> no repinta [§2.1, D-PINE-03]. Devuelve SMC_Zone ZS_ACTIVE o na.
+// LIMITE: si originBarIdx (pivote roto) quedo a mas de MAX_BARBUF barras atras, sale del
+// buffer rolling y se devuelve na SIN aviso (~21 dias en H1). Replicar el limite en MQL5
+// (golden tests, ADR-002); si en Fase 3 estorba, subir MAX_BARBUF o loggear el miss.
+f_detectOB(SMC_Event ev, int originBarIdx, array<float> bHighs, array<float> bLows, array<int> bIdxs, array<int> bTimes, array<float> bVols, float highVolFactor, int kind) =>
+    SMC_Zone z = na
+    if not na(ev) and not na(originBarIdx)
+        int n = array.size(bIdxs)
+        int   bestPos = na
+        float bestVal = na
+        if n > 0
+            for p = n - 1 to 0
+                int bi = array.get(bIdxs, p)
+                if bi < originBarIdx
+                    break
+                if bi < ev.barIdx
+                    float hi = array.get(bHighs, p)
+                    float lo = array.get(bLows, p)
+                    bool hv = (hi - lo) >= (highVolFactor * array.get(bVols, p))
+                    if ev.dir == DIR_BULL
+                        float pv = hv ? hi : lo
+                        if na(bestVal) or pv < bestVal
+                            bestVal := pv
+                            bestPos := p
+                    else
+                        float pv = hv ? lo : hi
+                        if na(bestVal) or pv > bestVal
+                            bestVal := pv
+                            bestPos := p
+        if not na(bestPos)
+            z := SMC_Zone.new(array.get(bHighs, bestPos), array.get(bLows, bestPos), ev.dir, array.get(bIdxs, bestPos), array.get(bTimes, bestPos), ZS_ACTIVE, 0.0, "", kind)
+    z
+
+// f_updateZoneMitigation: maquina de estados de mitigacion/invalidacion del UDT
+// SMC_Zone [§2.1]. Mas rica que el borrado binario de LuxAlgo (deleteOrderBlocks
+// ref :481-500): cuatro estados + mitigatedPct. useClose = fuente (§2.1
+// obMitigation): true exige CIERRE dentro; false (HIGHLOW, default) basta la mecha.
+// OB ALCISTA (soporte, el precio entra desde arriba): borde cercano = top, borde
+// lejano/protector = bottom. PARCIAL si la fuente perfora el top sin llegar al
+// bottom (mitigatedPct = (top-src)/altura); MITIGADA si la fuente alcanza el bottom
+// (borde lejano, "hizo su trabajo"); INVALIDA si una vela CIERRA bajo el bottom
+// (borde protector roto -> candidato a Breaker §Tier2). Bajista simetrico (entra
+// desde abajo; protector = top; invalida si close > top). La invalidacion (close)
+// tiene prioridad sobre la mitigacion (mecha). ZS_INVALID es terminal; ZS_MITIGATED
+// no regresa a PARCIAL (guard state < ZS_MITIGATED) pero puede escalar a INVALID.
+// Anti-repaint: llamar dentro de barstate.isconfirmed.
+f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
+    if z.state != ZS_INVALID
+        float height = z.top - z.bottom
+        if z.dir == DIR_BULL
+            float src = useClose ? close : low
+            if close < z.bottom
+                z.state := ZS_INVALID
+                z.mitigatedPct := 1.0
+            else if src <= z.bottom
+                z.state := ZS_MITIGATED
+                z.mitigatedPct := 1.0
+            else if src < z.top
+                if z.state < ZS_MITIGATED
+                    z.state := ZS_PARTIAL
+                z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (z.top - src) / height : 0.0)
+        else
+            float src = useClose ? close : high
+            if close > z.top
+                z.state := ZS_INVALID
+                z.mitigatedPct := 1.0
+            else if src >= z.top
+                z.state := ZS_MITIGATED
+                z.mitigatedPct := 1.0
+            else if src > z.bottom
+                if z.state < ZS_MITIGATED
+                    z.state := ZS_PARTIAL
+                z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
+    z
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -300,6 +392,42 @@ if barstate.isconfirmed
     // Consolidar el bias del TF tras la posible ruptura swing de esta barra [T04].
     f_updateTFState(chartState, evStructSwing)
 
+// --- Order Blocks [T05] ---
+// Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra
+// confirmada y acotados a MAX_BARBUF: f_detectOB recorre estos arrays (acceso
+// estatico, sin referencia historica dinamica de series) -> runtime-safe (evita
+// RE10045) y portable a golden tests MQL5 (ADR-002). En barra confirmada: empuja la
+// barra al buffer, actualiza la mitigacion de las zonas vivas y, si hubo ruptura
+// SWING, detecta el OB de la pierna (origen = pivote roto, misma ancla que el dibujo
+// de estructura). Escala SWING (confluencia #19 OB chart); el OB interno reusa
+// f_detectOB con structInternal y queda para su tarea.
+var array<float> obBufHigh = array.new<float>()
+var array<float> obBufLow  = array.new<float>()
+var array<int>   obBufIdx  = array.new<int>()
+var array<int>   obBufTime = array.new<int>()
+var array<float> obBufVol  = array.new<float>()
+float volMeasure = ta.atr(200)
+if barstate.isconfirmed
+    array.push(obBufHigh, high)
+    array.push(obBufLow,  low)
+    array.push(obBufIdx,  bar_index)
+    array.push(obBufTime, time)
+    array.push(obBufVol,  volMeasure)
+    if array.size(obBufIdx) > MAX_BARBUF
+        array.shift(obBufHigh)
+        array.shift(obBufLow)
+        array.shift(obBufIdx)
+        array.shift(obBufTime)
+        array.shift(obBufVol)
+    if array.size(SMC_zones) > 0
+        for i = 0 to array.size(SMC_zones) - 1
+            f_updateZoneMitigation(array.get(SMC_zones, i), i_obMitClose)
+    if not na(evStructSwing)
+        int obOrigin = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
+        SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
+        if not na(obZone)
+            f_pushZone(SMC_zones, obZone, MAX_ZONES)
+
 // === MTF ===
 // request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
 
@@ -321,7 +449,7 @@ if barstate.islastconfirmedhistory
     var label lbl = na
     label.delete(lbl)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
-    lbl := label.new(bar_index, high, "SMC Strategy — bias TF T04\nbias=" + biasTxt + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    lbl := label.new(bar_index, high, "SMC Strategy — OB T05\nbias=" + biasTxt + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.

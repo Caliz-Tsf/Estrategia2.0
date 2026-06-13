@@ -50,6 +50,7 @@ export const int MAX_ZONES  = 50
 export const int MAX_EVENTS = 100
 export const int MAX_SWINGS = 100
 export const int MAX_POOLS  = 50
+export const int MAX_BARBUF = 500
 
 // --- UDTs (PINE-PLAN §2) ---
 // Zona con extension espacial (OB, FVG, Breaker, Rejection, OTE, Premium/Discount...)
@@ -231,3 +232,84 @@ export f_updateTFState(SMC_TFState state, SMC_Event ev) =>
             state.lastCHoCHDir   := ev.dir
             state.lastCHoCHTime  := ev.barTime
     state
+
+// --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
+// f_detectOB: porta el algoritmo OB de LuxAlgo (storeOrdeBlock :502-525,
+// deleteOrderBlocks :478-500; v5->v6). El OB es la vela origen del impulso que rompe
+// estructura: en ruptura ALCISTA, la vela de MINIMO de la pierna [pivote roto ->
+// ruptura]; en BAJISTA, la de MAXIMO. El SWAP high<->low en barras de alta volatilidad
+// ((hi-lo) >= highVolFactor*vol) excluye la vela de impulso -> el OB es la ultima
+// consolidacion ANTES del impulso. Zona = [low, high] de esa vela (obBounds high/low).
+// En vez de referencia historica dinamica de series (fragil: RE10045 fuera de historia
+// + sin equivalente MQL5), recorre buffers ROLLING de barras (que el consumidor puebla
+// cada barra confirmada) -> runtime-safe y portable a golden tests MQL5 (ADR-002).
+// Recorre el buffer incluyendo barras con originBarIdx <= barIdx < ev.barIdx (excluye
+// la barra de ruptura, igual que el slice de LuxAlgo). Solo con ruptura CONFIRMADA ->
+// no repinta [§2.1, D-PINE-03]. Devuelve SMC_Zone ZS_ACTIVE o na.
+// LIMITE: si originBarIdx (pivote roto) quedo a mas de MAX_BARBUF barras atras, sale del
+// buffer rolling y se devuelve na SIN aviso (~21 dias en H1). Replicar el limite en MQL5
+// (golden tests, ADR-002); si en Fase 3 estorba, subir MAX_BARBUF o loggear el miss.
+export f_detectOB(SMC_Event ev, int originBarIdx, array<float> bHighs, array<float> bLows, array<int> bIdxs, array<int> bTimes, array<float> bVols, float highVolFactor, int kind) =>
+    SMC_Zone z = na
+    if not na(ev) and not na(originBarIdx)
+        int n = array.size(bIdxs)
+        int   bestPos = na
+        float bestVal = na
+        if n > 0
+            for p = n - 1 to 0
+                int bi = array.get(bIdxs, p)
+                if bi < originBarIdx
+                    break
+                if bi < ev.barIdx
+                    float hi = array.get(bHighs, p)
+                    float lo = array.get(bLows, p)
+                    bool hv = (hi - lo) >= (highVolFactor * array.get(bVols, p))
+                    if ev.dir == DIR_BULL
+                        float pv = hv ? hi : lo
+                        if na(bestVal) or pv < bestVal
+                            bestVal := pv
+                            bestPos := p
+                    else
+                        float pv = hv ? lo : hi
+                        if na(bestVal) or pv > bestVal
+                            bestVal := pv
+                            bestPos := p
+        if not na(bestPos)
+            z := SMC_Zone.new(array.get(bHighs, bestPos), array.get(bLows, bestPos), ev.dir, array.get(bIdxs, bestPos), array.get(bTimes, bestPos), ZS_ACTIVE, 0.0, "", kind)
+    z
+
+// f_updateZoneMitigation: maquina de estados de mitigacion/invalidacion del UDT
+// SMC_Zone [§2.1] (mas rica que el borrado binario de LuxAlgo). useClose = fuente
+// (§2.1 obMitigation): true exige cierre dentro; false (HIGHLOW) basta la mecha. OB
+// alcista (soporte): cercano = top, lejano/protector = bottom. PARCIAL si la fuente
+// perfora el top sin llegar al bottom; MITIGADA al alcanzar el bottom; INVALIDA si
+// una vela CIERRA bajo el bottom (-> Breaker §Tier2). Bajista simetrico. Invalidacion
+// (close) prioritaria. ZS_INVALID terminal; ZS_MITIGATED no regresa a PARCIAL.
+export f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
+    if z.state != ZS_INVALID
+        float height = z.top - z.bottom
+        if z.dir == DIR_BULL
+            float src = useClose ? close : low
+            if close < z.bottom
+                z.state := ZS_INVALID
+                z.mitigatedPct := 1.0
+            else if src <= z.bottom
+                z.state := ZS_MITIGATED
+                z.mitigatedPct := 1.0
+            else if src < z.top
+                if z.state < ZS_MITIGATED
+                    z.state := ZS_PARTIAL
+                z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (z.top - src) / height : 0.0)
+        else
+            float src = useClose ? close : high
+            if close > z.top
+                z.state := ZS_INVALID
+                z.mitigatedPct := 1.0
+            else if src >= z.top
+                z.state := ZS_MITIGATED
+                z.mitigatedPct := 1.0
+            else if src > z.bottom
+                if z.state < ZS_MITIGATED
+                    z.state := ZS_PARTIAL
+                z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
+    z
