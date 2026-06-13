@@ -14,14 +14,11 @@ i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
-<<<<<<< HEAD
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
-=======
->>>>>>> 8cd3288ab0869058bd0f0d19ba7487354d0136ed
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -87,9 +84,8 @@ type SMC_Swing
     float  price
     int    barIdx
     int    barTime
-    int    kind   = 0
-    bool   swept  = false
-    bool   isHigh = false
+    int    kind  = 0
+    bool   swept = false
 type SMC_Pool
     float  level
     int    dir
@@ -131,7 +127,6 @@ f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
         array.shift(a)
     array.size(a)
 
-<<<<<<< HEAD
 // --- Swings + clasificacion HH/HL/LH/LL [reglas-smc-ict §1.1/§1.2] · T02 ---
 // f_detectSwings: pivote simetrico estricto. high[len] > high de las len velas a
 // cada lado (low simetrico). Equivale a ta.pivothigh/low(len, len). Confirmado al
@@ -341,66 +336,14 @@ f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
                 z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
     z
 
-=======
-// --- Deteccion de swings estructurales [reglas-smc-ict §1.1] ---
-// Pivote ESTRICTO: la barra 'len' atras es swing high si su high supera (>) el
-// high de las 'len' barras a cada lado; swing low si su low es menor (<).
-// Igualdad a cualquier lado => NO es swing (candidato EQH/EQL). Espejo exacto
-// del detector golden scripts/ver05/detect.py:pivots (ADR-002). Anti-repaint:
-// el llamador evalua bajo barstate.isconfirmed; el swing NACE 'len' barras
-// atras (latencia inherente = len, deseable) y sus coords son las de esa barra
-// central. Polaridad en isHigh; el kind (HH/HL/LH/LL) lo pone f_classifySwing.
-// Devuelve SMC_Swing nuevo o na (un centro no puede ser high y low a la vez).
-f_detectSwings(int len) =>
-    SMC_Swing s = na
-    bool isH = not na(high[len])
-    bool isL = not na(low[len])
-    float ch = high[len]
-    float cl = low[len]
-    for k = 1 to len
-        if na(high[len + k]) or na(high[len - k]) or ch <= high[len + k] or ch <= high[len - k]
-            isH := false
-        if na(low[len + k]) or na(low[len - k]) or cl >= low[len + k] or cl >= low[len - k]
-            isL := false
-    if isH
-        s := SMC_Swing.new(price = high[len], barIdx = bar_index[len], barTime = time[len], isHigh = true)
-    else if isL
-        s := SMC_Swing.new(price = low[len], barIdx = bar_index[len], barTime = time[len], isHigh = false)
-    s
-
-// --- Clasificacion HH/HL/LH/LL [reglas-smc-ict §1.2] ---
-// Compara el swing recien confirmado con el PREVIO DEL MISMO TIPO (high vs
-// high, low vs low) recorriendo prevSwings de atras hacia delante. HH/LH para
-// highs, HL/LL para lows. Sin previo del mismo tipo o igualdad exacta => 0 (no
-// reclasifica; candidato EQH/EQL, como 'H?'/'EQ-H' del golden detect.py). La
-// polaridad vive en swing.isHigh, no en el kind devuelto.
-f_classifySwing(SMC_Swing swing, array<SMC_Swing> prevSwings) =>
-    int kind = 0
-    if not na(swing)
-        float prevPrice = na
-        int n = array.size(prevSwings)
-        if n > 0
-            for i = n - 1 to 0
-                SMC_Swing p = array.get(prevSwings, i)
-                if p.isHigh == swing.isHigh
-                    prevPrice := p.price
-                    break
-        if not na(prevPrice)
-            if swing.isHigh
-                kind := swing.price > prevPrice ? KIND_HH : swing.price < prevPrice ? KIND_LH : 0
-            else
-                kind := swing.price > prevPrice ? KIND_HL : swing.price < prevPrice ? KIND_LL : 0
-    kind
-
->>>>>>> 8cd3288ab0869058bd0f0d19ba7487354d0136ed
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
+// Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
 var array<SMC_Swing> SMC_swings = array.new<SMC_Swing>()
 var array<SMC_Event> SMC_events = array.new<SMC_Event>()
 var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 
-<<<<<<< HEAD
 // --- Swings [T02] ---
 // pivothigh/low(len,len) recien confirma len velas tras el pivote -> el guard
 // barstate.isconfirmed evita actuar sobre la vela en formacion (anti-repaint
@@ -496,25 +439,11 @@ if barstate.isconfirmed
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
             f_pushZone(SMC_zones, obZone, MAX_ZONES)
-=======
-// Swings estructurales (escala swingLen). Solo en barra confirmada [D-PINE-03].
-// El swing nace i_swingLen barras atras; se clasifica contra los ya confirmados
-// (antes de apilarlo) y se apila FIFO. newSwing != na -> hubo swing esta barra
-// (lo usa el DIBUJO mas abajo). El BOS/CHoCH interno (internalLen) entra en T03.
-SMC_Swing newSwing = na
-if barstate.isconfirmed
-    SMC_Swing s = f_detectSwings(i_swingLen)
-    if not na(s)
-        s.kind := f_classifySwing(s, SMC_swings)
-        f_pushSwing(SMC_swings, s, MAX_SWINGS)
-        newSwing := s
->>>>>>> 8cd3288ab0869058bd0f0d19ba7487354d0136ed
 
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
 
 // === DIBUJO ===
-<<<<<<< HEAD
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
 // f_drawSwing: etiqueta flotante HH/HL/LH/LL en la vela del pivote. Estructura
 // alcista (HH/HL) en verde-azulado, bajista (LH/LL) en rojo. style_label_down
@@ -576,18 +505,6 @@ if i_showOB and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_OB and z.state != ZS_INVALID
                 array.push(SMC_obBoxes, f_drawOB(z))
-=======
-// f_draw<Concepto>() por concepto, cada uno con su cuota de objetos
-// [PINE-PLAN §5]. Solo Visual dibuja (D-PINE-01). Resto de conceptos: T03+.
-// Etiqueta del swing recien confirmado (HH/HL/LH/LL). Helper de display (no
-// pertenece al CORE). kind 0 (primer swing del tipo o empate) => sin etiqueta.
-f_swingTag(int kind) =>
-    kind == KIND_HH ? "HH" : kind == KIND_HL ? "HL" : kind == KIND_LH ? "LH" : kind == KIND_LL ? "LL" : ""
-if i_showSwings and not na(newSwing)
-    string tag = f_swingTag(newSwing.kind)
-    if tag != ""
-        label.new(chart.point.new(newSwing.barTime, na, newSwing.price), tag, xloc = xloc.bar_time, color = color(na), textcolor = newSwing.isHigh ? color.new(color.red, 0) : color.new(color.teal, 0), style = newSwing.isHigh ? label.style_label_down : label.style_label_up, size = size.tiny)
->>>>>>> 8cd3288ab0869058bd0f0d19ba7487354d0136ed
 
 // === PANEL ===
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
@@ -597,7 +514,6 @@ if i_showPanel and barstate.islast
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
     color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-<<<<<<< HEAD
     table.cell(panel, 1, 0, "OB T05",              text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Bias",    text_color = color.gray)
     table.cell(panel, 1, 1, biasTxt, text_color = biasCol)
@@ -609,17 +525,6 @@ if i_showPanel and barstate.islast
     table.cell(panel, 1, 4, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
     table.cell(panel, 0, 5, "Pools",   text_color = color.gray)
     table.cell(panel, 1, 5, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
-=======
-    table.cell(panel, 1, 0, "T02 swings",          text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 0, 1, "Swings",  text_color = color.gray)
-    table.cell(panel, 1, 1, str.tostring(array.size(SMC_swings)), text_color = color.gray)
-    table.cell(panel, 0, 2, "Eventos", text_color = color.gray)
-    table.cell(panel, 1, 2, str.tostring(array.size(SMC_events)), text_color = color.gray)
-    table.cell(panel, 0, 3, "Zonas",   text_color = color.gray)
-    table.cell(panel, 1, 3, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
-    table.cell(panel, 0, 4, "Pools",   text_color = color.gray)
-    table.cell(panel, 1, 4, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
->>>>>>> 8cd3288ab0869058bd0f0d19ba7487354d0136ed
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).
