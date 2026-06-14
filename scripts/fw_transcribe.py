@@ -19,8 +19,8 @@ def main():
                    choices=['tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'])
     p.add_argument('--language', default=None, help='Codigo de idioma (ej: es, en). None=autodetectar')
     p.add_argument('--output_dir', default='.', help='Directorio donde se escribe el .txt')
-    p.add_argument('--device', default='cpu', choices=['cuda', 'cpu'])
-    p.add_argument('--compute_type', default='int8',
+    p.add_argument('--device', default='cuda', choices=['cuda', 'cpu'])
+    p.add_argument('--compute_type', default='float16',
                    choices=['float16', 'int8_float16', 'int8', 'float32'])
     args = p.parse_args()
 
