@@ -15,12 +15,12 @@ Index del vault:
   D:\obsidian\boveda MENTE\Mente\Teoria SMC\Index.md
 
 Herramientas disponibles en PATH:
-  yt-dlp, ffmpeg, whisper
+  yt-dlp, ffmpeg, python (faster-whisper instalado — NO usar `whisper` CLI)
 
 === PASO 0: VERIFICAR HERRAMIENTAS ===
 
 Ejecuta en shell:
-  where.exe yt-dlp && where.exe ffmpeg && where.exe whisper
+  where.exe yt-dlp && where.exe ffmpeg && where.exe python
 
 Si alguno no responde: DETENTE y reporta cual falta. No continues.
 
@@ -36,6 +36,8 @@ Elige el modelo Whisper segun duracion:
   - duracion < 1200s -> modelo: small  (DEFAULT)
   - duracion >= 1200s -> modelo: medium
 
+Si duracion = NA o no disponible: usa modelo small y continua (no te detengas).
+Si titulo = NA o no disponible: usa el ID del video como titulo provisional.
 Si el usuario especifico un modelo (-Model), usalo en vez de la seleccion automatica.
 
 === PASO 2: EJECUTAR EL PIPELINE ===

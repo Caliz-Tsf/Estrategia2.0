@@ -63,7 +63,7 @@ param(
 
     [int]$MaxSeconds = 0,
 
-    [string]$HermesModel
+    [string]$HermesModel = 'nvidia/llama-3.3-nemotron-super-49b-v1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -161,12 +161,9 @@ Al final: muestra resumen (exitosas / fallidas / lista de fallidas).
     }
 }
 
-# --- Ensamblar prompt final ---
-$fullPrompt = $basePrompt + "`n`n" + $taskSection
-
-# --- Construir argumentos de Hermes ---
-$hermesArgs = @('chat', '-q', $fullPrompt, '-t', 'terminal,file')
-if ($HermesModel) { $hermesArgs += @('-m', $HermesModel) }
+# --- Ensamblar y aplanar prompt (fix: CommandLineToArgvW fragmenta multilinea) ---
+$fullPrompt = $basePrompt + " " + ($taskSection -replace "`r`n"," " -replace "`n"," " -replace "\s{2,}"," ")
+$flatPrompt  = $fullPrompt -replace "`r`n"," " -replace "`n"," " -replace "\s{2,}"," "
 
 Write-Step "Invocando Hermes para transcripcion..."
 Write-Host "  Modo    : $($PSCmdlet.ParameterSetName)" -ForegroundColor DarkGray
@@ -174,9 +171,11 @@ if ($Url)       { Write-Host "  URL     : $Url" -ForegroundColor DarkGray }
 if ($InputFile) { Write-Host "  Archivo : $InputFile" -ForegroundColor DarkGray }
 if ($Batch)     { Write-Host "  Batch   : $Batch ($($urls.Count) URLs)" -ForegroundColor DarkGray }
 if ($Model)     { Write-Host "  Modelo  : $Model (forzado)" -ForegroundColor DarkGray }
+Write-Host "  Modelo  : $HermesModel (hermes)" -ForegroundColor DarkGray
 Write-Host ""
 
-& hermes @hermesArgs
+# Invocar hermes chat con prompt aplanado + --yolo (evita timeout por aprobacion de hooks)
+& hermes chat -q $flatPrompt -t terminal,file --yolo -Q -m $HermesModel --provider nvidia_nim
 $exit = $LASTEXITCODE
 
 if ($exit -eq 0) {

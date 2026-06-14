@@ -13,7 +13,7 @@
     ANSI; caracteres no-ASCII romperian el parseo. El .md de SALIDA si va en
     UTF-8 con acentos (es contenido, no codigo).
 
-    Requisitos en PATH: yt-dlp, ffmpeg, whisper (openai-whisper).
+    Requisitos en PATH: yt-dlp, ffmpeg, python (con faster-whisper instalado).
 
     Codigos de salida: 0 OK | 1 error.
 
@@ -77,14 +77,19 @@ function Write-Ok($m)   { Write-Host "[OK] $m"  -ForegroundColor Green }
 function Write-Bad($m)  { Write-Host "[X]  $m"  -ForegroundColor Red }
 
 # --- 0. Verificar herramientas ---
-$tools = @('yt-dlp', 'ffmpeg', 'whisper')
+$tools = @('yt-dlp', 'ffmpeg', 'python')
 # yt-dlp solo es necesario si se usa -Url
-if ($PSCmdlet.ParameterSetName -eq 'File') { $tools = @('ffmpeg', 'whisper') }
+if ($PSCmdlet.ParameterSetName -eq 'File') { $tools = @('ffmpeg', 'python') }
 foreach ($t in $tools) {
     if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
-        Write-Bad "Falta '$t' en PATH. Requisitos: yt-dlp, ffmpeg, whisper (openai-whisper)."
+        Write-Bad "Falta '$t' en PATH. Requisitos: yt-dlp, ffmpeg, python (con faster-whisper)."
         exit 1
     }
+}
+$fwScript = Join-Path $PSScriptRoot 'fw_transcribe.py'
+if (-not (Test-Path -LiteralPath $fwScript)) {
+    Write-Bad "No existe scripts/fw_transcribe.py. Regenera el archivo."
+    exit 1
 }
 
 if (-not $WorkDir) { $WorkDir = Join-Path $env:TEMP 'smc-video' }
@@ -167,15 +172,14 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $wavPath)) {
 }
 Write-Ok "WAV: $wavPath"
 
-# --- 3. Whisper: transcribir ---
-Write-Step "Transcribiendo con Whisper (modelo=$Model)... (puede tardar)"
-$wArgs = @($wavPath, '--model', $Model, '--output_format', 'txt',
-           '--output_dir', $WorkDir, '--fp16', 'False', '--verbose', 'False')
+# --- 3. faster-whisper GPU: transcribir ---
+Write-Step "Transcribiendo con faster-whisper (modelo=$Model, CPU int8)... (puede tardar)"
+$wArgs = @($fwScript, $wavPath, '--model', $Model, '--output_dir', $WorkDir)
 if ($Language) { $wArgs += @('--language', $Language) }
-& whisper @wArgs
+& python @wArgs
 $txtPath = Join-Path $WorkDir "$slug.txt"
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $txtPath)) {
-    Write-Bad "Whisper no genero la transcripcion ($txtPath)."
+    Write-Bad "faster-whisper no genero la transcripcion ($txtPath)."
     exit 1
 }
 $transcriptRaw = Get-Content -LiteralPath $txtPath -Raw -Encoding UTF8
@@ -240,6 +244,6 @@ Write-Host "==========================================================" -Foregro
 Write-Host "  process-video OK" -ForegroundColor Green
 Write-Host "  Titulo : $title" -ForegroundColor Green
 Write-Host "  Nota   : $mdPath" -ForegroundColor Green
-Write-Host "  Modelo : $Model | Idioma: $langLabel" -ForegroundColor Green
+Write-Host "  Modelo : $Model (faster-whisper CPU int8) | Idioma: $langLabel" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 exit 0
