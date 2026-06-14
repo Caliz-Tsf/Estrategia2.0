@@ -279,7 +279,8 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 - ✓ FVG bajista 2026-06-01 14:00 GMT: gap **[1.16184, 1.16452]**, altura 2.45×ATR, CE **1.16318** (tras el MSS).
 - ✓ FVG bajista 2026-06-05 13:00 GMT: gap **[1.15998, 1.16345]**, altura 2.90×ATR, CE **1.16172** (impulso fuerte).
 - ✓ FVG alcista 2026-05-29 15:00 GMT: gap **[1.16532, 1.16673]**, altura 1.17×ATR, CE **1.16602**.
-- ✗ Contraejemplo (sub-umbral, se descarta): 2026-06-03 06:00 GMT gap bajista [1.16224, 1.16244] = 0.26×ATR — apenas roza el umbral; cualquier gap < 0.25×ATR (micro-ineficiencia) se descarta.
+- ✗ Contraejemplo (sub-umbral, se descarta): 2026-06-04 11:00 GMT gap alcista [1.16284, 1.16304] = **0.209×ATR** (< 0.25) — micro-ineficiencia: el filtro de tamaño la descarta, no se crea zona. (En la ventana 25-may→11-jun hay **33 gaps sub-umbral** como este, todos filtrados.)
+- ⓘ Caso de invalidación (NO de descarte): 2026-06-03 06:00 GMT gap bajista [1.16224, 1.16244] = **0.255×ATR** → **PASA** el filtro (≥0.25) y la zona SÍ se crea, pero `close 1.16164 < bottom 1.16224` la **invalida** (estado 3) y no se dibuja. Ilustra la máquina de mitigación, no el umbral. *(Caso corregido en Sesion-018: antes rotulado por error como "sub-umbral".)*
 
 ---
 

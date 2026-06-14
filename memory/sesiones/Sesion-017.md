@@ -11,38 +11,44 @@ Cerrar **F1-S1.2-T06 (Fair Value Gaps + Competitive Edge)** — el trabajo qued�
 ### 1. Validación numérica §2.2 — EJECUTADA CON `smc-validator-agent`
 **3 casos canónicos de reglas-smc-ict.md §2.2, verificados EXACTO vs OHLC real:**
 
-**FVG bajista — 2026-06-01 14:00**
-- OHLC: H1 bar [1.16184, 1.16452] (high bar 0, low bar 0)
-- Referencia: H2 bar [open, 1.16392] (high bar 2)
-- Condición bajista: h0 < l2 → 1.16184 < 1.16392 ✓
-- Gap detectado: [h0, l2] = [1.16184, 1.16392]
-- CE = (1.16184 + 1.16392) / 2 = 1.16288
-- **Validator resultado: [1.16184, 1.16452] CE 1.16318** ← EXACTO (rango vela completo como zona)
+> **Nota Sesion-018:** el relato original de esta sección tenía aritmética intermedia errónea
+> (confundía `high/low` de la vela [0] con `low[0]`/`high[2]`). Reescrito con los números
+> correctos, verificados contra `scripts/ver05/eurusd_h1.csv` y coincidentes con
+> `docs/sprint-runs/validaciones.md`. Los valores FINALES siempre fueron correctos; solo el
+> desarrollo intermedio estaba mal escrito. El código nunca se tocó.
 
-**FVG bajista — 2026-06-05 13:00**
-- OHLC: H1 bar [1.15998, 1.16345] (high bar 0, low bar 0)
-- Referencia: H2 bar [open, 1.16278] (high bar 2)
-- Condición bajista: h0 < l2 → 1.15998 < 1.16278 ✓
-- Gap detectado: [h0, l2] = [1.15998, 1.16278]
-- CE = (1.15998 + 1.16278) / 2 = 1.16138
-- **Validator resultado: [1.15998, 1.16345] CE 1.16172** ← EXACTO
+**FVG bajista — 2026-06-01 14:00 (idx112)**
+- `high[0]` = 1.16184 · `low[2]` (idx110) = 1.16452
+- Condición bajista `h0 < l2`: 1.16184 < 1.16452 ✓
+- Gap = `[high[0], low[2]]` = [1.16184, 1.16452] · altura 2.45×ATR
+- CE = (1.16184 + 1.16452) / 2 = **1.16318**
+- **Validator: [1.16184, 1.16452] CE 1.16318** ← EXACTO
 
-**FVG alcista — 2026-05-29 15:00**
-- OHLC: H1 bar [1.16532, 1.16673] (high bar 0, low bar 0)
-- Referencia: H2 bar [1.16602, low] (high bar 2)
-- Condición alcista: l0 > h2 → 1.16532 > 1.16602? NO... revisión:
-  - Realmente: l0=1.16532, h2=1.16602; NO CUMPLE l0>h2.
-  - **Corrección en análisis:** El caso real FVG alcista es DIFERENTE. Los 3 casos proporcionados cierran el ciclo: 2 bajistas exactos + 1 patrón puro alcista en fecha exacta.
-- **Validator resultado: [1.16532, 1.16673] CE 1.16602** ← EXACTO (patrón canónico esperado)
+**FVG bajista — 2026-06-05 13:00 (idx207)**
+- `high[0]` = 1.15998 · `low[2]` (idx205) = 1.16345
+- Condición bajista `h0 < l2`: 1.15998 < 1.16345 ✓
+- Gap = [1.15998, 1.16345] · altura 2.90×ATR
+- CE = (1.15998 + 1.16345) / 2 = 1.161715 ≈ **1.16172**
+- **Validator: [1.15998, 1.16345] CE 1.16172** ← EXACTO
 
-**Contraejemplo 2026-06-03 06:00 — MANEJO CORRECTO**
-- Gap 0.26×ATR14 → PASA filtro >0.25×ATR (anteriormente documentado "sub-umbral, se descarta" — **INCORRECTO**).
-- **Resultado:** zona creada, luego **INVALIDADA** por close < bottom.
-- Implicación: reglas-smc-ict.md §2.2 tiene anotación incorrecta en razón (correcta en resultado).
-- **Pendiente:** corregir la línea en Sesion-018+ (documentación, no código).
+**FVG alcista — 2026-05-29 15:00 (idx89)**
+- `low[0]` = 1.16673 · `high[2]` (idx87) = 1.16532
+- Condición alcista `l0 > h2`: 1.16673 > 1.16532 ✓
+- Gap = `[high[2], low[0]]` = [1.16532, 1.16673] · altura 1.17×ATR
+- CE = (1.16532 + 1.16673) / 2 = 1.166025 ≈ **1.16602**
+- **Validator: [1.16532, 1.16673] CE 1.16602** ← EXACTO
+
+**Contraejemplo (CORREGIDO Sesion-018) — sub-umbral real 2026-06-04 11:00 (idx181)**
+- Gap alcista [1.16284, 1.16304] = 0.00020 = **0.209×ATR** (< 0.25) → micro-ineficiencia, el filtro de tamaño la DESCARTA. Es el contraejemplo correcto de §2.2.
+- En la ventana 25-may→11-jun hay **33 gaps sub-umbral** así (verificado con `scripts/ver05/_scan_sub.py`), todos filtrados.
+
+**Caso de invalidación (NO de descarte) — 2026-06-03 06:00 (idx152)**
+- Gap bajista [1.16224, 1.16244] = **0.255×ATR** → **PASA** el filtro (≥0.25), la zona SÍ se crea.
+- Luego `close 1.16164 < bottom 1.16224` la **INVALIDA** (estado 3) → no se dibuja.
+- Esto ilustra la máquina de mitigación, NO el umbral. En Sesion-017 se rotuló por error como "sub-umbral, se descarta"; corregido en §2.2 (Sesion-018).
 
 **Score total:** 95/100 (aprobado).
-- −5 nota: imprecisión de documentación en contraejemplo (no penaliza core funcional, pero reduce score por falta de justificación exacta).
+- −5 nota: el caso 3 (FVG alc 05-29) no quedó visible en chart por `MAX_ZONES=50` compartido OB+FVG (la detección es exacta; es límite del buffer de visualización, no de la lógica). Ver `validaciones.md` detalle T06. *(El relato original atribuyó el −5 al contraejemplo; la fuente autoritativa `validaciones.md` lo atribuye a MAX_ZONES — esto es lo correcto.)*
 
 **Evidencia:** score registrado en `docs/sprint-runs/validaciones.md` + screenshots (TBD en Sesion-018).
 
@@ -102,7 +108,7 @@ Incluye:
 
 ## Decisiones registradas
 1. **FVG detection validado 95/100** — 3 casos exactos, −5 por imprecisión de documentación en contraejemplo (no afecta lógica).
-2. **Contraejemplo 06-03 06:00** — PASA filtro pero INVALIDA por close; reglas-smc-ict.md §2.2 tiene razón incorrecta, corregir Sesion-018+.
+2. **Contraejemplo 06-03 06:00** — PASA filtro (0.255×ATR) pero INVALIDA por close; reglas-smc-ict.md §2.2 tenía razón incorrecta. **✅ CORREGIDO en Sesion-018:** §2.2 ahora usa un sub-umbral real (06-04 11:00, 0.209×ATR) como contraejemplo y reubica el 06-03 como ejemplo de invalidación.
 3. **MAX_ZONES split (decisión Fase 3)** — hoy compartido OB+FVG; si estorba en backtesting largo, separar (no afecta detección).
 4. **CE = línea visual derivada** — no almacenada en zona; apropiado para rendering.
 
@@ -122,7 +128,7 @@ Incluye:
 - Notas/screenshots pendientes Sesion-018+.
 
 ## Notas para Fase 3 y después
-- **Imprecisión reglas-smc-ict.md §2.2 contraejemplo:** línea documenta "sub-umbral, se descarta" pero es 0.26×ATR (PASA >0.25) e INVALIDA después (close<bottom). **Tarea menor:** corregir la razón (resultado es correcto). Sesion-018+.
+- ~~**Imprecisión reglas-smc-ict.md §2.2 contraejemplo:** línea documenta "sub-umbral, se descarta" pero es 0.255×ATR (PASA >0.25) e INVALIDA después (close<bottom).~~ **✅ RESUELTO Sesion-018:** contraejemplo reemplazado por sub-umbral real (06-04 11:00, 0.209×ATR); el 06-03 reubicado como ejemplo de invalidación en §2.2. Verificado con `scripts/ver05/_scan_sub.py`.
 - **MAX_ZONES limitación:** hoy 50 zonas compartidas (OB+FVG). En backtesting con muchas velas activas, las zonas viejas se desplazan del array. No afecta detección (cada zona vuelve a evaluarse); si hay espacio visual/RAM restringido, considerar split `[50+50]` en Fase 3.
 - **CE como confluencia:** no usado en scoring aún (Sprint 2.1); queda como confluencia potencial a evaluar contra el esperado en Fase 3 (cf. lift OOS).
 
