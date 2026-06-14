@@ -313,3 +313,29 @@ export f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
                     z.state := ZS_PARTIAL
                 z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
     z
+
+// --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
+// f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
+// 3.a vela (la actual al confirmar) sobre offsets FIJOS [0] y [2] -> referencia
+// historica ESTATICA (no dinamica): RE10045-safe y trivial en MQL5 (rates[i-2]).
+// Funcion pura: recibe los 4 precios (h0/l0 vela actual, h2/l2 vela -2), no lee series
+// -> golden tests MQL5 directos (ADR-002). FVG alcista: low[0] > high[2] -> gap
+// [high[2], low[0]] (dir BULL); bajista: high[0] < low[2] -> gap [high[0], low[2]]
+// (dir BEAR). Mutuamente excluyentes (un mismo trio no es alcista y bajista a la vez).
+// Filtro de tamaño: altura >= threshold (modo fixed: 0.25*ATR14, el default validado y
+// congelado ADR-002; el modo auto de LuxAlgo es %-based y choca con la doctrina ATR
+// (regla dura #3) -> NO se porta, revisitar en Fase 3 solo si estorba). El CE (50% =
+// (top+bottom)/2) NO se almacena: se deriva de top/bottom en dibujo y scoring (#26
+// FVG-CE tocado). Mitigacion via la MISMA maquina f_updateZoneMitigation (§2.2 "igual
+// maquina de estados que el OB"). barIdx/barTime = 3.a vela (oraculo ver05 bars[i]['t']).
+// Anti-repaint: llamar en barstate.isconfirmed [§2.2, D-PINE-03]. NB: LuxAlgo usa
+// request.security(...lookahead_on) (:634, repinta) + filtro extra close>high[2]; aqui
+// NO (TF propio, sin lookahead; el oraculo solo exige gap + umbral). Devuelve SMC_Zone
+// ZS_ACTIVE o na.
+export f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTime, float threshold, int kind) =>
+    SMC_Zone z = na
+    if l0 > h2 and (l0 - h2) >= threshold
+        z := SMC_Zone.new(l0, h2, DIR_BULL, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
+    else if h0 < l2 and (l2 - h0) >= threshold
+        z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
+    z

@@ -9,11 +9,13 @@ strategy("SMC Engine — Strategy", overlay = true, initial_capital = 10000, def
 // (toggles por concepto, pesos w_* del scoring) llega en sus tareas.
 GRP_STRUCT = "Estructura"
 GRP_OB     = "Order Blocks"
+GRP_FVG    = "Fair Value Gaps"
 GRP_SCORE  = "Scoring"
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
+i_fvgThreshold = input.float(0.25, "Umbral tamaño FVG (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
 
 // === LIBRARY CORE ===
@@ -332,6 +334,32 @@ f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
                 z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
     z
 
+// --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
+// f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
+// 3.a vela (la actual al confirmar) sobre offsets FIJOS [0] y [2] -> referencia
+// historica ESTATICA (no dinamica): RE10045-safe y trivial en MQL5 (rates[i-2]).
+// Funcion pura: recibe los 4 precios (h0/l0 vela actual, h2/l2 vela -2), no lee series
+// -> golden tests MQL5 directos (ADR-002). FVG alcista: low[0] > high[2] -> gap
+// [high[2], low[0]] (dir BULL); bajista: high[0] < low[2] -> gap [high[0], low[2]]
+// (dir BEAR). Mutuamente excluyentes (un mismo trio no es alcista y bajista a la vez).
+// Filtro de tamaño: altura >= threshold (modo fixed: 0.25*ATR14, el default validado y
+// congelado ADR-002; el modo auto de LuxAlgo es %-based y choca con la doctrina ATR
+// (regla dura #3) -> NO se porta, revisitar en Fase 3 solo si estorba). El CE (50% =
+// (top+bottom)/2) NO se almacena: se deriva de top/bottom en dibujo y scoring (#26
+// FVG-CE tocado). Mitigacion via la MISMA maquina f_updateZoneMitigation (§2.2 "igual
+// maquina de estados que el OB"). barIdx/barTime = 3.a vela (oraculo ver05 bars[i]['t']).
+// Anti-repaint: llamar en barstate.isconfirmed [§2.2, D-PINE-03]. NB: LuxAlgo usa
+// request.security(...lookahead_on) (:634, repinta) + filtro extra close>high[2]; aqui
+// NO (TF propio, sin lookahead; el oraculo solo exige gap + umbral). Devuelve SMC_Zone
+// ZS_ACTIVE o na.
+f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTime, float threshold, int kind) =>
+    SMC_Zone z = na
+    if l0 > h2 and (l0 - h2) >= threshold
+        z := SMC_Zone.new(l0, h2, DIR_BULL, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
+    else if h0 < l2 and (l2 - h0) >= threshold
+        z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
+    z
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -407,6 +435,7 @@ var array<int>   obBufIdx  = array.new<int>()
 var array<int>   obBufTime = array.new<int>()
 var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
+float atr14      = ta.atr(14)
 if barstate.isconfirmed
     array.push(obBufHigh, high)
     array.push(obBufLow,  low)
@@ -427,6 +456,15 @@ if barstate.isconfirmed
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
             f_pushZone(SMC_zones, obZone, MAX_ZONES)
+    // --- Fair Value Gaps [T06] ---
+    // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_zones
+    // para el scoring (Sprint 2.1). FVG de 3 velas sobre el TF propio, confirmado al
+    // cierre de la 3.a vela (este barstate.isconfirmed); offsets fijos [0]/[2] =
+    // referencia estatica RE10045-safe. Se empuja DESPUES de la mitigacion comun (loop
+    // arriba) -> no se mitiga en su barra de creacion (misma maquina §2.2).
+    SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time, i_fvgThreshold * atr14, KIND_FVG)
+    if not na(fvgZone)
+        f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
 
 // === MTF ===
 // request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
@@ -449,7 +487,7 @@ if barstate.islastconfirmedhistory
     var label lbl = na
     label.delete(lbl)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
-    lbl := label.new(bar_index, high, "SMC Strategy — OB T05\nbias=" + biasTxt + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    lbl := label.new(bar_index, high, "SMC Strategy — FVG T06\nbias=" + biasTxt + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.
