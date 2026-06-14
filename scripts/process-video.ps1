@@ -60,8 +60,8 @@ param(
     [Parameter(ParameterSetName = 'File', Mandatory = $true)]
     [string]$InputFile,
 
-    [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente\Estrategia2.0',
-    [string]$SubFolder = 'Teoria-SMC',
+    [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente',
+    [string]$SubFolder = 'Teoria SMC',
     [ValidateSet('tiny', 'base', 'small', 'medium', 'large')]
     [string]$Model = 'small',
     [string]$Language,
