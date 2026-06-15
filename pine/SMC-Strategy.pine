@@ -16,6 +16,8 @@ i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño FVG (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
+i_pdSwingLen  = input.int(50, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
+i_pdEqBand    = input.float(5.0, "Banda equilibrium P/D (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_SCORE)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
 
 // === LIBRARY CORE ===
@@ -56,6 +58,9 @@ ZS_ACTIVE    = 0
 ZS_PARTIAL   = 1
 ZS_MITIGATED = 2
 ZS_INVALID   = 3
+PD_DISCOUNT    = -1
+PD_EQUILIBRIUM = 0
+PD_PREMIUM     = 1
 MAX_ZONES  = 50
 MAX_EVENTS = 100
 MAX_SWINGS = 100
@@ -360,6 +365,76 @@ f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTime, flo
         z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
     z
 
+// --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
+// Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
+// trailingExtremes :181, updateTrailingExtremes :709-713, drawPremiumDiscountZones
+// :755-761; v5->v6). El rango operativo vigente [bottom, top] se ANCLA al ultimo swing
+// high/low confirmado (f_resetTrailing*, cf. LuxAlgo getCurrentStructure :430-454, solo
+// escala SWING — no interno) y luego SE EXPANDE vela a vela con el precio
+// (f_updateTrailing, max(high)/min(low)) -> el rango captura extension mas alla del
+// ultimo swing sin esperar otra confirmacion. eq = punto medio (50%).
+// DECISION DISENO T07 (opcion A, ver docs/decisiones-pd-rango.md): el rango = trailing
+// extremes de LuxAlgo, NO "ultimo strong high/low por BOS/CHoCH" (opcion B). Motivo:
+// paridad directa con la unica referencia externa permitida + portabilidad limpia a
+// MQL5 (estado plano, sin depender del historial de eventos estructurales).
+// Premium/Discount es una ZONA (localizacion), no un evento -> su expansion EN VIVO es
+// aceptable y replica a LuxAlgo (PINE-PLAN §4.4: las zonas se extienden en vivo, los
+// eventos solo se confirman al cierre). Para el scoring, el snapshot
+// (chartState.pdHigh/pdLow) se actualiza en barstate.isconfirmed -> determinista.
+// NB paridad: f_updateTrailing inicializa explicitamente desde na (rango = min/max de
+// la historia hasta el 1.er swing, luego se ancla); LuxAlgo deja na por la propagacion
+// math.max(x,na)=na. Desviacion intencional, determinista y mas facil de portar a MQL5
+// (golden tests, ADR-002); irrelevante en la historia validada (no en la barra 1).
+type SMC_Trailing
+    float top        = na
+    float bottom     = na
+    int   topTime    = na
+    int   bottomTime = na
+    int   barIdx     = na
+    int   barTime    = na
+
+// f_resetTrailingHigh/Low: ancla un extremo del rango al swing recien confirmado
+// (nivel + barra). barIdx/barTime = ancla izquierda para el dibujo de las zonas.
+f_resetTrailingHigh(SMC_Trailing tr, float price, int barIdx, int barTime) =>
+    tr.top     := price
+    tr.topTime := barTime
+    tr.barIdx  := barIdx
+    tr.barTime := barTime
+
+f_resetTrailingLow(SMC_Trailing tr, float price, int barIdx, int barTime) =>
+    tr.bottom     := price
+    tr.bottomTime := barTime
+    tr.barIdx     := barIdx
+    tr.barTime    := barTime
+
+// f_updateTrailing: expande el rango con el precio de la barra (cf. LuxAlgo
+// updateTrailingExtremes). top = max(high desde el ultimo reset); bottom = min(low).
+// Llamar en barstate.isconfirmed para un snapshot determinista. Devuelve el tr mutado.
+f_updateTrailing(SMC_Trailing tr, float h, float l, int t) =>
+    if na(tr.top) or h > tr.top
+        tr.top     := h
+        tr.topTime := t
+    if na(tr.bottom) or l < tr.bottom
+        tr.bottom     := l
+        tr.bottomTime := t
+    tr
+
+// f_premiumDiscount: clasifica la posicion de 'price' en el rango [bottom, top].
+// Devuelve [zona, pct]: pct = (price-bottom)/(top-bottom) en 0..1 (0=bottom/discount
+// extremo, 1=top/premium extremo); zona ∈ {PD_PREMIUM, PD_DISCOUNT, PD_EQUILIBRIUM}.
+// La banda equilibrium [eqLo, eqHi] (default 0.45-0.55, §2.3) tiene PRIORIDAD: dentro
+// de ella -> EQUILIBRIUM (confluencia #31, resta peso por falta de ventaja). Fuera:
+// pct>0.5 premium (favorece short), pct<0.5 discount (favorece long); el corte real
+// premium/discount es el 50% (§2.3), la banda solo neutraliza el centro. Rango invalido
+// (na o top<=bottom) -> [na, na]. Pura -> golden tests MQL5 directos (ADR-002).
+f_premiumDiscount(float price, float top, float bottom, float eqLo, float eqHi) =>
+    int   zone = na
+    float pct  = na
+    if not na(top) and not na(bottom) and top > bottom
+        pct  := (price - bottom) / (top - bottom)
+        zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
+    [zone, pct]
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -393,6 +468,14 @@ var SMC_Structure structInternal = SMC_Structure.new()
 // [Sprint 2.1]. structInternal queda fuera (no voltea el bias, §1.4).
 var SMC_TFState chartState = SMC_TFState.new()
 
+// Dealing range Premium/Discount [T07]: trailing extremes anclados al ultimo swing de
+// ESCALA P/D (opcion A, ver docs/decisiones-pd-rango.md). Estado del consumidor (el TYPE
+// vive en CORE). Swing P/D dedicado (i_pdSwingLen, default 50 = swing de LuxAlgo), NO el
+// swingLen=5 estructural: el dealing range de LuxAlgo se basa en
+// getCurrentStructure(swingsLengthInput=50) (ref :782) -> rango DOMINANTE, no local.
+var SMC_Trailing trailing = SMC_Trailing.new()
+[pdSwingHigh, pdSwingLow] = f_detectSwings(i_pdSwingLen)
+
 [internalHigh, internalLow] = f_detectSwings(i_internalLen)
 newInternalHigh = barstate.isconfirmed and not na(internalHigh)
 newInternalLow  = barstate.isconfirmed and not na(internalLow)
@@ -405,6 +488,23 @@ if newInternalHigh
     f_setStructureHigh(structInternal, internalHigh, bar_index - i_internalLen, time[i_internalLen])
 if newInternalLow
     f_setStructureLow(structInternal, internalLow, bar_index - i_internalLen, time[i_internalLen])
+
+// --- Premium/Discount: dealing range [T07] ---
+// Reanclaje a los swings de ESCALA P/D (i_pdSwingLen, default 50 = swing de LuxAlgo; ref
+// :782 getCurrentStructure(swingsLengthInput,false)). Solo en swings confirmados (anti-
+// repaint); el swing P/D pertenece a la vela t = bar_index - i_pdSwingLen. Luego
+// f_updateTrailing expande el rango CADA barra (incl. la viva) como LuxAlgo
+// (updateTrailingExtremes :770-771, no gated) -> el precio vivo nunca excede el rango y el
+// pct queda en 0..1. Orden reset->expand. El snapshot para el scoring se congela SOLO en
+// barstate.isconfirmed (determinista, no repinta historia).
+if barstate.isconfirmed and not na(pdSwingHigh)
+    f_resetTrailingHigh(trailing, pdSwingHigh, bar_index - i_pdSwingLen, time[i_pdSwingLen])
+if barstate.isconfirmed and not na(pdSwingLow)
+    f_resetTrailingLow(trailing, pdSwingLow, bar_index - i_pdSwingLen, time[i_pdSwingLen])
+f_updateTrailing(trailing, high, low, time)
+if barstate.isconfirmed
+    chartState.pdHigh := trailing.top
+    chartState.pdLow  := trailing.bottom
 
 SMC_Event evStructSwing = na
 SMC_Event evStructInt   = na
@@ -487,7 +587,10 @@ if barstate.islastconfirmedhistory
     var label lbl = na
     label.delete(lbl)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
-    lbl := label.new(bar_index, high, "SMC Strategy — FVG T06\nbias=" + biasTxt + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
+    string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
+    string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
+    lbl := label.new(bar_index, high, "SMC Strategy — P/D T07\nbias=" + biasTxt + "  P/D=" + pdCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.

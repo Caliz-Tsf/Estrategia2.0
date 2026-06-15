@@ -10,6 +10,7 @@ indicator("SMC Engine — Visual", overlay = true, max_labels_count = 500, max_l
 GRP_STRUCT = "Estructura"
 GRP_OB     = "Order Blocks"
 GRP_FVG    = "Fair Value Gaps"
+GRP_PD     = "Premium/Discount"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
@@ -23,6 +24,9 @@ i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group 
 i_showFVG      = input.bool(true,  "Mostrar Fair Value Gaps",          group = GRP_FVG)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_showCE       = input.bool(true,  "Mostrar nivel CE (50%)",           group = GRP_FVG)
+i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
+i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
+i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -62,6 +66,9 @@ ZS_ACTIVE    = 0
 ZS_PARTIAL   = 1
 ZS_MITIGATED = 2
 ZS_INVALID   = 3
+PD_DISCOUNT    = -1
+PD_EQUILIBRIUM = 0
+PD_PREMIUM     = 1
 MAX_ZONES  = 50
 MAX_EVENTS = 100
 MAX_SWINGS = 100
@@ -366,6 +373,76 @@ f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTime, flo
         z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
     z
 
+// --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
+// Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
+// trailingExtremes :181, updateTrailingExtremes :709-713, drawPremiumDiscountZones
+// :755-761; v5->v6). El rango operativo vigente [bottom, top] se ANCLA al ultimo swing
+// high/low confirmado (f_resetTrailing*, cf. LuxAlgo getCurrentStructure :430-454, solo
+// escala SWING — no interno) y luego SE EXPANDE vela a vela con el precio
+// (f_updateTrailing, max(high)/min(low)) -> el rango captura extension mas alla del
+// ultimo swing sin esperar otra confirmacion. eq = punto medio (50%).
+// DECISION DISENO T07 (opcion A, ver docs/decisiones-pd-rango.md): el rango = trailing
+// extremes de LuxAlgo, NO "ultimo strong high/low por BOS/CHoCH" (opcion B). Motivo:
+// paridad directa con la unica referencia externa permitida + portabilidad limpia a
+// MQL5 (estado plano, sin depender del historial de eventos estructurales).
+// Premium/Discount es una ZONA (localizacion), no un evento -> su expansion EN VIVO es
+// aceptable y replica a LuxAlgo (PINE-PLAN §4.4: las zonas se extienden en vivo, los
+// eventos solo se confirman al cierre). Para el scoring, el snapshot
+// (chartState.pdHigh/pdLow) se actualiza en barstate.isconfirmed -> determinista.
+// NB paridad: f_updateTrailing inicializa explicitamente desde na (rango = min/max de
+// la historia hasta el 1.er swing, luego se ancla); LuxAlgo deja na por la propagacion
+// math.max(x,na)=na. Desviacion intencional, determinista y mas facil de portar a MQL5
+// (golden tests, ADR-002); irrelevante en la historia validada (no en la barra 1).
+type SMC_Trailing
+    float top        = na
+    float bottom     = na
+    int   topTime    = na
+    int   bottomTime = na
+    int   barIdx     = na
+    int   barTime    = na
+
+// f_resetTrailingHigh/Low: ancla un extremo del rango al swing recien confirmado
+// (nivel + barra). barIdx/barTime = ancla izquierda para el dibujo de las zonas.
+f_resetTrailingHigh(SMC_Trailing tr, float price, int barIdx, int barTime) =>
+    tr.top     := price
+    tr.topTime := barTime
+    tr.barIdx  := barIdx
+    tr.barTime := barTime
+
+f_resetTrailingLow(SMC_Trailing tr, float price, int barIdx, int barTime) =>
+    tr.bottom     := price
+    tr.bottomTime := barTime
+    tr.barIdx     := barIdx
+    tr.barTime    := barTime
+
+// f_updateTrailing: expande el rango con el precio de la barra (cf. LuxAlgo
+// updateTrailingExtremes). top = max(high desde el ultimo reset); bottom = min(low).
+// Llamar en barstate.isconfirmed para un snapshot determinista. Devuelve el tr mutado.
+f_updateTrailing(SMC_Trailing tr, float h, float l, int t) =>
+    if na(tr.top) or h > tr.top
+        tr.top     := h
+        tr.topTime := t
+    if na(tr.bottom) or l < tr.bottom
+        tr.bottom     := l
+        tr.bottomTime := t
+    tr
+
+// f_premiumDiscount: clasifica la posicion de 'price' en el rango [bottom, top].
+// Devuelve [zona, pct]: pct = (price-bottom)/(top-bottom) en 0..1 (0=bottom/discount
+// extremo, 1=top/premium extremo); zona ∈ {PD_PREMIUM, PD_DISCOUNT, PD_EQUILIBRIUM}.
+// La banda equilibrium [eqLo, eqHi] (default 0.45-0.55, §2.3) tiene PRIORIDAD: dentro
+// de ella -> EQUILIBRIUM (confluencia #31, resta peso por falta de ventaja). Fuera:
+// pct>0.5 premium (favorece short), pct<0.5 discount (favorece long); el corte real
+// premium/discount es el 50% (§2.3), la banda solo neutraliza el centro. Rango invalido
+// (na o top<=bottom) -> [na, na]. Pura -> golden tests MQL5 directos (ADR-002).
+f_premiumDiscount(float price, float top, float bottom, float eqLo, float eqHi) =>
+    int   zone = na
+    float pct  = na
+    if not na(top) and not na(bottom) and top > bottom
+        pct  := (price - bottom) / (top - bottom)
+        zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
+    [zone, pct]
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -402,6 +479,14 @@ var SMC_Structure structInternal = SMC_Structure.new()
 // el scoring lee [Sprint 2.1]. structInternal queda fuera (no voltea el bias, §1.4).
 var SMC_TFState chartState = SMC_TFState.new()
 
+// Dealing range Premium/Discount [T07]: trailing extremes anclados al ultimo swing de
+// ESCALA P/D (opcion A, ver docs/decisiones-pd-rango.md). Estado del consumidor (el TYPE
+// vive en CORE). Swing P/D dedicado (i_pdSwingLen, default 50 = swing de LuxAlgo), NO el
+// swingLen=5 estructural: el dealing range de LuxAlgo se basa en
+// getCurrentStructure(swingsLengthInput=50) (ref :782) -> rango DOMINANTE, no local.
+var SMC_Trailing trailing = SMC_Trailing.new()
+[pdSwingHigh, pdSwingLow] = f_detectSwings(i_pdSwingLen)
+
 // Pivotes internos (los swing ya se calcularon arriba). Mismo guard anti-repaint.
 [internalHigh, internalLow] = f_detectSwings(i_internalLen)
 newInternalHigh = barstate.isconfirmed and not na(internalHigh)
@@ -416,6 +501,23 @@ if newInternalHigh
     f_setStructureHigh(structInternal, internalHigh, bar_index - i_internalLen, time[i_internalLen])
 if newInternalLow
     f_setStructureLow(structInternal, internalLow, bar_index - i_internalLen, time[i_internalLen])
+
+// --- Premium/Discount: dealing range [T07] ---
+// Reanclaje a los swings de ESCALA P/D (i_pdSwingLen, default 50 = swing de LuxAlgo; ref
+// :782 getCurrentStructure(swingsLengthInput,false)). Solo en swings confirmados (anti-
+// repaint); el swing P/D pertenece a la vela t = bar_index - i_pdSwingLen. Luego
+// f_updateTrailing expande el rango CADA barra (incl. la viva) como LuxAlgo
+// (updateTrailingExtremes :770-771, no gated) -> el precio vivo nunca excede el rango y el
+// pct queda en 0..1. Orden reset->expand. El snapshot para el scoring se congela SOLO en
+// barstate.isconfirmed (determinista, no repinta historia).
+if barstate.isconfirmed and not na(pdSwingHigh)
+    f_resetTrailingHigh(trailing, pdSwingHigh, bar_index - i_pdSwingLen, time[i_pdSwingLen])
+if barstate.isconfirmed and not na(pdSwingLow)
+    f_resetTrailingLow(trailing, pdSwingLow, bar_index - i_pdSwingLen, time[i_pdSwingLen])
+f_updateTrailing(trailing, high, low, time)
+if barstate.isconfirmed
+    chartState.pdHigh := trailing.top
+    chartState.pdLow  := trailing.bottom
 
 // Ruptura estructural solo al cierre confirmado (anti-repaint [D-PINE-03]). El
 // interno usa guard de nivel-distinto: no duplica la senal cuando su pivote coincide
@@ -580,25 +682,65 @@ if i_showFVG and barstate.islast
                     color ceCol = z.dir == DIR_BULL ? color.lime : color.orange
                     array.push(SMC_fvgCELines, line.new(z.barIdx - 1, ce, bar_index, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_index))
 
+// f_drawPDLine: una linea de nivel del dealing range [T07] (solo Visual). Como LuxAlgo
+// (drawTrailingExtremes :715-732): cada linea se ancla en SU PROPIO extremo via tiempo —
+// premium en trailing.topTime (la barra del strong high), discount en trailing.bottomTime
+// (la del strong low), no en un ancla compartida (eso hacia "volar" la linea). Dibuja con
+// xloc.bar_time hasta la barra actual. Menos ruido que cajas (pref. usuario, Sesion-021).
+f_drawPDLine(int leftTime, float level, color col, string lineStyle) =>
+    line.new(leftTime, level, time, level, xloc = xloc.bar_time, color = col, style = lineStyle, width = 1)
+
+// En la ultima barra limpia y repinta las 3 lineas P/D + las etiquetas. Premium = linea
+// solida roja en trailing.top desde la barra del high (trailing.topTime, cf. LuxAlgo
+// lastTopTime :725); Discount = linea solida verde en trailing.bottom desde la barra del
+// low (trailing.bottomTime, cf. :730); Equilibrium = punteada gris en el 50% desde el
+// extremo mas antiguo. La banda [45%,55%] (i_pdEqBand) ya no se dibuja: solo alimenta la
+// clasificacion del panel (#31). Sin cajas -> sin ruido.
+var array<line>  SMC_pdLines  = array.new<line>()
+var array<label> SMC_pdLabels = array.new<label>()
+if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
+    for l in SMC_pdLines
+        line.delete(l)
+    for lb in SMC_pdLabels
+        label.delete(lb)
+    array.clear(SMC_pdLines)
+    array.clear(SMC_pdLabels)
+    float eqLvl    = (trailing.top + trailing.bottom) / 2.0
+    int   topLeft  = nz(trailing.topTime, time)
+    int   botLeft  = nz(trailing.bottomTime, time)
+    int   eqLeft   = topLeft < botLeft ? topLeft : botLeft
+    array.push(SMC_pdLines, f_drawPDLine(topLeft, trailing.top,    color.new(color.red, 0),   line.style_solid))
+    array.push(SMC_pdLines, f_drawPDLine(eqLeft,  eqLvl,           color.new(color.gray, 20), line.style_dotted))
+    array.push(SMC_pdLines, f_drawPDLine(botLeft, trailing.bottom, color.new(color.green, 0), line.style_solid))
+    array.push(SMC_pdLabels, label.new(bar_index, trailing.top,    "Premium "  + str.tostring(trailing.top, format.mintick),    style = label.style_label_down, color = color.new(color.red, 80),   textcolor = color.red,   size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(color.gray, 80),  textcolor = color.gray,  size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_up,   color = color.new(color.green, 80), textcolor = color.green, size = size.small))
+
 // === PANEL ===
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
 // globales. El panel completo (PINE-PLAN §5) llega en T14.
 if i_showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 6, border_width = 1)
+    var table panel = table.new(position.top_right, 2, 7, border_width = 1)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
     color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
+    [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
+    string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
+    color  pdCol = pdZone == PD_PREMIUM ? color.red : pdZone == PD_DISCOUNT ? color.green : color.gray
+    string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "FVG T06",             text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "P/D T07",             text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Bias",    text_color = color.gray)
     table.cell(panel, 1, 1, biasTxt, text_color = biasCol)
-    table.cell(panel, 0, 2, "Swings",  text_color = color.gray)
-    table.cell(panel, 1, 2, str.tostring(array.size(SMC_swings)), text_color = color.gray)
-    table.cell(panel, 0, 3, "Eventos", text_color = color.gray)
-    table.cell(panel, 1, 3, str.tostring(array.size(SMC_events)), text_color = color.gray)
-    table.cell(panel, 0, 4, "Zonas",   text_color = color.gray)
-    table.cell(panel, 1, 4, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
-    table.cell(panel, 0, 5, "Pools",   text_color = color.gray)
-    table.cell(panel, 1, 5, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
+    table.cell(panel, 0, 2, "Premium/Discount", text_color = color.gray)
+    table.cell(panel, 1, 2, pdCell, text_color = pdCol)
+    table.cell(panel, 0, 3, "Swings",  text_color = color.gray)
+    table.cell(panel, 1, 3, str.tostring(array.size(SMC_swings)), text_color = color.gray)
+    table.cell(panel, 0, 4, "Eventos", text_color = color.gray)
+    table.cell(panel, 1, 4, str.tostring(array.size(SMC_events)), text_color = color.gray)
+    table.cell(panel, 0, 5, "Zonas",   text_color = color.gray)
+    table.cell(panel, 1, 5, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
+    table.cell(panel, 0, 6, "Pools",   text_color = color.gray)
+    table.cell(panel, 1, 6, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).

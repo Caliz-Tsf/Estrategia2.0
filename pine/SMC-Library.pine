@@ -44,6 +44,10 @@ export const int ZS_ACTIVE    = 0
 export const int ZS_PARTIAL   = 1
 export const int ZS_MITIGATED = 2
 export const int ZS_INVALID   = 3
+// Zonas de valor Premium/Discount [§2.3 · T07]
+export const int PD_DISCOUNT    = -1
+export const int PD_EQUILIBRIUM = 0
+export const int PD_PREMIUM     = 1
 
 // --- Limites de arrays por TF (performance, reglas-dev §1.6) ---
 export const int MAX_ZONES  = 50
@@ -339,3 +343,58 @@ export f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTi
     else if h0 < l2 and (l2 - h0) >= threshold
         z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
     z
+
+// --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
+// Dealing range basado en trailing extremes de LuxAlgo (trailingExtremes :181,
+// updateTrailingExtremes :709-713; v5->v6). El rango [bottom, top] se ANCLA al ultimo
+// swing high/low confirmado (f_resetTrailing*, solo escala SWING) y SE EXPANDE vela a
+// vela con el precio (f_updateTrailing). eq = punto medio (50%). DECISION DISENO T07
+// (opcion A, ver docs/decisiones-pd-rango.md): trailing extremes vs "ultimo strong
+// high/low por BOS/CHoCH" (opcion B) -> A por paridad LuxAlgo + portabilidad MQL5
+// (estado plano). Zona = localizacion (se extiende en vivo); el snapshot para scoring
+// se toma en barstate.isconfirmed en el consumidor.
+export type SMC_Trailing
+    float top        = na
+    float bottom     = na
+    int   topTime    = na
+    int   bottomTime = na
+    int   barIdx     = na
+    int   barTime    = na
+
+// Ancla un extremo del rango al swing recien confirmado (nivel + barra). barIdx/barTime
+// = ancla izquierda para el dibujo de las zonas en el consumidor (Visual).
+export f_resetTrailingHigh(SMC_Trailing tr, float price, int barIdx, int barTime) =>
+    tr.top     := price
+    tr.topTime := barTime
+    tr.barIdx  := barIdx
+    tr.barTime := barTime
+
+export f_resetTrailingLow(SMC_Trailing tr, float price, int barIdx, int barTime) =>
+    tr.bottom     := price
+    tr.bottomTime := barTime
+    tr.barIdx     := barIdx
+    tr.barTime    := barTime
+
+// Expande el rango con el precio de la barra (max(high)/min(low) desde el ultimo reset).
+// Llamar en barstate.isconfirmed para un snapshot determinista. Devuelve el tr mutado.
+export f_updateTrailing(SMC_Trailing tr, float h, float l, int t) =>
+    if na(tr.top) or h > tr.top
+        tr.top     := h
+        tr.topTime := t
+    if na(tr.bottom) or l < tr.bottom
+        tr.bottom     := l
+        tr.bottomTime := t
+    tr
+
+// Clasifica la posicion de 'price' en el rango [bottom, top]. Devuelve [zona, pct]:
+// pct en 0..1 (0=discount extremo, 1=premium extremo); zona ∈ {PD_PREMIUM, PD_DISCOUNT,
+// PD_EQUILIBRIUM}. Banda equilibrium [eqLo, eqHi] (default 0.45-0.55, §2.3) prioritaria
+// (#31, resta peso). Fuera: pct>0.5 premium (short), pct<0.5 discount (long). Rango
+// invalido -> [na, na]. Pura -> golden tests MQL5 directos (ADR-002).
+export f_premiumDiscount(float price, float top, float bottom, float eqLo, float eqHi) =>
+    int   zone = na
+    float pct  = na
+    if not na(top) and not na(bottom) and top > bottom
+        pct  := (price - bottom) / (top - bottom)
+        zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
+    [zone, pct]
