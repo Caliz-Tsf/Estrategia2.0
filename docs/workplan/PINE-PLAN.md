@@ -262,6 +262,7 @@ Protocolo por concepto: **implementar → compilar 0 errores/0 warnings → scre
 5. Order Blocks + mitigación (portar algoritmo LuxAlgo)
 6. FVG + CE 50% + tracking de mitigación explícito `[FIX: gap del plan original]`
 7. Premium/Discount/Equilibrium
+7B. Estructura BOS/CHoCH DOMINANTE (swing 50) — capa aditiva sobre el CORE, no toca T01–T07 `[T07B · ADR-004]`
 8. EQH/EQL
 
 **Sprint 1.3 — Liquidez (corazón SMC):**

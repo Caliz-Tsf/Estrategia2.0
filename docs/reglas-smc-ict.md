@@ -39,15 +39,19 @@ La estructura es la columna vertebral: define el *bias* y habilita o invalida to
 - **Swing High** en la vela de índice `t`: su `high` es **estrictamente mayor** que el `high` de las `swingLen` velas anteriores (`t-1 … t-swingLen`) **y** de las `swingLen` velas posteriores (`t+1 … t+swingLen`). Equivale a `ta.pivothigh(swingLen, swingLen)`.
 - **Swing Low** en `t`: simétrico, su `low` estrictamente **menor** a ambos lados.
 - **Estructura interna:** idéntica definición pero con `internalLen` (default 3). Detecta swings menores ("internal liquidity") dentro de las piernas del swing mayor.
+- **Estructura dominante:** idéntica definición con `majorLen` (default 50). Es la **escala grande** (swing structure de LuxAlgo, `getCurrentStructure(50)`). Marca los movimientos estructurales mayores [T07B].
+
+**Tres escalas (mapeo a LuxAlgo).** El sistema evalúa swings en **tres** longitudes a la vez. Nuestro `swingLen=5` equivale al **interno** de LuxAlgo; `majorLen=50` equivale al **swing (dominante)** de LuxAlgo. La capa dominante es la que faltaba: hasta T07B solo existían `swingLen`/`internalLen` para la estructura (y `majorLen=50` ya se usaba para el rango P/D en T07 §2.3).
 
 **Parámetros default.**
 | Param | Default | Rango sugerido | Nota |
 |---|---|---|---|
-| `swingLen` | **5** | 3–10 | Estructura mayor (swing structure). |
+| `majorLen` | **50** | 20–80 | Estructura **dominante** / swing grande (= swing structure de LuxAlgo). Capa de contexto [T07B]. |
+| `swingLen` | **5** | 3–10 | Estructura mayor (≈ interno de LuxAlgo). Gatillo de estructura local. |
 | `internalLen` | **3** | 2–5 | Estructura interna. Debe ser `< swingLen` siempre. |
 
 **Confirmación / anti-repaint.**
-- Un swing en `t` **no existe** hasta el cierre de la vela `t + swingLen` (hacen falta `swingLen` velas a la derecha para confirmarlo). Latencia inherente = `swingLen` velas. Esto es **deseable**: garantiza cero repaint.
+- Un swing en `t` **no existe** hasta el cierre de la vela `t + swingLen` (hacen falta `swingLen` velas a la derecha para confirmarlo). Latencia inherente = `swingLen` velas. Esto es **deseable**: garantiza cero repaint. La escala dominante hereda esto: un swing 50 confirma 50 velas tarde (≈2 días en H1) y su ruptura puede tardar días — es correcto, no un bug [T07B].
 - `precio` del swing = `high`/`low` de la vela `t`. Su `barIdx`/`barTime` = los de la vela `t` (no los de la vela de confirmación).
 
 **Manejo de empates (desempate de *detección*).** Desigualdad estricta a ambos lados. Si dos velas **vecinas** (dentro de la ventana `swingLen`) comparten el `high` idéntico al tick, ninguna forma swing por sí sola → no se estampa swing en ese punto. Es solo para evitar swings duplicados/ambiguos. **No confundir** con Equal Highs (EQH): EQH son dos *swings high ya confirmados y separados en el tiempo* a niveles casi iguales (diferencia `< umbral×ATR`) = liquidez (§Liquidez), no un empate de detección.
@@ -114,7 +118,7 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 - **BOS alcista:** con bias alcista, el `close` de una vela confirmada es **estrictamente mayor** que el `structure high` (último swing high no roto). → se actualiza el structure high; bias sigue `+1`.
 - **BOS bajista:** con bias bajista, el `close` confirmado es **estrictamente menor** que el `structure low` (último swing low no roto). → se actualiza el structure low; bias sigue `-1`.
 - **Base de ruptura = `close`**, no la mecha (`breakBasis = close`, default). Una mecha que pincha el nivel pero cierra de vuelta **no es BOS** (es sweep/grab, §Liquidez).
-- **Interno vs swing:** se evalúa en ambas escalas. *BOS swing* (sobre swings `swingLen`) = mayor. *BOS interno* (sobre swings `internalLen`) = menor (suele ser el gatillo fino). Se registran por separado (confluencias #2 BOS H1 y #4 BOS chart).
+- **Escalas:** se evalúa en las **tres** escalas (§1.1). *BOS dominante* (sobre `majorLen=50`) = contexto mayor [T07B]. *BOS swing* (sobre `swingLen`) = estructura local. *BOS interno* (sobre `internalLen`) = gatillo fino. Se registran por separado (confluencias #2 BOS H1 y #4 BOS chart). La capa dominante se **detecta y dibuja**; **no** voltea por sí sola el bias headline hasta decisión de calibración de Fase 3.
 
 **Parámetros default.**
 | Param | Default | Nota |
@@ -132,6 +136,9 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 - ✓ BOS bajista 2026-06-03 08:00 GMT: `close` **1.16082** < structure low 1.16135.
 - ✗ Contraejemplo (mecha que barre sin cierre): 2026-05-27 12:00 GMT high **1.16615** supera el structure high 1.16452 pero `close` 1.16440 queda por debajo → es *liquidity grab/sweep* del techo, NO BOS.
 
+**Casos de prueba — escala DOMINANTE (`majorLen=50`)** *(EURUSD H1, vs LuxAlgo swing structure) [T07B]*:
+- ✓ BOS bajista ~**1.15762** — pivote (structure low dominante) roto inicia jue 2026-05-21 09:00; ruptura confirmada vie 2026-06-05 09:00 (`close` < structure low dominante, continuación bajista de gran escala).
+
 ---
 
 ### 1.4 CHoCH — Change of Character `f_detectCHoCH`
@@ -142,7 +149,7 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 - **CHoCH alcista:** con bias **bajista**, el `close` confirmado es **estrictamente mayor** que el `structure high` que protegía (último LH). → bias candidato pasa a `+1`.
 - **CHoCH bajista:** con bias **alcista**, el `close` confirmado es **estrictamente menor** que el `structure low` que protegía (último HL). → bias candidato pasa a `-1`.
 - Misma mecánica de cierre y misma regla anti-repaint que BOS; lo que cambia es **cuál** swing se rompe (el protector, no el extensor).
-- **Interno vs swing:** *CHoCH interno* (sobre `internalLen`) = cambio menor, suele ser el gatillo de entrada (IDM/precisión); *CHoCH swing* = cambio mayor de bias. **No voltear el bias mayor con una ruptura interna.**
+- **Escalas:** *CHoCH interno* (sobre `internalLen`) = cambio menor, suele ser el gatillo de entrada (IDM/precisión); *CHoCH swing* = cambio mayor de bias; *CHoCH dominante* (sobre `majorLen=50`) = cambio de carácter de gran escala/contexto [T07B]. **No voltear el bias mayor con una ruptura interna.** El CHoCH dominante se detecta y dibuja; su efecto sobre el bias headline queda diferido a calibración de Fase 3 (no voltea solo).
 
 **Efecto.** Un CHoCH **invierte el bias de trabajo** del TF. La siguiente ruptura en la nueva dirección ya sería un BOS (que confirma la nueva tendencia).
 
@@ -153,6 +160,11 @@ La diferencia BOS vs CHoCH es **qué swing se rompe**:
 - ✓ CHoCH alcista 2026-05-27 06:00 GMT: con bias bajista, `close` **1.16456** > LH protector 1.16452 → bias a +1.
 - ✓ CHoCH alcista 2026-05-29 14:00 GMT: `close` **1.16687** > LH protector 1.16566.
 - ✗ Contraejemplo (CHoCH **interno** que NO voltea el bias swing): 2026-06-02 04:00 GMT `close` 1.16379 rompe un swing interno (1.16370) pero NO el LH swing → es CHoCH interno; el bias mayor sigue bajista.
+
+**Casos de prueba — escala DOMINANTE (`majorLen=50`)** *(EURUSD H1, vs LuxAlgo swing structure) [T07B]*:
+- ✓ CHoCH bajista ~**1.17225** — pivote dominante roto inicia jue 2026-05-07 16:00; ruptura confirmada mié 2026-05-13 01:00.
+- ✓ CHoCH ~**1.15777** — pivote dominante roto inicia mar 2026-06-09 09:00; ruptura confirmada jue 2026-06-11 15:00.
+- Comportamiento esperado: la estructura dominante sigue al precio y no marca nueva ruptura hasta que el precio rompe ese LL/HH; no aparece otra hasta el próximo HH/LL.
 
 ---
 

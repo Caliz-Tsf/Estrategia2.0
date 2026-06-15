@@ -11,6 +11,9 @@ GRP_STRUCT = "Estructura"
 GRP_OB     = "Order Blocks"
 GRP_FVG    = "Fair Value Gaps"
 GRP_SCORE  = "Scoring"
+// Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
+// NUESTRO swingLen=5 ~= interno de LuxAlgo; esta capa es la que faltaba [T07B].
+i_majorLen    = input.int(50, "Swing dominante (estructura grande)", minval = 10, group = GRP_STRUCT)
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
@@ -463,6 +466,13 @@ if newSwingLow
 var SMC_Structure structSwing    = SMC_Structure.new()
 var SMC_Structure structInternal = SMC_Structure.new()
 
+// Estructura DOMINANTE (escala 50) [T07B]. Capa aditiva: reutiliza el CORE escala-
+// agnostico (SMC_Structure / f_setStructure* / f_detectStructure) sin tocarlo. Sus
+// eventos van a un array dedicado (NO al SMC_events compartido que consume el OB).
+// NO alimenta f_updateTFState -> el bias headline (swingLen=5) no cambia [§1.3/§1.4].
+var SMC_Structure structMajor = SMC_Structure.new()
+var array<SMC_Event> SMC_eventsMajor = array.new<SMC_Event>()
+
 // Snapshot consolidado del bias del TF propio [T04]. Se alimenta SOLO del evento de
 // escala swing -> el bias mayor; lo que el MTF exporta [Sprint 1.4] y el scoring lee
 // [Sprint 2.1]. structInternal queda fuera (no voltea el bias, §1.4).
@@ -488,6 +498,18 @@ if newInternalHigh
     f_setStructureHigh(structInternal, internalHigh, bar_index - i_internalLen, time[i_internalLen])
 if newInternalLow
     f_setStructureLow(structInternal, internalLow, bar_index - i_internalLen, time[i_internalLen])
+
+// --- Estructura dominante: pivotes escala 50 [T07B] ---
+// Mismo guard anti-repaint que swing/interno. Latencia inherente = i_majorLen velas
+// (~2 dias en H1): el pivote pertenece a la vela t = bar_index - i_majorLen y NO existe
+// hasta su cierre [§1.1]. Es correcto, no un bug.
+[majorHigh, majorLow] = f_detectSwings(i_majorLen)
+newMajorHigh = barstate.isconfirmed and not na(majorHigh)
+newMajorLow  = barstate.isconfirmed and not na(majorLow)
+if newMajorHigh
+    f_setStructureHigh(structMajor, majorHigh, bar_index - i_majorLen, time[i_majorLen])
+if newMajorLow
+    f_setStructureLow(structMajor, majorLow, bar_index - i_majorLen, time[i_majorLen])
 
 // --- Premium/Discount: dealing range [T07] ---
 // Reanclaje a los swings de ESCALA P/D (i_pdSwingLen, default 50 = swing de LuxAlgo; ref
@@ -519,6 +541,15 @@ if barstate.isconfirmed
         f_pushEvent(SMC_events, evStructInt, MAX_EVENTS)
     // Consolidar el bias del TF tras la posible ruptura swing de esta barra [T04].
     f_updateTFState(chartState, evStructSwing)
+
+// Ruptura estructural de escala DOMINANTE (50) [T07B]. Es la mayor -> guards true,true
+// (no necesita dedupe contra una escala superior). Eventos a array dedicado; NO se
+// llama f_updateTFState con este evento: el bias headline NO cambia (ver §1.3/§1.4).
+SMC_Event evStructMajor = na
+if barstate.isconfirmed
+    evStructMajor := f_detectStructure(structMajor, bar_index, time, true, true)
+    if not na(evStructMajor)
+        f_pushEvent(SMC_eventsMajor, evStructMajor, MAX_EVENTS)
 
 // --- Order Blocks [T05] ---
 // Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra

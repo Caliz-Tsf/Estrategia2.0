@@ -1,6 +1,6 @@
 # TASK F1-S1.2-T07B — Estructura BOS/CHoCH DOMINANTE (swing length 50)
 
-> **Tipo:** sesión dedicada (Sesion-022). **Estado:** ESPECIFICADO, sin implementar.
+> **Tipo:** sesión dedicada (Sesion-022). **Estado:** ✅ COMPLETADO E IMPLEMENTADO (Sesion-022, 2026-06-15). Compila 0/0, core-sync OK mismo SHA, validación visual con LuxAlgo (3 casos presentes, sin regresión T01–T07), aprobado por Freddy. Ver ADR-004 + Sesion-022. Pendiente Fase 3: bias dominante en scoring.
 > **Origen:** `docs/pendiente-estructura-swing-grande.md` (hallazgo del usuario en Sesion-021).
 > **Regla de oro de este task:** **NO romper nada de T01–T07.** Solo se AÑADE una capa;
 > no se modifica detección ya validada (swings 5, interno 3, OB, FVG, P/D).
