@@ -1,5 +1,10 @@
 # PENDIENTE — Estructura BOS/CHoCH de escala GRANDE (swing 50)
 
+> ✅ **CONVERTIDO EN TASK (2026-06-14).** El task de implementación completo y autocontenido
+> vive en **[`docs/task-T07B-estructura-swing-dominante.md`](task-T07B-estructura-swing-dominante.md)**
+> (Opción **C** ratificada, wiring listo, no rompe T01–T07). Este archivo queda como **nota de
+> origen / contexto** del hallazgo; para implementar, usar el task. No duplicar contenido aquí.
+
 > Abierto en Sesion-021 (2026-06-14) por hallazgo del usuario comparando con LuxAlgo.
 > **Tarea de SESIÓN DEDICADA y específica.** No mezclar con otra tarea. **No debe
 > romper nada de T01–T07 ya validado.** Revisar con `opus-max` (arquitecto) y planear
