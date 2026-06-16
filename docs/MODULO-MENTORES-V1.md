@@ -1,4 +1,12 @@
 # MODULO-MENTORES-V1 — Personalidades indexadas en Estrategia 2.0
+> ⚠ **PARCIALMENTE OBSOLETO (Sesion-023).** Los modelos citados aquí (nemotron-550b/49b vía
+> `critical_analysis`/`personality_agent`) quedaron suspendidos: NIM/OR están caídos, el primario es ahora
+> **Puter / claude-sonnet-4-6** (ver `~/.hermes/MODELO-GUIA.md`). El mecanismo de carga de personalidad
+> (PERFIL en system_prompt / `personality_agent`) también se revisó: la dirección nueva es **una skill de
+> Hermes por mentor** generada con `skill-creator`. El workflow definitivo de las 4 fases se está
+> rediseñando en la próxima sesión (ver memoria `mentores-modulo-plan` y el plan de Sesion-023). Lo de abajo
+> queda como histórico/inventario.
+>
 > Documentacion del modulo de mentores. NO reemplaza al WORKPLAN-MAESTRO-V2.md
 > ni toca codigo Pine/MQL5. Es un modulo paralelo que aprende de las
 > transcripciones y crea perfiles consultables desde Hermes.

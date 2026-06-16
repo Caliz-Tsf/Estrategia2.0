@@ -63,7 +63,9 @@ param(
 
     [int]$MaxSeconds = 0,
 
-    [string]$HermesModel = 'nvidia/llama-3.3-nemotron-super-49b-v1'
+    # Default Puter/Claude Sonnet (NIM suspendido — ver ~/.hermes/MODELO-GUIA.md). La transcripcion real
+    # la hace faster-whisper en GPU; este modelo solo orquesta los pasos.
+    [string]$HermesModel = 'claude-sonnet-4-6'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -175,7 +177,7 @@ Write-Host "  Modelo  : $HermesModel (hermes)" -ForegroundColor DarkGray
 Write-Host ""
 
 # Invocar hermes chat con prompt aplanado + --yolo (evita timeout por aprobacion de hooks)
-& hermes chat -q $flatPrompt -t terminal,file --yolo -Q -m $HermesModel --provider nvidia_nim
+& hermes chat -q $flatPrompt -t terminal,file --yolo -Q -m $HermesModel --provider puter
 $exit = $LASTEXITCODE
 
 if ($exit -eq 0) {
