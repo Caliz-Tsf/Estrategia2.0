@@ -133,6 +133,13 @@ pondera por confianza) y lo mapea a las 42 confluencias del §4.8 **SIN recalcul
 score cuantitativo; el voto del enjambre es una capa **cualitativa** de revisión/veto/descubrimiento. Separar
 ambas capas es obligatorio (anti-overfitting).
 
+> **Sesgo de confluencia (lectura honesta):** los mentores SMC coinciden porque comparten el mismo libro de
+> jugadas — son fuentes **correlacionadas, no confirmaciones independientes**. Que N agentes voten igual **no**
+> sube la probabilidad de éxito; el espejismo de consenso es el riesgo #1. **El valor del panel está en la
+> DISCREPANCIA, no en la coincidencia:** cuando un agente entra al FVG y otro exige un OB previo, son **dos
+> hipótesis distintas que se backtestean por separado**. La coincidencia dispara *investigar*; el backtest
+> IS/OOS **decide**. Por eso existe el rol **Escéptico**.
+
 ### Roster (4 familias)
 
 | Familia | Agente(s) | Función | Restricción |
@@ -140,7 +147,7 @@ ambas capas es obligatorio (anti-overfitting).
 | **Mentores** | `mentor-<n>` | Opina con la voz/metodología del mentor | Solo su metodología; cita sus videos; no inventa |
 | **Expertos-concepto** | E1–E6 | Juzga la señal contra la def. canónica de su grupo | Estricto a `reglas-smc-ict.md`, alineado al Pine real |
 | **Funcionales** | Noticias · Order Flow · Tendencias-MTF/Macro | Contexto externo al Pine | Solo hechos de su fuente; no dan call de trade |
-| **Control** | Router · Supervisor de Confluencia · Orchestrator · Entrenador | Orquestar · consolidar votos · decidir (laboratorio) · refinar mentores | Validador de Norms en código; nunca inventan señal |
+| **Control** | Router · Supervisor de Confluencia · Orchestrator · Entrenador · **Escéptico** | Orquestar · consolidar votos · decidir (laboratorio) · refinar mentores · **atacar toda confluencia que backtestee bien** | Validador de Norms en código; el **Escéptico es independiente** del que propone (no juzga su propia señal); nunca inventan señal |
 
 ### Flujo (corregido — termina en informe, no en MT5)
 

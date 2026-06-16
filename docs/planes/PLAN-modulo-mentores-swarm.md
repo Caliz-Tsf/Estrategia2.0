@@ -41,7 +41,8 @@ nativo). El EA **hereda** reglas cristalizadas; **no consulta** al enjambre. Ún
    criterio, evidencia}`. El Supervisor de Confluencia consolida **determinista** y **no recalcula** el score
    §4.8 (capa cualitativa de revisión/veto, no un segundo score).
 3. **Roster (4 familias):** Mentores · Expertos E1–E6 · Funcionales (Noticias, Order Flow, Tendencias-MTF) ·
-   Control (Router, Supervisor de Confluencia, Orchestrator, Entrenador). Flujo → **informe de confluencias
+   Control (Router, Supervisor de Confluencia, Orchestrator, Entrenador, **Escéptico** = ataca toda confluencia
+   que backtestee bien, **independiente** del proponente). Flujo → **informe de confluencias
    +/–** (diario de laboratorio) y, en modo copiloto, → **tú decides**. **No** termina en MT5.
 4. **MCP TV:** solo el Router toca TV (secuencial; una instancia CDP 9222). **Async:** no existe en 0.15.2;
    `delegate_task` síncrono para el broadcast.
