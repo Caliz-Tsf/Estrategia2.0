@@ -108,4 +108,10 @@ en `reglas-smc-ict.md §2.4` (`f_detectEQHL`).
 - NUEVO: `docs/adrs/ADR-005-enjambre-laboratorio-no-runtime-ea.md`.
 - SIN TOCAR: el CORE de Pine, los 5 scripts (el código ya construido es correcto; los cambios son de diseño/
   doc), los wheels nvidia-cu12.
+- PRÓXIMA SESIÓN (diseño — antes de bajar cursos): **design doc del swarm** — detallar al 100% el roster por
+  **arquetipos de agente** (Mentor SMC = juzga confluencia · Mentor Estrategia/Boxxocode = recupera estrategias
+  de su catálogo dado el contexto, como sugerencia · Experto E1–E6 · Funcional · Control/Escéptico). Por cada
+  agente: rol · dominio · conocimiento/grounding · entradas · salida (voto) · Norms · modelo sugerido ·
+  relaciones. **E1–E6 / funcionales / control se cierran ya** (no dependen de cursos); los **mentores se
+  instancian al bajar su curso** (ficha, cero-invención).
 - PRÓXIMA SESIÓN (al construir): añadir campo 9 a `hermes-prompt-analisis-mentor.txt`; archivar skills V1.
