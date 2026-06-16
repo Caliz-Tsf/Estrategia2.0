@@ -173,7 +173,7 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $wavPath)) {
 Write-Ok "WAV: $wavPath"
 
 # --- 3. faster-whisper GPU: transcribir ---
-Write-Step "Transcribiendo con faster-whisper (modelo=$Model, CPU int8)... (puede tardar)"
+Write-Step "Transcribiendo con faster-whisper (modelo=$Model, GPU cuda/float16, fallback CPU int8)... (puede tardar)"
 $wArgs = @($fwScript, $wavPath, '--model', $Model, '--output_dir', $WorkDir)
 if ($Language) { $wArgs += @('--language', $Language) }
 & python @wArgs
@@ -244,6 +244,6 @@ Write-Host "==========================================================" -Foregro
 Write-Host "  process-video OK" -ForegroundColor Green
 Write-Host "  Titulo : $title" -ForegroundColor Green
 Write-Host "  Nota   : $mdPath" -ForegroundColor Green
-Write-Host "  Modelo : $Model (faster-whisper CPU int8) | Idioma: $langLabel" -ForegroundColor Green
+Write-Host "  Modelo : $Model (faster-whisper GPU cuda/float16, fallback CPU int8) | Idioma: $langLabel" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 exit 0

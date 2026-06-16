@@ -4,12 +4,41 @@ Uso: python fw_transcribe.py <audio> --model <model> [--language <lang>] --outpu
 Salida: <output_dir>/<stem>.txt con la transcripcion completa.
 """
 import argparse
+import glob
 import io
+import os
+import site
 import sys
 from pathlib import Path
 
 # Forzar stdout UTF-8 para evitar UnicodeEncodeError en consola Windows (cp1252)
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+
+def _register_cuda_dll_dirs():
+    """Anade al DLL search path las carpetas bin de los wheels nvidia-*-cu12
+    (cuBLAS, cuDNN). CTranslate2 4.x busca cublas64_12.dll / cudnn64_9.dll y no
+    los encuentra solo con CUDA Toolkit 13 instalado. Los wheels cu12 aportan
+    las DLLs correctas sin tocar el toolkit del sistema. No-op en Linux/Mac."""
+    if os.name != 'nt':
+        return
+    roots = []
+    try:
+        roots.extend(site.getsitepackages())
+    except Exception:
+        pass
+    roots.append(site.getusersitepackages())
+    for root in roots:
+        for dll_dir in glob.glob(os.path.join(root, 'nvidia', '*', 'bin')):
+            if os.path.isdir(dll_dir):
+                try:
+                    os.add_dll_directory(dll_dir)
+                except OSError:
+                    pass
+                os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
+
+
+_register_cuda_dll_dirs()
 
 
 def main():
