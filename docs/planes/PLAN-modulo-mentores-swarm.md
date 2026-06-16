@@ -1,122 +1,107 @@
-# Plan — Módulo Mentores (5 scripts) + Diseño del Swarm de agentes
+# Plan — Módulo Mentores + Swarm  ·  v2 (corregido por Opus, Sesión-025)
 
-> Plan aprobado en Sesión-024 (2026-06-16). Copia versionada del plan de trabajo
-> (`~/.claude/plans/opus-ayudame-con-las-happy-codd.md`). Handoff de revisión:
-> [`HANDOFF-OPUS-MAX.md`](HANDOFF-OPUS-MAX.md). Workflow ejecutado:
-> [`../MODULO-MENTORES-WORKFLOW.md`](../MODULO-MENTORES-WORKFLOW.md).
+> **v2 (2026-06-16):** revisión integral del plan por Opus (el handoff de
+> [`HANDOFF-OPUS-MAX.md`](HANDOFF-OPUS-MAX.md)). Arquitectura raíz fijada en
+> **[ADR-005](../adrs/ADR-005-enjambre-laboratorio-no-runtime-ea.md)**. Workflow canónico:
+> [`../MODULO-MENTORES-WORKFLOW.md`](../MODULO-MENTORES-WORKFLOW.md). La v1 (Sesión-024) queda abajo en
+> "Cambios respecto a v1". **Esta sesión NO ejecuta nada — solo deja el plan corregido.**
 
-## Contexto
-El usuario cerró la S023 dejando tres tareas para la siguiente sesión, ya decididas en esta planificación:
-
-1. **Construir el módulo mentores** (los 5 scripts del pipeline transcripción→personalidad) según el
-   workflow rediseñado en S023. Hermes + workspace ya están operativos (Claude Sonnet 4.6 vía Puter;
-   faster-whisper en GPU RTX 3070). Ver memoria `[[mentores-modulo-plan]]`, `[[hermes-puter-provider]]`,
-   `[[hermes-workspace-setup]]`.
-2. **Decidir el modelo de los mentores** → DECIDIDO: **único `claude-sonnet-4-6` (Puter) por defecto, con
-   override opcional por mentor**. La fidelidad de la personalidad la da la ficha/skill, no el modelo.
-3. **Diseñar el grupo de agentes (swarm) + restricciones** → DECIDIDO: **solo propuesta + diagrama** esta
-   sesión (roles, funciones, conexiones, restricciones). Construirlos es Fase 5 (requiere mentores reales
-   primero). Entregable = doc + diagrama renderizado.
-
-Aparte (NO en este alcance, va DESPUÉS y casi seguro en otra sesión): **Pine T08 EQH/EQL** — al abrir TV
-confirmar 0/0 y re-guardar el slot por el cambio de estilo de etiqueta de S022.
-
-> Nota fija: los wheels `nvidia-cublas-cu12` + `nvidia-cudnn-cu12` (~1.2 GB) habilitan la GPU de
-> transcripción — **no tocarlos**.
+## Estado de lo construido (Sesión-024) — verificado contra la realidad
+Los 5 scripts del pipeline existen y **hacen lo que el plan dice** (verificado contra `config.yaml` real):
+`gemini-2.5-pro` (MAP) y `claude-sonnet-4-6` (REDUCE) están en Puter ✅ · `deepseek-v4-flash` existe (override
+válido) ✅ · `mcp_servers: tradingview-desktop` `enabled` ✅ · `max_concurrent_children: 3` ✅ · sidecar
+`model.txt` coherente entre `build-personality` y `hermes-chat-mentor` ✅. **Hermes real = 0.15.2.**
 
 ---
 
-## PARTE A — Decisión de modelo (cómo se implementa el override)
-- **Default global:** `claude-sonnet-4-6 --provider puter` para TODOS los mentores (consistente, barato,
-  visión+código). No se confía en el routing de `task_profiles` porque su cadena prioriza NIM/OR (caídos).
-- **Override por mentor (opcional):** la `ficha-mentor.md` puede declarar en su frontmatter `modelo: <id>`
-  (ej. `deepseek-v4-flash` para uno simple). Mecánica:
-  - `build-personality.ps1` copia ese valor a un sidecar `model.txt` dentro de la skill.
-  - `hermes-chat-mentor.ps1` resuelve el modelo en este orden: parámetro `-Model` explícito → `model.txt`
-    de la skill → default `claude-sonnet-4-6`. Siempre `--provider puter`.
-- Esto da "único por defecto" + "selector manual" sin bloque `personalities:` (que está vacío y no se lee).
+## PARTE A — Arquitectura (lo que más cambió) · [ADR-005]
+**El enjambre es laboratorio + copiloto, NO runtime del EA.** Tres tiempos que no se mezclan:
+Descubrimiento (enjambre, offline) → Validación (Strategy Tester IS/OOS, determinista) → Ejecución (EA MQL5
+nativo). El EA **hereda** reglas cristalizadas; **no consulta** al enjambre. Único puente EA↔exterior en vivo:
+**gate funcional determinista** (noticias/macro como veto binario con fail-safe; fuente **TBD**).
+- **Modo Laboratorio:** enjambre opina sobre histórico/replay → propone y juzga confluencias (informe, no
+  orden).
+- **Modo Copiloto:** enjambre opina en vivo vía MCP TV para asistir **tu** decisión manual/paper en fase TV.
+- Sin LLM, sin webhook, sin consulta al enjambre en el runtime del EA.
+
+## PARTE B — Decisión de modelo (sin cambios)
+Único `claude-sonnet-4-6`/Puter por defecto + override por mentor (`modelo:` → sidecar `model.txt`). Orden:
+`-Model` → sidecar → default. Siempre `--provider puter`.
+
+## PARTE C — Diseño del Swarm (corregido)
+1. **3 capas de contexto por agente** (Knowledge / Expertise / Norms), corregidas para el proyecto:
+   - Knowledge: Expertos → `reglas-smc-ict.md §`; Mentores → ficha; Funcionales → su fuente de datos.
+   - Expertise: Mentores → ficha 3/7/8 (canal real); Expertos → criterio válido/inválido **alineado al Pine
+     real**. Versionado por frontmatter.
+   - Norms: **dominio** (por agente, en SKILL.md) + **riesgo** (GLOBAL, una fuente, **en código** Pine/EA, no
+     por-mentor) + **validador determinista** en Orchestrator/Confluencia (descarta propuestas sin R:R≥1:3).
+   - **No** se crea `/context/<mentor>/{knowledge,expertise,norms}.md` (fragmenta la verdad). Cada agente =
+     skill de Hermes que **referencia** su grounding + Norms globales.
+2. **Esquema de voto** (contrato I/O que faltaba): `{agente, direccion, postura, confianza, concepto,
+   criterio, evidencia}`. El Supervisor de Confluencia consolida **determinista** y **no recalcula** el score
+   §4.8 (capa cualitativa de revisión/veto, no un segundo score).
+3. **Roster (4 familias):** Mentores · Expertos E1–E6 · Funcionales (Noticias, Order Flow, Tendencias-MTF) ·
+   Control (Router, Supervisor de Confluencia, Orchestrator, Entrenador). Flujo → **informe de confluencias
+   +/–** (diario de laboratorio) y, en modo copiloto, → **tú decides**. **No** termina en MT5.
+4. **MCP TV:** solo el Router toca TV (secuencial; una instancia CDP 9222). **Async:** no existe en 0.15.2;
+   `delegate_task` síncrono para el broadcast.
+
+## PARTE D — Metodología de laboratorio (NUEVO)
+El Strategy abre/cierra las entradas solo (es el backtester). Ciclo de una confluencia: hipótesis (agente) →
+regla en `SMC-Strategy.pine` → backtest IS/OOS 70/30 → `smc-backtesting-analyst` juzga → Replay para casos
+dudosos → entra/descarta. **Escalera:** backtest TV → replay → paper TV → [F4] EA en MT5 tester (+paridad) →
+[F5] demo MT5 → real. **Diario** en `docs/laboratorio/`. **No** construir plataforma nueva: orquestar Hermes +
+MCP TV + Strategy Tester + skills `smc-backtesting-analyst`/`smc-replay`/`smc-multi-scan`. MT5 (años de tick
+data) entra en **Fase 4**.
+
+## PARTE E — Pipeline de mentor unificado
+Canónico = pipeline S024 (ficha → `mentor-<slug>`). **Rescatar** del V1 el campo **9. Conflictos con el
+sistema 2.0** (cruza al mentor con `reglas-smc-ict.md` + scoring). **Archivar** las skills V1 (`consult-mentor`,
+`mentor-extract-profile`, `mentor-transcribe`) — no borrar sin backup.
 
 ---
 
-## PARTE B — Construir los 5 scripts + doc (Fases 1-4)
-Patrón común a respetar (copiar de `scripts/hermes-transcribe.ps1`): `$ErrorActionPreference='Stop'`,
-helpers `Write-Step/Ok/Bad`, archivo **solo-ASCII** (PS 5.1 lee .ps1 como ANSI; el `.md`/`.txt` de salida sí
-va UTF-8 sin BOM), aplanado del prompt antes de `hermes chat`, invocar con `--yolo -Q -m <modelo>
---provider puter`. Modelo siempre forzado a Puter.
+## Cambios respecto a v1 / Divergencias plan↔realidad resueltas
+1. **Flujo terminaba en MT5** (enjambre dispara trades) → enjambre = laboratorio + copiloto; EA hereda reglas;
+   gate funcional único puente. **[ADR-005]**
+2. El prompt de Sonnet asumía **Hermes v0.11.0** → real **0.15.2** (el `0.11.0` venía del `/health`
+   hardcodeado de `hermes-proxy.mjs`, engañoso).
+3. Asumía **OpenRouter** → real **Puter/Sonnet** (OR suspendido). El `proxy.mjs` usa OR con key hardcodeada,
+   pero es **puente de la UI del Workspace**, no la capa de decisión.
+4. Listaba agentes inexistentes (**Harmonic Concept, ADT, Argentina-Confluencia**) → real **E1–E6 + mentores
+   por canal + funcionales + control**.
+5. Asumía **webhook** ("en construcción") → **sin webhook** (regla dura).
+6. Ponía las Norms de riesgo en **`proxy.mjs`** → corregido: Norms en **Pine/EA** + validador en el
+   Orchestrator. El proxy es puente de UI, capa equivocada.
+7. Ponía Norms **por-mentor** → corregido: Norms de riesgo **globales** (una fuente); el mentor solo *sugiere*
+   (Expertise).
+8. **Faltaba el contrato I/O** entre agentes → añadido el **esquema de voto**.
+9. **Faltaba alineación experto↔Pine** → el Expertise de E1–E6 se ata a la implementación real.
+10. **Dos pipelines de mentor conviviendo** (V1 PERFIL-10 + S024 ficha-8) → unificar en S024 + rescatar campo
+    9; archivar V1.
+11. **Issues #5586/#11508** citados como evidencia de "no async" → **marcar para verificar** (números
+    inverosímiles); el hecho técnico se sostiene por el código instalado.
+12. **flag `--yolo` vs `-yolo`** y **toolset `file`/MCP en `hermes chat`** → confirmar en el E2E.
 
-- **B0. Doc** → `docs/MODULO-MENTORES-WORKFLOW.md` (4 fases + diagrama del swarm + tabla de scripts).
-- **B1. Fase 1 — Ingesta** → `scripts/process-channel.ps1` (determinista, sin LLM): `yt-dlp
-  --flat-playlist` → itera `process-video.ps1 -SubFolder "Mentores\<n>"`. Genera `Index.md`.
-- **B2. Fase 2 — Análisis (map-reduce)** → `scripts/hermes-analyze-mentor.ps1` +
-  `scripts/hermes-prompt-analisis-mentor.txt` (8 campos). MAP (gemini/deepseek) → REDUCE (Sonnet) →
-  `ficha-mentor.md`. **Orientado a archivos** (Hermes lee/escribe rutas con el toolset `file`) para evitar el
-  límite de longitud de comando con transcripciones largas.
-- **B3. Fase 3 — Personalidad** → `scripts/build-personality.ps1`: ficha → skill `mentor-<slug>`
-  (`SKILL.md` + reglas de rol + ruta del vault + sidecar `model.txt` si hay override).
-- **B4. Fase 4 — Uso** → `scripts/hermes-chat-mentor.ps1`: resuelve modelo y abre
-  `hermes chat -s mentor-<slug> --provider puter -t terminal,file`.
-- **B5. Limpieza** → `hermes-transcribe.ps1` default Puter (ya hecho en S023).
-
----
-
-## PARTE C — Diseño del Swarm (solo propuesta + diagrama)
-**Principio de restricción:** cada agente tiene dominio estricto; el `system_prompt` prohíbe responder fuera
-de él. Grounding: mentores → transcripciones; expertos-concepto → `docs/reglas-smc-ict.md`; funcionales →
-fuentes web/datos; control → solo meta.
-
-**Expertos-concepto (24 conceptos de reglas-smc-ict.md en 6 dominios):**
-E1 Estructura (§1.1-1.6) · E2 Order Blocks (§2.1, 2.6, 2.7, 2.8) · E3 Imbalance/FVG (§2.2, §4.1) ·
-E4 Premium/Discount & OTE (§2.3, §2.5) · E5 Liquidez (§2.4, §3.1, 3.2, 3.3, 3.5, 3.6, 3.7) ·
-E6 Tiempo & Sesiones (§3.4, §4.2, §4.3).
-
-**Roster (4 familias):** Mentores (SMC + estrategia, p.ej. `mentor-boxxocode`) · Expertos-concepto E1–E6 ·
-Funcionales (Noticias, Order Flow, Tendencias-MTF/Macro) · Control (Router, Supervisor de Confluencia,
-Orchestrator, Entrenador). Flujo: Pine/TV → Router (broadcast) → opinadores → Confluencia (42 confluencias
-§4.8) → Orchestrator (R:R≥1:3 + filtros) → MT5. Entrenador = loop offline que refina mentores.
-
-**C.2 MCP TV:** Hermes ya tiene `mcp_servers: tradingview-desktop`. Los agentes pueden manejar TV
-**secuencialmente** (uno por uno); **NO en paralelo** (una sola instancia CDP 9222 → se pisan). Recomendado:
-solo el Router toca TV y reparte el contexto.
-
-**C.3 Delegación async:** hermes-agent **0.15.2 NO** trae `delegate_task_async`/`async_delegation` (issue
-[#5586](https://github.com/NousResearch/hermes-agent/issues/5586) abierto;
-[#11508](https://github.com/NousResearch/hermes-agent/issues/11508) confirma el bloqueo). `delegate_task`
-corre hijos en paralelo (hasta `max_concurrent_children: 3`) pero bloquea al padre. Estables:
-`terminal(background=True, notify_on_complete=True)` y `cron`. **Recomendación:** usar `delegate_task` para el
-broadcast ("junta y decide"); `terminal background`/`cron` para tareas largas; no esperar async.
+## Nota de seguridad (fuera de alcance — pendiente)
+`D:\CODE\hermes\hermes-proxy.mjs:5` tiene una **API key de OpenRouter en texto plano**; `config.yaml` tiene la
+JWT de Puter y una key de NIM en texto plano. Va contra "secretos solo por env var" (incidente previo SEC-01).
+Rotar/mover a `.env` cuando se aborde (verificar antes si el `.mjs` está versionado en algún git).
 
 ---
 
-## PARTE D — Pine T08 EQH/EQL (FUERA de alcance hoy)
-Va después, casi seguro en otra sesión. Al abrir TV: confirmar 0/0 en los 3 scripts y re-guardar el slot por
-el cambio de etiqueta de S022. Concepto en `reglas-smc-ict.md §2.4` (`f_detectEQHL`).
+## Verificación end-to-end (NO en esta sesión)
+Ver [`../MODULO-MENTORES-WORKFLOW.md`](../MODULO-MENTORES-WORKFLOW.md) §Verificación. Primer mentor real
+sugerido: `process-channel.ps1 -ChannelUrl "https://www.youtube.com/@Boxxocode/videos" -Mentor "boxxocode"
+-MaxVideos 3`.
 
----
+## Pine T08 EQH/EQL (FUERA de alcance — otra sesión)
+Al abrir TV: confirmar 0/0 en los 3 scripts y re-guardar el slot por el cambio de etiqueta de S022. Concepto
+en `reglas-smc-ict.md §2.4` (`f_detectEQHL`).
 
-## PARTE E — Cierre + Handoff a Opus Max
-Versionar el plan en `docs/planes/` (este archivo), crear `docs/planes/HANDOFF-OPUS-MAX.md`, commit+push en
-`pine/sistema-completo`, entregar URLs de GitHub, cierre con `/smc-session-close`. El handoff instruye a Opus
-Max (nueva sesión de Claude Code sobre este repo) a revisar/reconstruir el plan invocando los agentes/skills
-(`smc-architect`, `planner`, `plan-eng-review`, `autoplan`).
-
----
-
-## Verificación end-to-end
-1. `process-channel.ps1 -ChannelUrl <playlist> -Mentor "Test" -MaxVideos 2` → `.md` + `Index.md`.
-2. `hermes-analyze-mentor.ps1 -MentorFolder "Mentores\Test"` → `ficha-mentor.md` (8 secciones `##`).
-3. `build-personality.ps1 -MentorFolder "Mentores\Test"` → skill `mentor-test` en `~/.hermes/skills/`.
-4. `hermes-chat-mentor.ps1 -Mentor test -q "<pregunta>"` → responde en voz/metodología, cita transcripciones,
-   rechaza lo de fuera de dominio.
-5. Override: `modelo: deepseek-v4-flash` en una ficha → el launcher lo usa.
-6. Confirmar Puter/Sonnet + transcripción por GPU.
-7. Primer mentor real (opcional): `process-channel.ps1 -ChannelUrl "https://www.youtube.com/@Boxxocode/videos"
-   -Mentor "boxxocode" -MaxVideos 3` → ingesta + ficha + skill; clasificar su contenido.
-
-## Archivos
-- NUEVOS (B-C): `docs/MODULO-MENTORES-WORKFLOW.md`, `scripts/process-channel.ps1`,
-  `scripts/hermes-prompt-analisis-mentor.txt`, `scripts/hermes-analyze-mentor.ps1`,
-  `scripts/build-personality.ps1`, `scripts/hermes-chat-mentor.ps1`.
-- NUEVOS (E): `docs/planes/PLAN-modulo-mentores-swarm.md`, `docs/planes/HANDOFF-OPUS-MAX.md`.
-- REUTILIZA: `scripts/process-video.ps1`, `scripts/fw_transcribe.py`, `scripts/hermes-transcribe.ps1`,
-  `~/.hermes/skills/mentor-extract-profile/SKILL.md`, `docs/reglas-smc-ict.md`.
-- NO TOCAR: el CORE de Pine, los wheels nvidia-cu12.
+## Archivos de este plan
+- ACTUALIZADOS: `docs/MODULO-MENTORES-WORKFLOW.md` (canónico), este plan.
+- NUEVO: `docs/adrs/ADR-005-enjambre-laboratorio-no-runtime-ea.md`.
+- SIN TOCAR: el CORE de Pine, los 5 scripts (el código ya construido es correcto; los cambios son de diseño/
+  doc), los wheels nvidia-cu12.
+- PRÓXIMA SESIÓN (al construir): añadir campo 9 a `hermes-prompt-analisis-mentor.txt`; archivar skills V1.
