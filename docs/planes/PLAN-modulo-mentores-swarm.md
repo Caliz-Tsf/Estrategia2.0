@@ -51,7 +51,10 @@ nativo). El EA **hereda** reglas cristalizadas; **no consulta** al enjambre. Ún
 El Strategy abre/cierra las entradas solo (es el backtester). Ciclo de una confluencia: hipótesis (agente) →
 regla en `SMC-Strategy.pine` → backtest IS/OOS 70/30 → `smc-backtesting-analyst` juzga → Replay para casos
 dudosos → entra/descarta. **Escalera:** backtest TV → replay → paper TV → [F4] EA en MT5 tester (+paridad) →
-[F5] demo MT5 → real. **Diario** en `docs/laboratorio/`. **No** construir plataforma nueva: orquestar Hermes +
+[F5] demo MT5 → real. **Diario** en `docs/laboratorio/` — S025 añade **(b) registro de atribución por agente** (track record de cada
+mentor: fecha/hora · agente · confluencia · win/loss · R; el resultado lo decide el trade, no el enjambre) +
+**diversidad de modelos por agente** vía override (reduce correlación; solo entre modelos capaces; Escéptico
+con modelo distinto). **No** construir plataforma nueva: orquestar Hermes +
 MCP TV + Strategy Tester + skills `smc-backtesting-analyst`/`smc-replay`/`smc-multi-scan`. MT5 (años de tick
 data) entra en **Fase 4**.
 

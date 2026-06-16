@@ -60,6 +60,14 @@ Default global `claude-sonnet-4-6` vía Puter para todos. Override por mentor co
 de la ficha → `build-personality.ps1` lo copia a `model.txt` → el launcher lo aplica
 (`-Model` → sidecar → default). La fidelidad la da la ficha/skill, no el modelo.
 
+> **Diversidad de modelos (nota de diseño, swarm):** el override por agente permite **asignar modelos
+> distintos a agentes distintos** (Sonnet, DeepSeek-v4, Gemini-2.5-pro, GLM-5…) para **reducir la correlación**
+> entre voces. Matices: (a) gran parte de la correlación viene del grounding SMC compartido, no del modelo →
+> ayuda al razonamiento/crítica, no elimina el eco; (b) diversificar **solo entre modelos capaces** (un modelo
+> débil = opinión equivocada, no diversa); (c) el **Escéptico debe correr un modelo distinto** del proponente;
+> (d) las locales (RTX 3070 8 GB) = voz diversa barata **solo en laboratorio offline**, no en el camino crítico
+> (latencia/capacidad); (e) **no sustituye el backtest** — mejora hipótesis, no las vuelve evidencia.
+
 ### Sub-tipos de mentor
 - **Mentor SMC/ICT** — destila metodología (voz + reglas). Aporta criterio de confluencia.
 - **Mentor de estrategia** — p. ej. `mentor-boxxocode` (`@Boxxocode`). Aporta **ideas**, no doctrina. **Sus
@@ -200,9 +208,13 @@ descarta.
 
 **Piezas a orquestar (no construir plataforma nueva):** Hermes `delegate_task` (broadcast) · MCP TV
 (`data_get_strategy_results`/`data_get_trades`/`data_get_equity`, `replay_*`, `capture_screenshot`) · Strategy
-Tester · skills `smc-backtesting-analyst` / `smc-replay` / `smc-multi-scan` · diario de experimentos en
-`docs/laboratorio/` (cada confluencia = quién la propuso, regla, resultados PF/WR/R/DD IS/OOS, veredicto,
-decisión).
+Tester · skills `smc-backtesting-analyst` / `smc-replay` / `smc-multi-scan` · **dos registros** en `docs/laboratorio/`: **(a) diario de reglas** (cada confluencia = quién la propuso,
+regla, resultados PF/WR/R/DD IS/OOS, veredicto, decisión); **(b) registro de atribución por agente** [NUEVO
+S025] = log estructurado (JSONL/CSV) `fecha_hora · símbolo · TF · agente/mentor · dirección · confianza ·
+confluencia · criterio · resultado(win/loss) · R · fuente(backtest/replay/forward)` → construye el **track
+record real de cada mentor/agente** (hit-rate por confluencia/sesión/símbolo, con muestra suficiente). El
+resultado lo decide el **trade** (reglas de salida deterministas), **no** el enjambre; una señal suelta es
+ruido.
 
 **MT5:** el histórico profundo (años de tick data del broker) entra en **Fase 4** (paridad + validación de
 spread/slippage), no antes — el sistema actual es Pine y no corre sobre datos de MT5.
