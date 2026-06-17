@@ -416,3 +416,62 @@ export f_detectEQHL(bool isHigh, float curPrice, int curBarIdx, int curBarTime, 
     if not na(prevPrice) and not na(curPrice) and math.abs(curPrice - prevPrice) <= threshold
         ev := SMC_Event.new(curPrice, isHigh ? DIR_BEAR : DIR_BULL, curBarIdx, curBarTime, "", isHigh ? KIND_EQH : KIND_EQL)
     ev
+
+// --- Pools de liquidez BSL/SSL [reglas-smc-ict §3.1] · T09 ---
+// f_buildPools: clusteriza EQH/EQL (kind KIND_EQH/KIND_EQL en 'eqhl') + swings NO barridos
+// (HH/LH -> BSL, HL/LL -> SSL) cuyos niveles caen dentro de tolPrice (= poolTol*ATR14) entre
+// si. Cada EQH/EQL aporta 2 touches (doble techo/suelo ya confirmado); cada swing no barrido
+// aporta 1. Cluster con touches >= minTouches -> SMC_Pool (level = promedio, dir = +1 BSL /
+// -1 SSL, touches = suma, barTime = mas reciente, swept = false; el sweep es T10). Diseño
+// propio (LuxAlgo no tiene pools). PURA -> golden tests MQL5 (ADR-002).
+export f_buildPools(array<SMC_Event> eqhl, array<SMC_Swing> swings, float tolPrice, int minTouches) =>
+    array<SMC_Pool> pools = array.new<SMC_Pool>()
+    for side = 0 to 1
+        bool isHigh = side == 0
+        array<float> lv = array.new<float>()
+        array<int>   wt = array.new<int>()
+        array<int>   tm = array.new<int>()
+        if array.size(eqhl) > 0
+            for j = 0 to array.size(eqhl) - 1
+                SMC_Event e = array.get(eqhl, j)
+                if (isHigh and e.kind == KIND_EQH) or (not isHigh and e.kind == KIND_EQL)
+                    array.push(lv, e.price)
+                    array.push(wt, 2)
+                    array.push(tm, e.barTime)
+        if array.size(swings) > 0
+            for m = 0 to array.size(swings) - 1
+                SMC_Swing s = array.get(swings, m)
+                bool hi = s.kind == KIND_HH or s.kind == KIND_LH
+                bool lo = s.kind == KIND_HL or s.kind == KIND_LL
+                if not s.swept and ((isHigh and hi) or (not isHigh and lo))
+                    array.push(lv, s.price)
+                    array.push(wt, 1)
+                    array.push(tm, s.barTime)
+        int n = array.size(lv)
+        if n > 0
+            array<int> ord = array.sort_indices(lv, order.ascending)
+            float clSum   = na
+            int   clCount = 0
+            int   clTouch = 0
+            int   clTime  = 0
+            for k = 0 to n - 1
+                int   idx   = array.get(ord, k)
+                float level = array.get(lv, idx)
+                int   w     = array.get(wt, idx)
+                int   t     = array.get(tm, idx)
+                float clMean = clCount > 0 ? clSum / clCount : na
+                if clCount > 0 and math.abs(level - clMean) <= tolPrice
+                    clSum   := clSum + level
+                    clCount := clCount + 1
+                    clTouch := clTouch + w
+                    clTime  := t > clTime ? t : clTime
+                else
+                    if clCount > 0 and clTouch >= minTouches
+                        array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
+                    clSum   := level
+                    clCount := 1
+                    clTouch := w
+                    clTime  := t
+            if clCount > 0 and clTouch >= minTouches
+                array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
+    pools

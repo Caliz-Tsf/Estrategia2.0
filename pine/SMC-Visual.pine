@@ -12,6 +12,7 @@ GRP_OB     = "Order Blocks"
 GRP_FVG    = "Fair Value Gaps"
 GRP_PD     = "Premium/Discount"
 GRP_EQHL   = "Equal Highs/Lows"
+GRP_LIQ    = "Liquidez"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 // Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
@@ -36,6 +37,9 @@ i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, max
 i_showEQHL     = input.bool(true,  "Mostrar Equal Highs/Lows",         group = GRP_EQHL)
 i_eqThreshold  = input.float(0.1,  "Umbral igualdad (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_EQHL)
 i_eqlLength    = input.int(3,      "Barras confirmacion EQH/EQL", minval = 1, group = GRP_EQHL)
+i_showPools    = input.bool(true,  "Mostrar pools de liquidez (BSL/SSL)", group = GRP_LIQ)
+i_poolTol      = input.float(0.1,  "Tolerancia cluster (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_LIQ)
+i_minTouches   = input.int(2,      "Toques minimos para pool", minval = 2, group = GRP_LIQ)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -474,6 +478,72 @@ f_detectEQHL(bool isHigh, float curPrice, int curBarIdx, int curBarTime, float p
         ev := SMC_Event.new(curPrice, isHigh ? DIR_BEAR : DIR_BULL, curBarIdx, curBarTime, "", isHigh ? KIND_EQH : KIND_EQL)
     ev
 
+// --- Pools de liquidez BSL/SSL [reglas-smc-ict §3.1] · T09 ---
+// f_buildPools: construye el set de pools de liquidez clusterizando EQH/EQL (§2.4, kind
+// KIND_EQH/KIND_EQL en 'eqhl') + swings NO barridos (HH/LH para BSL, HL/LL para SSL) cuyos
+// niveles caen dentro de tolPrice (= poolTol*ATR14) entre si. Cada EQH/EQL aporta 2 touches
+// (es un doble techo/suelo YA confirmado por T08); cada swing no barrido aporta 1. Un cluster
+// con touches >= minTouches forma un SMC_Pool: level = promedio de los niveles miembros,
+// dir = +1 BSL (lado highs, iman al alza) / -1 SSL (lado lows), touches = suma de aportes,
+// barTime = el del miembro mas reciente, swept = false (el barrido lo marca el sweep, T10).
+// Lado highs y lado lows por separado (no se mezclan). NO hay algoritmo LuxAlgo que portar:
+// LuxAlgo carece de pools -> diseño propio §3.1. Funcion PURA (reconstruye el set completo
+// desde sus entradas, sin estado ni series) -> determinista y portable a golden tests MQL5
+// (ADR-002). Clustering voraz sobre niveles ordenados, agrupando mientras |nivel-media| <=
+// tolPrice (media corrida del cluster). El consumidor la llama en barra confirmada cuando hay
+// un cambio relevante y vuelca el resultado en SMC_pools.
+f_buildPools(array<SMC_Event> eqhl, array<SMC_Swing> swings, float tolPrice, int minTouches) =>
+    array<SMC_Pool> pools = array.new<SMC_Pool>()
+    for side = 0 to 1
+        bool isHigh = side == 0
+        array<float> lv = array.new<float>()
+        array<int>   wt = array.new<int>()
+        array<int>   tm = array.new<int>()
+        if array.size(eqhl) > 0
+            for j = 0 to array.size(eqhl) - 1
+                SMC_Event e = array.get(eqhl, j)
+                if (isHigh and e.kind == KIND_EQH) or (not isHigh and e.kind == KIND_EQL)
+                    array.push(lv, e.price)
+                    array.push(wt, 2)
+                    array.push(tm, e.barTime)
+        if array.size(swings) > 0
+            for m = 0 to array.size(swings) - 1
+                SMC_Swing s = array.get(swings, m)
+                bool hi = s.kind == KIND_HH or s.kind == KIND_LH
+                bool lo = s.kind == KIND_HL or s.kind == KIND_LL
+                if not s.swept and ((isHigh and hi) or (not isHigh and lo))
+                    array.push(lv, s.price)
+                    array.push(wt, 1)
+                    array.push(tm, s.barTime)
+        int n = array.size(lv)
+        if n > 0
+            array<int> ord = array.sort_indices(lv, order.ascending)
+            float clSum   = na
+            int   clCount = 0
+            int   clTouch = 0
+            int   clTime  = 0
+            for k = 0 to n - 1
+                int   idx   = array.get(ord, k)
+                float level = array.get(lv, idx)
+                int   w     = array.get(wt, idx)
+                int   t     = array.get(tm, idx)
+                float clMean = clCount > 0 ? clSum / clCount : na
+                if clCount > 0 and math.abs(level - clMean) <= tolPrice
+                    clSum   := clSum + level
+                    clCount := clCount + 1
+                    clTouch := clTouch + w
+                    clTime  := t > clTime ? t : clTime
+                else
+                    if clCount > 0 and clTouch >= minTouches
+                        array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
+                    clSum   := level
+                    clCount := 1
+                    clTouch := w
+                    clTime  := t
+            if clCount > 0 and clTouch >= minTouches
+                array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
+    pools
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -687,6 +757,21 @@ if barstate.isconfirmed and not na(eqPivotLow)
     prevEqLowIdx  := bar_index - i_eqlLength
     prevEqLowTime := time[i_eqlLength]
 
+// --- Pools de liquidez [T09] ---
+// Reconstruye SMC_pools (BSL/SSL) desde SMC_eqhl + swings no barridos al confirmarse un
+// cambio relevante (nuevo swing o nuevo EQH/EQL): f_buildPools es pura, el estado vive en el
+// consumidor. tolPrice = i_poolTol*ATR14 (§3.1). El sweep que marca pool.swept llega en T10.
+if barstate.isconfirmed and (newSwingHigh or newSwingLow or not na(evEqHigh) or not na(evEqLow))
+    array<SMC_Pool> rebuiltPools = f_buildPools(SMC_eqhl, SMC_swings, i_poolTol * atr14, i_minTouches)
+    // Volcado COMPLETO (no f_pushPool/FIFO): el set lo construye f_buildPools primero
+    // BSL y luego SSL; un cap FIFO descartaria los BSL del frente (sesgo de lado, romperia
+    // los sweeps de compra T10). El set ya esta acotado por las entradas (no se acumula:
+    // array.clear cada rebuild). El nº de pools (alto con los defaults 0.1/2) es ruido de
+    // calibracion Fase 3, igual que EQH/EQL — no se filtra aqui (anti-overfitting, ADR-002).
+    array.clear(SMC_pools)
+    for p in rebuiltPools
+        array.push(SMC_pools, p)
+
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
 
@@ -765,6 +850,34 @@ if i_showEQHL and not na(evEqHigh)
     f_drawEQHL(eqHPrevTime, eqHPrevLvl, eqHPrevIdx, evEqHigh.barTime, evEqHigh.barIdx, evEqHigh.price, true)
 if i_showEQHL and not na(evEqLow)
     f_drawEQHL(eqLPrevTime, eqLPrevLvl, eqLPrevIdx, evEqLow.barTime, evEqLow.barIdx, evEqLow.price, false)
+
+// f_drawPools [T09]: linea horizontal del nivel del pool, anclada en su barra de origen
+// (pool.barTime) y extendida a la derecha hasta la barra actual (la liquidez vive hasta ser
+// barrida). DASHED para distinguir de la P/D (solida) y del EQHL (punteado que conecta los dos
+// pivotes). BSL (sobre highs) naranja / SSL (bajo lows) aqua. La etiqueta a la derecha muestra
+// "BSL ·N" / "SSL ·N" con N = touches (mas touches = mas liquidez acumulada, §3.1).
+f_drawPools(SMC_Pool p) =>
+    bool isBSL = p.dir == DIR_BULL
+    col = isBSL ? color.orange : color.aqua
+    line.new(p.barTime, p.level, time, p.level, xloc = xloc.bar_time, color = color.new(col, 0), style = line.style_dashed, width = 1)
+
+// En la ultima barra limpia y repinta las lineas + etiquetas de los pools vivos (<= MAX_POOLS).
+var array<line>  SMC_poolLines  = array.new<line>()
+var array<label> SMC_poolLabels = array.new<label>()
+if i_showPools and barstate.islast
+    for l in SMC_poolLines
+        line.delete(l)
+    for lb in SMC_poolLabels
+        label.delete(lb)
+    array.clear(SMC_poolLines)
+    array.clear(SMC_poolLabels)
+    if array.size(SMC_pools) > 0
+        for i = 0 to array.size(SMC_pools) - 1
+            SMC_Pool p = array.get(SMC_pools, i)
+            bool isBSL = p.dir == DIR_BULL
+            color col = isBSL ? color.orange : color.aqua
+            array.push(SMC_poolLines, f_drawPools(p))
+            array.push(SMC_poolLabels, label.new(bar_index, p.level, (isBSL ? "BSL ·" : "SSL ·") + str.tostring(p.touches), style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
@@ -878,7 +991,7 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
 // globales. El panel completo (PINE-PLAN §5) llega en T14.
 if i_showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 9, border_width = 1)
+    var table panel = table.new(position.top_right, 2, 10, border_width = 1)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
     color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
     // Bias dominante (50) [T07B]: lo fija structMajor.bias (no chartState, que es swing) -> el
@@ -890,7 +1003,7 @@ if i_showPanel and barstate.islast
     color  pdCol = pdZone == PD_PREMIUM ? color.red : pdZone == PD_DISCOUNT ? color.green : color.gray
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "T08",                 text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "T09",                 text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Bias dom. (50)", text_color = color.gray)
     table.cell(panel, 1, 1, majTxt, text_color = majCol)
     table.cell(panel, 0, 2, "Bias",    text_color = color.gray)
@@ -907,6 +1020,8 @@ if i_showPanel and barstate.islast
     table.cell(panel, 1, 7, str.tostring(array.size(SMC_eventsMajor)),  text_color = color.gray)
     table.cell(panel, 0, 8, "EQ H/L", text_color = color.gray)
     table.cell(panel, 1, 8, str.tostring(array.size(SMC_eqhl)),  text_color = color.gray)
+    table.cell(panel, 0, 9, "Pools", text_color = color.gray)
+    table.cell(panel, 1, 9, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).
