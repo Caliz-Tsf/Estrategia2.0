@@ -36,6 +36,9 @@ export const int KIND_HH = 40
 export const int KIND_HL = 41
 export const int KIND_LH = 42
 export const int KIND_LL = 43
+// Equal Highs/Lows (SMC_Event.kind, §2.4 · T08)
+export const int KIND_EQH = 44
+export const int KIND_EQL = 45
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -398,3 +401,18 @@ export f_premiumDiscount(float price, float top, float bottom, float eqLo, float
         pct  := (price - bottom) / (top - bottom)
         zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
     [zone, pct]
+
+// --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
+// f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
+// getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del
+// MISMO tipo a nivel "igual" = doble techo/suelo -> liquidez (BSL arriba en EQH, SSL abajo
+// en EQL), objetivo de sweep y base de los pools (§Liquidez). Escala propia eqlLength=3,
+// separada del swingLen=5 y del pdSwingLen=50. Pura: iguales si |cur-prev| <= threshold
+// (= eqThreshold*ATR14, §2.4; LuxAlgo usa "<" estricto, doc usa "<="). Devuelve SMC_Event
+// en el nivel actual (kind EQH/EQL; dir EQH=BEAR / EQL=BULL) o na. El anclaje izquierdo
+// del dibujo lo aporta el consumidor. Golden tests MQL5 directos (ADR-002).
+export f_detectEQHL(bool isHigh, float curPrice, int curBarIdx, int curBarTime, float prevPrice, float threshold) =>
+    SMC_Event ev = na
+    if not na(prevPrice) and not na(curPrice) and math.abs(curPrice - prevPrice) <= threshold
+        ev := SMC_Event.new(curPrice, isHigh ? DIR_BEAR : DIR_BULL, curBarIdx, curBarTime, "", isHigh ? KIND_EQH : KIND_EQL)
+    ev

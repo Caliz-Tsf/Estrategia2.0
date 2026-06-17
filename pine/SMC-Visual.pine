@@ -11,6 +11,7 @@ GRP_STRUCT = "Estructura"
 GRP_OB     = "Order Blocks"
 GRP_FVG    = "Fair Value Gaps"
 GRP_PD     = "Premium/Discount"
+GRP_EQHL   = "Equal Highs/Lows"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 // Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
@@ -32,6 +33,9 @@ i_showCE       = input.bool(true,  "Mostrar nivel CE (50%)",           group = G
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
 i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
+i_showEQHL     = input.bool(true,  "Mostrar Equal Highs/Lows",         group = GRP_EQHL)
+i_eqThreshold  = input.float(0.1,  "Umbral igualdad (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_EQHL)
+i_eqlLength    = input.int(3,      "Barras confirmacion EQH/EQL", minval = 1, group = GRP_EQHL)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -65,6 +69,8 @@ KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
 KIND_LL = 43
+KIND_EQH = 44
+KIND_EQL = 45
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -448,6 +454,26 @@ f_premiumDiscount(float price, float top, float bottom, float eqLo, float eqHi) 
         zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
     [zone, pct]
 
+// --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
+// f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
+// getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del
+// MISMO tipo a nivel "igual" = doble techo/suelo -> liquidez acumulada (BSL arriba en
+// EQH, SSL abajo en EQL) que el precio tiende a barrer: alimenta los pools (§Liquidez) y
+// es objetivo de sweep. Escala PROPIA eqlLength=3 (= equalHighsLowsLengthInput), separada
+// del swingLen=5 estructural y del pdSwingLen=50 (cf. P/D T07) -> mas sensible. Funcion
+// pura: compara el pivote recien confirmado (curPrice) con el PREVIO del mismo tipo
+// (prevPrice); iguales si |cur-prev| <= threshold (= eqThreshold*ATR14, §2.4). NB: LuxAlgo
+// usa "<" estricto; la doc usa "<=" -> desviacion trivial, la doc manda. Devuelve un
+// SMC_Event en el nivel actual (kind KIND_EQH/KIND_EQL; dir informativa EQH=BEAR /
+// EQL=BULL, cf. color bearish/bullish de LuxAlgo) o na si no son iguales o falta el
+// previo. El anclaje izquierdo del dibujo (barra del pivote previo) lo aporta el consumidor
+// (estado plano). Pura (sin series) -> golden tests MQL5 directos (ADR-002).
+f_detectEQHL(bool isHigh, float curPrice, int curBarIdx, int curBarTime, float prevPrice, float threshold) =>
+    SMC_Event ev = na
+    if not na(prevPrice) and not na(curPrice) and math.abs(curPrice - prevPrice) <= threshold
+        ev := SMC_Event.new(curPrice, isHigh ? DIR_BEAR : DIR_BULL, curBarIdx, curBarTime, "", isHigh ? KIND_EQH : KIND_EQL)
+    ev
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -616,6 +642,51 @@ if barstate.isconfirmed
     if not na(fvgZone)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
 
+// --- Equal Highs / Equal Lows [T08] ---
+// Pivotes a escala PROPIA eqlLength (3) — no los swing(5)/major(50). Mismo guard anti-
+// repaint (el pivote pertenece a t = bar_index - i_eqlLength). El pivote recien confirmado
+// se compara con el PREVIO del mismo tipo (estado plano prevEq*); si son "iguales"
+// (f_detectEQHL) -> SMC_Event EQH/EQL al array dedicado SMC_eqhl (futuros pools §Liquidez,
+// NO el SMC_events del OB). El previo SIEMPRE avanza al actual (cf. LuxAlgo, que actualiza
+// equalHigh/equalLow tras el check, iguales o no). Las vars eq?Prev* guardan el ancla del
+// pivote previo ANTES de sobrescribir, para que el dibujo trace el segmento (Visual).
+var array<SMC_Event> SMC_eqhl = array.new<SMC_Event>()
+var float prevEqHigh     = na
+var int   prevEqHighIdx  = na
+var int   prevEqHighTime = na
+var float prevEqLow      = na
+var int   prevEqLowIdx   = na
+var int   prevEqLowTime  = na
+[eqPivotHigh, eqPivotLow] = f_detectSwings(i_eqlLength)
+float eqHPrevLvl  = na
+int   eqHPrevIdx  = na
+int   eqHPrevTime = na
+float eqLPrevLvl  = na
+int   eqLPrevIdx  = na
+int   eqLPrevTime = na
+SMC_Event evEqHigh = na
+SMC_Event evEqLow  = na
+if barstate.isconfirmed and not na(eqPivotHigh)
+    evEqHigh := f_detectEQHL(true, eqPivotHigh, bar_index - i_eqlLength, time[i_eqlLength], prevEqHigh, i_eqThreshold * atr14)
+    if not na(evEqHigh)
+        eqHPrevLvl  := prevEqHigh
+        eqHPrevIdx  := prevEqHighIdx
+        eqHPrevTime := prevEqHighTime
+        f_pushEvent(SMC_eqhl, evEqHigh, MAX_EVENTS)
+    prevEqHigh     := eqPivotHigh
+    prevEqHighIdx  := bar_index - i_eqlLength
+    prevEqHighTime := time[i_eqlLength]
+if barstate.isconfirmed and not na(eqPivotLow)
+    evEqLow := f_detectEQHL(false, eqPivotLow, bar_index - i_eqlLength, time[i_eqlLength], prevEqLow, i_eqThreshold * atr14)
+    if not na(evEqLow)
+        eqLPrevLvl  := prevEqLow
+        eqLPrevIdx  := prevEqLowIdx
+        eqLPrevTime := prevEqLowTime
+        f_pushEvent(SMC_eqhl, evEqLow, MAX_EVENTS)
+    prevEqLow     := eqPivotLow
+    prevEqLowIdx  := bar_index - i_eqlLength
+    prevEqLowTime := time[i_eqlLength]
+
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
 
@@ -677,13 +748,31 @@ if i_showMajor and not na(evStructMajor)
     int pivotB = evStructMajor.dir == DIR_BULL ? structMajor.highBarIdx : structMajor.lowBarIdx
     f_drawStructureMajor(pivotT, pivotB, evStructMajor.price, evStructMajor.barTime, evStructMajor.barIdx, evStructMajor.kind, evStructMajor.dir)
 
+// f_drawEQHL [T08]: linea punteada conectando los dos pivotes "iguales" + etiqueta
+// EQH/EQL en el midpoint (bar_index). AZUL para ambos (EQH y EQL, pref. usuario): doble
+// techo/suelo = liquidez (BSL arriba / SSL abajo). EQH encima de la linea, EQL debajo.
+// Linea por xloc.bar_time (robusta en spans largos, cf. f_drawStructureMajor); etiqueta
+// por bar_index (centra pese a los gaps de finde). Replica drawEqualHighLow LuxAlgo (style
+// dotted).
+f_drawEQHL(int prevTime, float prevLevel, int prevBarIdx, int curTime, int curBarIdx, float level, bool isHigh) =>
+    col = color.blue
+    txt = isHigh ? "EQH" : "EQL"
+    line.new(prevTime, prevLevel, curTime, level, xloc = xloc.bar_time, color = col, style = line.style_dotted, width = 1)
+    int midIdx = math.round((prevBarIdx + curBarIdx) / 2.0)
+    label.new(midIdx, level, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small)
+
+if i_showEQHL and not na(evEqHigh)
+    f_drawEQHL(eqHPrevTime, eqHPrevLvl, eqHPrevIdx, evEqHigh.barTime, evEqHigh.barIdx, evEqHigh.price, true)
+if i_showEQHL and not na(evEqLow)
+    f_drawEQHL(eqLPrevTime, eqLPrevLvl, eqLPrevIdx, evEqLow.barTime, evEqLow.barIdx, evEqLow.price, false)
+
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
-// origen no repinta). Alcista teal / bajista rojo. Transparencia por estado: activa
-// solida, parcial mas tenue, mitigada gris. La invalida no se dibuja (pasa a breaker
-// en su tarea). Devuelve el box para gestionarlo (clear/redibujo).
+// origen no repinta). Alcista VERDE OSCURO / bajista ROJO OSCURO (pref. usuario, para no
+// confundir con el teal/rojo de la estructura). Transparencia por estado: activa solida,
+// parcial mas tenue, mitigada gris. La invalida no se dibuja (pasa a breaker en su tarea).
 f_drawOB(SMC_Zone z) =>
-    col = z.dir == DIR_BULL ? color.teal : color.red
+    col = z.dir == DIR_BULL ? color.rgb(0, 100, 0) : color.rgb(120, 20, 20)
     int transp = z.state == ZS_ACTIVE ? 75 : z.state == ZS_PARTIAL ? 83 : 90
     color bg = z.state == ZS_MITIGATED ? color.new(color.gray, 90) : color.new(col, transp)
     box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = bg, border_color = color.new(col, 50), border_width = 1, xloc = xloc.bar_index)
@@ -705,10 +794,10 @@ if i_showOB and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_OB and z.state != ZS_INVALID
                 array.push(SMC_obBoxes, f_drawOB(z))
-                // Nombre del OB (pref. usuario): tag de texto a la derecha del origen,
-                // centrado en la mitad de la zona, sin recuadro (fondo transparente).
-                color obCol = z.dir == DIR_BULL ? color.teal : color.red
-                array.push(SMC_obLabels, label.new(z.barIdx, (z.top + z.bottom) / 2.0, "OB", style = label.style_label_right, color = color.new(obCol, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
+                // Nombre del OB (pref. usuario): texto CENTRADO dentro de la caja (medio
+                // horizontal entre origen y barra actual, medio vertical), sin recuadro.
+                color obCol = z.dir == DIR_BULL ? color.rgb(120, 220, 120) : color.rgb(235, 120, 120)
+                array.push(SMC_obLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "OB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
 // vela media (z.barIdx-1, cf. LuxAlgo lastTime=time[1]) para cubrir el desplazamiento
@@ -742,10 +831,10 @@ if i_showFVG and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_FVG and z.state != ZS_INVALID
                 array.push(SMC_fvgBoxes, f_drawFVG(z))
-                // Nombre del FVG (pref. usuario): tag de texto a la derecha del origen,
-                // centrado en la mitad de la zona, sin recuadro (fondo transparente).
+                // Nombre del FVG (pref. usuario): texto CENTRADO dentro de la caja (medio
+                // horizontal entre origen y barra actual, medio vertical), sin recuadro.
                 color fvgCol = z.dir == DIR_BULL ? color.lime : color.orange
-                array.push(SMC_fvgLabels, label.new(z.barIdx - 1, (z.top + z.bottom) / 2.0, "FVG", style = label.style_label_right, color = color.new(fvgCol, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_fvgLabels, label.new(math.round((z.barIdx - 1 + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "FVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
                 if i_showCE and z.state != ZS_MITIGATED
                     float ce = (z.top + z.bottom) / 2.0
                     color ceCol = z.dir == DIR_BULL ? color.lime : color.orange
@@ -789,7 +878,7 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
 // globales. El panel completo (PINE-PLAN §5) llega en T14.
 if i_showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 8, border_width = 1)
+    var table panel = table.new(position.top_right, 2, 9, border_width = 1)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
     color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
     // Bias dominante (50) [T07B]: lo fija structMajor.bias (no chartState, que es swing) -> el
@@ -801,7 +890,7 @@ if i_showPanel and barstate.islast
     color  pdCol = pdZone == PD_PREMIUM ? color.red : pdZone == PD_DISCOUNT ? color.green : color.gray
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "T07B",                text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "T08",                 text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Bias dom. (50)", text_color = color.gray)
     table.cell(panel, 1, 1, majTxt, text_color = majCol)
     table.cell(panel, 0, 2, "Bias",    text_color = color.gray)
@@ -816,6 +905,8 @@ if i_showPanel and barstate.islast
     table.cell(panel, 1, 6, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
     table.cell(panel, 0, 7, "Ev. dom.", text_color = color.gray)
     table.cell(panel, 1, 7, str.tostring(array.size(SMC_eventsMajor)),  text_color = color.gray)
+    table.cell(panel, 0, 8, "EQ H/L", text_color = color.gray)
+    table.cell(panel, 1, 8, str.tostring(array.size(SMC_eqhl)),  text_color = color.gray)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).

@@ -22,6 +22,8 @@ i_fvgThreshold = input.float(0.25, "Umbral tamaño FVG (x ATR14)", minval = 0.0,
 i_pdSwingLen  = input.int(50, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
 i_pdEqBand    = input.float(5.0, "Banda equilibrium P/D (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_SCORE)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
+i_eqThreshold = input.float(0.1, "Umbral igualdad EQH/EQL (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_SCORE)
+i_eqlLength   = input.int(3, "Barras confirmacion EQH/EQL", minval = 1, group = GRP_SCORE)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -55,6 +57,8 @@ KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
 KIND_LL = 43
+KIND_EQH = 44
+KIND_EQL = 45
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -438,6 +442,26 @@ f_premiumDiscount(float price, float top, float bottom, float eqLo, float eqHi) 
         zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
     [zone, pct]
 
+// --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
+// f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
+// getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del
+// MISMO tipo a nivel "igual" = doble techo/suelo -> liquidez acumulada (BSL arriba en
+// EQH, SSL abajo en EQL) que el precio tiende a barrer: alimenta los pools (§Liquidez) y
+// es objetivo de sweep. Escala PROPIA eqlLength=3 (= equalHighsLowsLengthInput), separada
+// del swingLen=5 estructural y del pdSwingLen=50 (cf. P/D T07) -> mas sensible. Funcion
+// pura: compara el pivote recien confirmado (curPrice) con el PREVIO del mismo tipo
+// (prevPrice); iguales si |cur-prev| <= threshold (= eqThreshold*ATR14, §2.4). NB: LuxAlgo
+// usa "<" estricto; la doc usa "<=" -> desviacion trivial, la doc manda. Devuelve un
+// SMC_Event en el nivel actual (kind KIND_EQH/KIND_EQL; dir informativa EQH=BEAR /
+// EQL=BULL, cf. color bearish/bullish de LuxAlgo) o na si no son iguales o falta el
+// previo. El anclaje izquierdo del dibujo (barra del pivote previo) lo aporta el consumidor
+// (estado plano). Pura (sin series) -> golden tests MQL5 directos (ADR-002).
+f_detectEQHL(bool isHigh, float curPrice, int curBarIdx, int curBarTime, float prevPrice, float threshold) =>
+    SMC_Event ev = na
+    if not na(prevPrice) and not na(curPrice) and math.abs(curPrice - prevPrice) <= threshold
+        ev := SMC_Event.new(curPrice, isHigh ? DIR_BEAR : DIR_BULL, curBarIdx, curBarTime, "", isHigh ? KIND_EQH : KIND_EQL)
+    ev
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -597,6 +621,27 @@ if barstate.isconfirmed
     if not na(fvgZone)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
 
+// --- Equal Highs / Equal Lows [T08] ---
+// Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_eqhl para el
+// scoring/pools (Sprint 2.1). Pivotes escala PROPIA eqlLength (3); el pivote recien
+// confirmado se compara con el previo del mismo tipo (estado plano prevEq*); si son
+// "iguales" (f_detectEQHL) -> SMC_Event al array dedicado SMC_eqhl. El previo siempre
+// avanza al actual. Anti-repaint [§1.1].
+var array<SMC_Event> SMC_eqhl = array.new<SMC_Event>()
+var float prevEqHigh = na
+var float prevEqLow  = na
+[eqPivotHigh, eqPivotLow] = f_detectSwings(i_eqlLength)
+if barstate.isconfirmed and not na(eqPivotHigh)
+    SMC_Event evEqHigh = f_detectEQHL(true, eqPivotHigh, bar_index - i_eqlLength, time[i_eqlLength], prevEqHigh, i_eqThreshold * atr14)
+    if not na(evEqHigh)
+        f_pushEvent(SMC_eqhl, evEqHigh, MAX_EVENTS)
+    prevEqHigh := eqPivotHigh
+if barstate.isconfirmed and not na(eqPivotLow)
+    SMC_Event evEqLow = f_detectEQHL(false, eqPivotLow, bar_index - i_eqlLength, time[i_eqlLength], prevEqLow, i_eqThreshold * atr14)
+    if not na(evEqLow)
+        f_pushEvent(SMC_eqhl, evEqLow, MAX_EVENTS)
+    prevEqLow := eqPivotLow
+
 // === MTF ===
 // request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
 
@@ -621,7 +666,7 @@ if barstate.islastconfirmedhistory
     [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
     string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
-    lbl := label.new(bar_index, high, "SMC Strategy — P/D T07\nbias=" + biasTxt + "  P/D=" + pdCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    lbl := label.new(bar_index, high, "SMC Strategy — T08\nbias=" + biasTxt + "  P/D=" + pdCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.
