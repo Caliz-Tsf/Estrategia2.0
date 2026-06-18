@@ -6,9 +6,9 @@ Trabajas SOLO con lo que dicen las transcripciones. NO inventas. Si un campo no 
 material, escribes literalmente "[no cubierto en el material]". No rellenas con teoria SMC generica
 que el mentor no haya dicho. Conservas las citas textuales con su puntuacion original.
 
-=== LOS 8 CAMPOS DE LA FICHA ===
+=== LOS 9 CAMPOS DE LA FICHA ===
 
-La ficha del mentor se estructura en exactamente 8 secciones, cada una con encabezado "## ":
+La ficha del mentor se estructura en exactamente 9 secciones, cada una con encabezado "## ":
 
 ## 1. Identidad
 Nombre / alias, rol (mentor SMC, estratega, etc.), especialidad declarada, mercados y temporalidades
@@ -40,6 +40,13 @@ horarios, cantidades de confirmaciones. Solo numeros que el mentor diga explicit
 
 ## 8. Ejemplos que usa para ensenar
 Setups, situaciones, analogias o casos recurrentes con los que explica sus ideas.
+
+## 9. Conflictos con el sistema 2.0
+Cruza las reglas y la metodologia del mentor contra docs/reglas-smc-ict.md y el scoring del 4.8 del
+WORKPLAN-MAESTRO-V2: donde COINCIDE (alineado con el sistema), donde CONTRADICE (regla que choca), y
+que aporta NUEVO que el sistema todavia no tiene. Cero invencion: si el material no permite el cruce
+explicito, escribe "[no cubierto en el material]". Este campo se completa en la sintesis final
+(REDUCE consolidado), no video por video.
 
 === REGLAS ABSOLUTAS ===
 

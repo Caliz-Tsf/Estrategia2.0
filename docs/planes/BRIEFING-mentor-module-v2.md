@@ -16,6 +16,8 @@
 3. **Grounding obligatorio + cero invención.** Cada mentor se **instancia solo al bajar su curso** (de su `ficha-mentor.md`, 9 campos, incluido **"Conflictos con el sistema"**). Su lectura se ancla en `docs/reglas-smc-ict.md` (fuente de verdad SMC) y emite un **voto estructurado** (contrato I/O), no prosa libre. Un mentor sin curso descargado **no existe** (no se inventa su metodología).
 4. **El destino del debate NO es una orden, es un registro.** La síntesis va a: (a) **diario de laboratorio** (`docs/laboratorio/`) como hipótesis fechada y falsable, y (b) **sugerencia copiloto** al humano en la fase TV. La promoción a regla/peso pasa SIEMPRE por validación determinista (anti-overfitting, **ADR-002** umbrales congelados hasta Fase 3).
 
+> **Actualización (ADR-007):** el enjambre es **continuo y en tiempo real** (no solo on-demand): unos agentes evalúan confluencias actuales vía TV MCP y otros cazan nuevas; al cerrar una positiva en TV se registra con **autoría**, y se hace **scoring/atribución de agentes** (track record, combinación de votos). Y se precisa que **el EA SÍ razona**, pero como motor de scoring determinista que **generaliza** confluencias similares-no-exactas — no como exact-match ni como LLM en vivo. El diseño detallado del motor del EA + el runtime del enjambre está en `HANDOFF-OPUS-MAX-ea-razonamiento-y-enjambre.md`.
+
 ---
 
 ## 1. Objetivo (reformulado)

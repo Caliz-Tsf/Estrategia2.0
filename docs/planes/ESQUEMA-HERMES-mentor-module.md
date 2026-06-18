@@ -54,6 +54,8 @@
 
 Resumen de responsabilidades: **Cron = cuándo · Kanban = dónde queda · Swarm/Operations = quién y cómo discute · Knowledge+Memoria = con qué fundamento · Conductor = cómo lo veo · MCP = de dónde sale el dato.**
 
+> **ADR-007 (continuo + scoring de agentes):** este loop NO es solo on-demand — corre **en tiempo real de forma continua** (unos agentes evalúan confluencias actuales, otros descubren nuevas), registra en `docs/laboratorio/` las que cierran positivas con **autoría**, y mantiene **track record/score por agente** para ponderar votos. El EA al final de la cadena **razona** por scoring que generaliza (determinista), no consulta al enjambre en vivo. Diseño: `HANDOFF-OPUS-MAX-ea-razonamiento-y-enjambre.md`.
+
 ---
 
 ## 3. UN mentor con MÚLTIPLES conocimientos (respuesta a tu pregunta)
