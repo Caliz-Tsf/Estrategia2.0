@@ -93,10 +93,13 @@ export type SMC_Swing
 export type SMC_Pool
     float  level
     int    dir
-    int    touches  = 1
+    int    touches      = 1
     int    barTime
-    bool   swept    = false
-    string tf       = ""
+    bool   swept        = false
+    string tf           = ""
+    int    barIdx       = na
+    int    sweptBarTime = na
+    int    sweptBarIdx  = na
 
 // Snapshot de estado por timeframe (campos planos: lo que cruza request.security)
 export type SMC_TFState
@@ -474,4 +477,79 @@ export f_buildPools(array<SMC_Event> eqhl, array<SMC_Swing> swings, float tolPri
                     clTime  := t
             if clCount > 0 and clTouch >= minTouches
                 array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
+    pools
+
+// --- Ciclo de vida de pools: upsert + barrido (sweep) [reglas-smc-ict §3.1/§3.2] · T09b/T10 ---
+// Modelo PERSISTENTE: el consumidor mantiene el set de pools entre velas y lo actualiza incremental
+// (no rebuild), de modo que recuerda que pool ya fue barrido. f_buildPools se conserva para
+// seeding/golden tests pero el set vivo se gestiona con estas funciones. Todas PURAS -> golden
+// tests MQL5 (ADR-002).
+
+// f_upsertPool: alta/merge incremental de UN candidato contra el set vivo (swept==false) del mismo
+// lado, con |level-p.level| <= tolPrice. Merge: touches += weight, level = media ponderada, bar* del
+// mas reciente. Si no hay match -> alta (touches = weight). Visibilidad (touches >= minTouches) la
+// decide el consumidor.
+export f_upsertPool(array<SMC_Pool> pools, bool isHigh, float level, int weight, int barTime, int barIdx, float tolPrice) =>
+    int poolDir  = isHigh ? DIR_BULL : DIR_BEAR
+    int matchIdx = -1
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if not p.swept and p.dir == poolDir and math.abs(level - p.level) <= tolPrice
+                matchIdx := i
+                break
+    if matchIdx >= 0
+        SMC_Pool p = array.get(pools, matchIdx)
+        int newTouches = p.touches + weight
+        p.level   := (p.level * p.touches + level * weight) / newTouches
+        p.touches := newTouches
+        if barTime > p.barTime
+            p.barTime := barTime
+            p.barIdx  := barIdx
+    else
+        array.push(pools, SMC_Pool.new(level, poolDir, weight, barTime, false, "", barIdx, na, na))
+    pools
+
+// f_markPoolsSwept: marca swept los pools vivos cruzados por la barra. BSL barrido si barHigh >=
+// level; SSL si barLow <= level. Registra sweptBarTime/Idx. Llamar en barstate.isconfirmed.
+export f_markPoolsSwept(array<SMC_Pool> pools, float barHigh, float barLow, int barTime, int barIdx) =>
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if not p.swept
+                bool crossed = (p.dir == DIR_BULL and barHigh >= p.level) or (p.dir == DIR_BEAR and barLow <= p.level)
+                if crossed
+                    p.swept        := true
+                    p.sweptBarTime := barTime
+                    p.sweptBarIdx  := barIdx
+    pools
+
+// f_detectSweep [T10, §3.2]: clasifica trampa sobre los pools barridos en esta barra (sweptBarIdx ==
+// barIdx). BSL barrido con close < level -> sesgo DIR_BEAR; SSL con close > level -> DIR_BULL (sesgo
+// contrario, confluencia #10). Close mas alla = ruptura, no sweep. Devuelve el SMC_Event KIND_SWEEP
+// del pool con mas touches, o na. minTouches exige pool real.
+export f_detectSweep(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, int minTouches) =>
+    SMC_Event ev = na
+    int bestTouches = 0
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if p.swept and p.sweptBarIdx == barIdx and p.touches >= minTouches
+                bool trapBSL = p.dir == DIR_BULL and barClose < p.level
+                bool trapSSL = p.dir == DIR_BEAR and barClose > p.level
+                if (trapBSL or trapSSL) and p.touches > bestTouches
+                    bestTouches := p.touches
+                    ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_SWEEP)
+    ev
+
+// f_prunePools: acota el set a maxN. Borra primero el pool barrido mas antiguo; si no hay barridos,
+// el del frente. Mantiene los imanes vivos el mayor tiempo posible.
+export f_prunePools(array<SMC_Pool> pools, int maxN) =>
+    while array.size(pools) > maxN
+        int rm = -1
+        for i = 0 to array.size(pools) - 1
+            if array.get(pools, i).swept
+                rm := i
+                break
+        array.remove(pools, rm >= 0 ? rm : 0)
     pools

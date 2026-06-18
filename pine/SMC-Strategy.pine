@@ -101,10 +101,13 @@ type SMC_Swing
 type SMC_Pool
     float  level
     int    dir
-    int    touches  = 1
+    int    touches      = 1
     int    barTime
-    bool   swept    = false
-    string tf       = ""
+    bool   swept        = false
+    string tf           = ""
+    int    barIdx       = na
+    int    sweptBarTime = na
+    int    sweptBarIdx  = na
 type SMC_TFState
     int    bias           = 0
     float  lastBOSPrice   = na
@@ -530,6 +533,92 @@ f_buildPools(array<SMC_Event> eqhl, array<SMC_Swing> swings, float tolPrice, int
                 array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
     pools
 
+// --- Ciclo de vida de pools: upsert + barrido (sweep) [reglas-smc-ict §3.1/§3.2] · T09b/T10 ---
+// [P1] Modelo PERSISTENTE: en vez de reconstruir el set cada vela (f_buildPools borra el estado
+// swept), el consumidor MANTIENE SMC_pools entre velas y lo actualiza incremental. Asi se recuerda
+// que pool ya fue barrido (deja de ser iman) -> el grafico no se satura con niveles muertos.
+// f_buildPools se conserva (export / golden test / seeding) pero YA NO se llama en deteccion.
+// Todas estas funciones son PURAS (reciben precios/arrays por parametro, no dibujan, no leen series
+// ni request.security) -> portables a golden tests MQL5 (ADR-002).
+
+// f_upsertPool: alta/merge INCREMENTAL de UN candidato (swing o EQH/EQL) contra el set VIVO. Busca
+// un pool vivo (swept==false) del mismo lado (isHigh -> BSL, else SSL) con |level-p.level| <=
+// tolPrice; si existe -> merge (touches += weight, level = media ponderada por touches, barTime/
+// barIdx = el mas reciente); si no -> alta nueva (touches = weight). La visibilidad (touches >=
+// minTouches) la decide el dibujo/scoring, NO esta funcion: un swing suelto (weight 1) queda
+// almacenado para poder fusionar con otro cercano y promover a pool.
+f_upsertPool(array<SMC_Pool> pools, bool isHigh, float level, int weight, int barTime, int barIdx, float tolPrice) =>
+    int poolDir  = isHigh ? DIR_BULL : DIR_BEAR
+    int matchIdx = -1
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if not p.swept and p.dir == poolDir and math.abs(level - p.level) <= tolPrice
+                matchIdx := i
+                break
+    if matchIdx >= 0
+        SMC_Pool p = array.get(pools, matchIdx)
+        int newTouches = p.touches + weight
+        p.level   := (p.level * p.touches + level * weight) / newTouches
+        p.touches := newTouches
+        if barTime > p.barTime
+            p.barTime := barTime
+            p.barIdx  := barIdx
+    else
+        array.push(pools, SMC_Pool.new(level, poolDir, weight, barTime, false, "", barIdx, na, na))
+    pools
+
+// f_markPoolsSwept: marca como barrido (swept) cada pool VIVO cuyo nivel cruza la barra actual.
+// BSL (dir==DIR_BULL) barrido si barHigh >= level; SSL (dir==DIR_BEAR) si barLow <= level. El pool
+// deja de ser iman (la liquidez se tomo, sea trampa o ruptura) y registra sweptBarTime/Idx para el
+// marcador (Propuesta B). La CLASIFICACION trampa-vs-ruptura la hace f_detectSweep. Llamar SOLO en
+// barstate.isconfirmed (anti-repaint; §3.2 evalua al cierre).
+f_markPoolsSwept(array<SMC_Pool> pools, float barHigh, float barLow, int barTime, int barIdx) =>
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if not p.swept
+                bool crossed = (p.dir == DIR_BULL and barHigh >= p.level) or (p.dir == DIR_BEAR and barLow <= p.level)
+                if crossed
+                    p.swept        := true
+                    p.sweptBarTime := barTime
+                    p.sweptBarIdx  := barIdx
+    pools
+
+// f_detectSweep [T10, §3.2]: clasifica TRAMPA sobre los pools barridos EN esta barra (sweptBarIdx ==
+// barIdx). Un pool es sweep (no ruptura) si el close vuelve dentro del rango: BSL barrido con close <
+// level -> trampa bajista (sesgo DIR_BEAR); SSL barrido con close > level -> trampa alcista
+// (DIR_BULL). El sesgo es CONTRARIO al lado barrido (§3.2, confluencia #10). Si el close queda mas
+// alla del nivel = ruptura/false breakout (§3.7), NO es sweep. Devuelve el SMC_Event KIND_SWEEP del
+// pool mas relevante (mayor touches), o na. PURA. minTouches exige que el pool barrido sea un pool
+// real (>= toques), no un nivel de un solo swing.
+f_detectSweep(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, int minTouches) =>
+    SMC_Event ev = na
+    int bestTouches = 0
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if p.swept and p.sweptBarIdx == barIdx and p.touches >= minTouches
+                bool trapBSL = p.dir == DIR_BULL and barClose < p.level
+                bool trapSSL = p.dir == DIR_BEAR and barClose > p.level
+                if (trapBSL or trapSSL) and p.touches > bestTouches
+                    bestTouches := p.touches
+                    ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_SWEEP)
+    ev
+
+// f_prunePools: acota el set persistente a maxN. Borra primero el pool BARRIDO mas antiguo
+// (historial/marcador, prescindible); si no hay barridos, el del frente (mas antiguo). Mantiene los
+// imanes vivos el mayor tiempo posible. PURA (muta y devuelve el array).
+f_prunePools(array<SMC_Pool> pools, int maxN) =>
+    while array.size(pools) > maxN
+        int rm = -1
+        for i = 0 to array.size(pools) - 1
+            if array.get(pools, i).swept
+                rm := i
+                break
+        array.remove(pools, rm >= 0 ? rm : 0)
+    pools
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -537,6 +626,7 @@ var array<SMC_Swing> SMC_swings = array.new<SMC_Swing>()
 var array<SMC_Event> SMC_events = array.new<SMC_Event>()
 var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
+var array<SMC_Event> SMC_sweeps = array.new<SMC_Event>()
 
 // --- Swings [T02] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_swings
@@ -698,31 +788,39 @@ if barstate.isconfirmed
 var array<SMC_Event> SMC_eqhl = array.new<SMC_Event>()
 var float prevEqHigh = na
 var float prevEqLow  = na
-bool poolsDirty = newSwingHigh or newSwingLow
 [eqPivotHigh, eqPivotLow] = f_detectSwings(i_eqlLength)
+SMC_Event evEqHigh = na
+SMC_Event evEqLow  = na
 if barstate.isconfirmed and not na(eqPivotHigh)
-    SMC_Event evEqHigh = f_detectEQHL(true, eqPivotHigh, bar_index - i_eqlLength, time[i_eqlLength], prevEqHigh, i_eqThreshold * atr14)
+    evEqHigh := f_detectEQHL(true, eqPivotHigh, bar_index - i_eqlLength, time[i_eqlLength], prevEqHigh, i_eqThreshold * atr14)
     if not na(evEqHigh)
         f_pushEvent(SMC_eqhl, evEqHigh, MAX_EVENTS)
-        poolsDirty := true
     prevEqHigh := eqPivotHigh
 if barstate.isconfirmed and not na(eqPivotLow)
-    SMC_Event evEqLow = f_detectEQHL(false, eqPivotLow, bar_index - i_eqlLength, time[i_eqlLength], prevEqLow, i_eqThreshold * atr14)
+    evEqLow := f_detectEQHL(false, eqPivotLow, bar_index - i_eqlLength, time[i_eqlLength], prevEqLow, i_eqThreshold * atr14)
     if not na(evEqLow)
         f_pushEvent(SMC_eqhl, evEqLow, MAX_EVENTS)
-        poolsDirty := true
     prevEqLow := eqPivotLow
 
-// --- Pools de liquidez [T09] ---
-// Mismo set que Visual pero sin dibujo (la Strategy solo pobla SMC_pools para el scoring,
-// Sprint 2.1). f_buildPools (CORE) es pura; se reconstruye al haber nuevo swing o EQH/EQL.
-if barstate.isconfirmed and poolsDirty
-    array<SMC_Pool> rebuiltPools = f_buildPools(SMC_eqhl, SMC_swings, i_poolTol * atr14, i_minTouches)
-    // Volcado COMPLETO (no f_pushPool/FIFO): un cap FIFO descartaria los BSL (que f_buildPools
-    // construye antes que los SSL) -> sesgo de lado. El set ya esta acotado por las entradas.
-    array.clear(SMC_pools)
-    for p in rebuiltPools
-        array.push(SMC_pools, p)
+// --- Pools de liquidez: persistentes con ciclo de vida [T09b] + sweep [T10] ---
+// Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_pools/SMC_sweeps para el
+// scoring, Sprint 2.1). [P1] Modelo PERSISTENTE (reemplaza el rebuild stateless de T09):
+//   upsert candidatos -> mark barridos (high/low) -> sweep (close, T10) -> prune a MAX_POOLS.
+// NO array.clear: el set persiste y recuerda swept. Orden upsert -> mark (esqueleto §3.A.3).
+if barstate.isconfirmed
+    if newSwingHigh
+        f_upsertPool(SMC_pools, true,  swingHigh, 1, time[i_swingLen], bar_index - i_swingLen, i_poolTol * atr14)
+    if newSwingLow
+        f_upsertPool(SMC_pools, false, swingLow,  1, time[i_swingLen], bar_index - i_swingLen, i_poolTol * atr14)
+    if not na(evEqHigh)
+        f_upsertPool(SMC_pools, true,  evEqHigh.price, 2, evEqHigh.barTime, evEqHigh.barIdx, i_poolTol * atr14)
+    if not na(evEqLow)
+        f_upsertPool(SMC_pools, false, evEqLow.price,  2, evEqLow.barTime, evEqLow.barIdx, i_poolTol * atr14)
+    f_markPoolsSwept(SMC_pools, high, low, time, bar_index)
+    SMC_Event evSweep = f_detectSweep(SMC_pools, close, bar_index, time, i_minTouches)
+    if not na(evSweep)
+        f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
+    f_prunePools(SMC_pools, MAX_POOLS)
 
 // === MTF ===
 // request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
@@ -748,7 +846,7 @@ if barstate.islastconfirmedhistory
     [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
     string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
-    lbl := label.new(bar_index, high, "SMC Strategy — T09\nbias=" + biasTxt + "  P/D=" + pdCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    lbl := label.new(bar_index, high, "SMC Strategy — T09b\nbias=" + biasTxt + "  P/D=" + pdCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.
