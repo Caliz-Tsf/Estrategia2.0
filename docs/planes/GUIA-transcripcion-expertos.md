@@ -62,20 +62,37 @@ Flujo por mentor: bajar curso principal → ficha (9 campos) → bajar playlists
 
 ---
 
-## 4. Expertos y URLs — PENDIENTE QUE LLENES
+## 4. Expertos y URLs (recibidas) — comandos los genero la PRÓXIMA sesión
 
-Lléname esta tabla con los canales/playlists (la próxima sesión genero los comandos por-video concretos como el del curso principal):
+> Los comandos 5-en-5 por playlist los genera **Claude** (no Opus Max) en la próxima sesión. Aquí quedan registradas las URLs.
 
-| Mentor | Tipo | URL canal/playlist | ¿Bajado? |
-|---|---|---|---|
-| No soy liquidez — curso | playlist | `https://www.youtube.com/playlist?list=PLOwrTT3cFiA5Qo_k27soDPvyPo3Wr7T8S` | ✅ |
-| No soy liquidez — price action | playlist | `<URL>` | ⬜ |
-| No soy liquidez — live execution | playlist | `<URL>` | ⬜ |
-| No soy liquidez — high precision entries | playlist | `<URL>` | ⬜ |
-| No soy liquidez — smart money flow | playlist | `<URL>` | ⬜ |
-| Boxxocode | canal `/videos` | `<URL>` | ⬜ |
-| Experto 3 | ? | `<URL>` | ⬜ |
-| Experto 4 | ? | `<URL>` | ⬜ |
+### No soy liquidez — curso ✅ + 6 playlists extra (mismo agente, varios knowledge)
+| Tema | Videos | Playlist | Slug carpeta |
+|---|---:|---|---|
+| Curso (madre) ✅ | 65 | `PLOwrTT3cFiA5Qo_k27soDPvyPo3Wr7T8S` | `no-soy-liquidez` |
+| Lectura Price Action | 22 | `PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf` | `no-soy-liquidez-price-action` |
+| Smart Money Flow | 20 | `PLOwrTT3cFiA4CdYD__c0Sqd1U81IX8nVb` | `no-soy-liquidez-smart-money-flow` |
+| Live Execution | 32 | `PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR` | `no-soy-liquidez-live-execution` |
+| Entradas de Alta Precisión SMC | 8 | `PLOwrTT3cFiA4Oq5tx5WsmTu5hZ9LIbroi` | `no-soy-liquidez-entradas-precision` |
+| High Precision Trading Entries | 7 | `PLOwrTT3cFiA4J3gr2fBoqvcxhE746uUvY` | `no-soy-liquidez-high-precision` |
+| Sesión de Feedback | 23 | `PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9` | `no-soy-liquidez-feedback` |
+
+### ICT — Inner Circle Trader (🇬🇧 creador de ICT, mentor-experto raíz)
+Canal: `https://www.youtube.com/@InnerCircleTrader/playlists` — **el canal completo es la fuente**.
+| Rol | Playlist | ID |
+|---|---|---|
+| **MADRE** (conceptos actualizados) | 2026 ICT Smart Money Concept Lecture | `PLVgHx4Z63paaja3GW0dYSr6y_V2Sttx4-` |
+| Agregados clave | 2025 Lecture Series · ICT 2024 Mentorship · 2023 ICT Mentorship · 2022 ICT Mentorship · ICT Forex Precision Trading Concepts · ICT OTE Pattern Recognition · ICT Market Maker Series · Mastering High Probability Scalping | (ver canal) |
+
+> Slug ICT: `ict` (madre) + `ict-<tema>`. Es el mentor-experto de los conceptos raíz → su knowledge alimenta el cierre del gap (matriz).
+
+### Los otros 4 expertos ya tienen su doc de comandos
+`COMANDOS-boxxocode.md` · `COMANDOS-profittrading.md` · `COMANDOS-tj-trading.md` · `COMANDOS-fedex.md`.
+
+### ⚠️ Traducción inglés → español (ICT y Boxxocode)
+faster-whisper **solo traduce hacia inglés** (no a español). Para fuentes en inglés:
+- **Transcribir en su idioma nativo** (`-Language en`) — es lo más fiel.
+- **El español sale en la SÍNTESIS (Fase 2):** la ficha y los knowledge `.md` se generan con **Gemini**, que produce el resumen **en español** aunque la transcripción esté en inglés. No hace falta traducir las transcripciones crudas (eso solo añade error); se traduce/sintetiza el conocimiento, no el verbatim.
 
 ---
 

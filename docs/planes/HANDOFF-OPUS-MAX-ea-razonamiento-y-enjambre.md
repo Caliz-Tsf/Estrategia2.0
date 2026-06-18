@@ -64,6 +64,12 @@ Los mentores ICT enseñan ~25-30 conceptos que **NO están** en `reglas-smc-ict.
   - **teoría propia a escrutar** (Gray Pool, Event Horizon, Price Delivery Continuum, Early Buyer/Seller) → validar valor real vs reempaque (campo 9).
 - **Entregar:** un plan de cómo se amplían las confluencias y los sprints de Fase 1 para absorber el gap **sin romper** el scoring ya validado ni la congelación ADR-002 (se define mecánica; pesos en Fase 3). El EA generaliza sobre el set ampliado.
 
+### 3.E — PILOTO: UN agente de referencia completo ("No soy liquidez") + entorno Hermes
+**Norte del usuario:** se baja TODO "No soy liquidez" y se usa **SOLO este mentor como ejemplo** para **rediseñar todo lo que se hará en el enjambre (cron, task/kanban, swarm, workspace, etc.)**. El objetivo es dejar **UN agente construido de punta a punta** —con todo lo que necesita y todo lo que le solicita al workspace— de modo que **los demás mentores se clonen/ajusten de esa plantilla** según la función que cada uno cumpla.
+- Diseñar (estructura/ingeniería) el **entorno completo del agente piloto**: su perfil/skill, sus carpetas de knowledge, qué herramientas de Hermes usa (cron, kanban, file, MCP TV), qué le pide al workspace, cómo entra al loop continuo del enjambre, cómo emite su voto y cómo registra en el diario de laboratorio.
+- Producirlo como **plantilla parametrizable** (el resto de mentores = misma estructura, distinta ficha/knowledge/función). Entregar los **documentos de creación del entorno** (qué crear en Hermes y en el repo).
+- **Insumo:** el curso completo de "No soy liquidez" (ficha 9 campos + knowledge por tema) más sus playlists extra y el canal ICT (fuente raíz de los conceptos).
+
 ---
 
 ## 4. Restricciones y reglas duras (no negociables)
@@ -72,6 +78,8 @@ Los mentores ICT enseñan ~25-30 conceptos que **NO están** en `reglas-smc-ict.
 - Umbrales/pesos **congelados hasta Fase 3** (ADR-002): el diseño no "ajusta" umbrales, define la *mecánica*.
 - El EA no consulta LLM en runtime (ADR-005/007). Único puente vivo = gate determinista.
 - Símbolo-agnóstico (ADR-001): validar en EURUSD primero.
+- **NO duplicar lo existente:** Opus Max no recrea ni altera conceptos/objetos ya creados ni los que ya están en `reglas-smc-ict.md`/el Pine validado (T01–T10). Solo **construye sobre ellos** o añade lo que falta (el gap §3.D). Antes de proponer un concepto, verificar que no exista ya (matriz).
+- **Fuera del alcance de Opus Max:** la generación de los **documentos de comandos de descarga** (listas por playlist, lotes de 5) la hace **Claude Code en la sesión siguiente**, NO Opus Max. Este handoff es estructura/ingeniería, no operación de descarga.
 
 ## 5. Entregables esperados de Opus Max
 1. **Spec del motor de razonamiento del EA** (§3.A) con el modelo de generalización medible y el mapeo Pine→MQL5.
