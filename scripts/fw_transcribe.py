@@ -41,6 +41,18 @@ def _register_cuda_dll_dirs():
 _register_cuda_dll_dirs()
 
 
+def fmt_ts(seconds):
+    """Formatea segundos como marca de tiempo legible: M:SS, o H:MM:SS si hay horas.
+    Se antepone a cada segmento en la transcripcion para poder citar el minuto/segundo
+    exacto del video (sin capa visual: solo alineacion audio->tiempo)."""
+    s = int(round(seconds or 0))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        return f'{h}:{m:02d}:{sec:02d}'
+    return f'{m}:{sec:02d}'
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('audio', help='Ruta al archivo de audio (WAV)')
@@ -80,7 +92,7 @@ def main():
         for seg in segs:  # iteracion lazy — CUDA error ocurre aqui
             text = seg.text.strip()
             if text:
-                parts.append(text)
+                parts.append(f'[{fmt_ts(seg.start)}] {text}')
                 print(f'[fw] [{seg.start:6.1f}s] {text}', flush=True)
         return parts
 
