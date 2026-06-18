@@ -39,6 +39,11 @@
     Si > 0, recorta cada video a los primeros N segundos (pasa a process-video.ps1).
     Util para una prueba rapida de todo el canal. Default: 0 (completo).
 
+.PARAMETER PlaylistItems
+    Rango/seleccion de items de la playlist al estilo yt-dlp (ej: "6-10", "1,3,5",
+    "11-15"). Permite bajar por LOTES (de a 5, etc.) sin reprocesar lo ya bajado.
+    Si se setea, tiene prioridad sobre -MaxVideos. Default: '' (toda la lista).
+
 .PARAMETER VaultRoot
     Raiz del vault. Default: D:\obsidian\boveda MENTE\Mente
 
@@ -62,6 +67,7 @@ param(
     [string]$Model = 'small',
     [int]$MaxVideos = 0,
     [int]$MaxSeconds = 0,
+    [string]$PlaylistItems = '',
     [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente'
 )
 
@@ -101,7 +107,12 @@ Write-Step "Destino: $destDir"
 # --- 1. Resolver la lista de IDs de video (sin descargar) ---
 Write-Step "Resolviendo lista de videos con yt-dlp (--flat-playlist)..."
 $ytArgs = @('--flat-playlist', '--no-warnings', '--print', '%(id)s')
-if ($MaxVideos -gt 0) { $ytArgs = @('--playlist-end', "$MaxVideos") + $ytArgs }
+if ($PlaylistItems) {
+    # Lote explicito (ej. "6-10"): prioridad sobre -MaxVideos.
+    $ytArgs = @('--playlist-items', $PlaylistItems) + $ytArgs
+} elseif ($MaxVideos -gt 0) {
+    $ytArgs = @('--playlist-end', "$MaxVideos") + $ytArgs
+}
 $ytArgs += $ChannelUrl
 
 $ids = & yt-dlp @ytArgs 2>&1 | Where-Object { $_ -and ($_ -match '^[\w-]{6,}$') } | ForEach-Object { $_.Trim() }
