@@ -117,7 +117,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Url') {
     $sourceUrl = $Url
     Write-Step "Leyendo metadatos con yt-dlp..."
     # id|title|duration  (separador | improbable en estos campos)
-    $meta = & yt-dlp --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
+    # player_client=android salta el chequeo anti-bot "Sign in to confirm you're not a bot"
+    # de YouTube (las cookies de Chrome/Edge no se pueden leer: cifrado app-bound v127+, issue 10927).
+    $meta = & yt-dlp --extractor-args 'youtube:player_client=android' --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
     if ($LASTEXITCODE -ne 0 -or -not $meta) {
         Write-Bad "yt-dlp no pudo leer el video: $meta"
         exit 1
@@ -131,7 +133,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Url') {
     $slug = Get-Slug $title
     $audioPath = Join-Path $WorkDir "$slug.mp3"
 
-    $ytArgs = @('-x', '--audio-format', 'mp3', '--audio-quality', '0',
+    # -f 18/bestaudio/best: con el cliente android solo el formato 18 (mp4 360p + audio mp4a 44k)
+    # esta disponible sin PO token; -x extrae el audio a mp3 (44k basta para Whisper).
+    $ytArgs = @('--extractor-args', 'youtube:player_client=android', '-f', '18/bestaudio/best',
+                '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '--no-warnings', '-o', $audioPath, $Url)
     if ($MaxSeconds -gt 0) {
         $ytArgs = @('--download-sections', "*0-$MaxSeconds") + $ytArgs
