@@ -53,6 +53,17 @@ Diseñar el **loop continuo** del enjambre como laboratorio:
 ### 3.C — Traza de la cadena completa + refactors
 Producir un **diagrama y una tabla de extremo a extremo**: enjambre (descubre) → diario laboratorio → validación IS/OOS → cristalización de pesos → Pine scoring → EA MQL5. En cada eslabón: qué existe, qué falta, **qué refactor se necesita** para que quede "medido y conectado". Marcar explícitamente cualquier cambio en Pine/core y cómo respeta core-sync, anti-repaint y ADR-002 (umbrales congelados hasta Fase 3).
 
+### 3.D — Integración del GAP de conceptos al Pine master plan (decisión del usuario)
+Los mentores ICT enseñan ~25-30 conceptos que **NO están** en `reglas-smc-ict.md`. **Decisión del usuario:** integrarlos al plan maestro de Pine por el **MISMO proceso que todos** (no atajos), porque **Pine y el EA deben verlos, identificarlos y calcularlos como confluencias**. Insumo completo: **`docs/planes/MATRIZ-conceptos-cobertura.md`** (inventario have/falta/variante + clasificación por tipo).
+- **Revisar** `WORKPLAN-MAESTRO-V2.md` §4.8 (42 confluencias) + `docs/workplan/PINE-PLAN.md` + `reglas-smc-ict.md` y decidir, por cada concepto faltante, **cuál es:**
+  - **primitiva nueva de detección** (Vacuum/Propulsion Block, Volume Imbalance/SIVI/BIVI, Immediate Rebalance, BPR, CISD, Breakaway Gap, IPR, Standard Deviation, IFVG/True FVG como variantes propias, niveles-gap de apertura NWOG/NDOG/ORG, SMT≈requiere símbolo correlacionado) → entra por el pipeline estándar (spec cuantificada → `f_detect*` puro → 0/0 + core-sync → validación ≥90 → confluencia §4.8 + golden test MQL5);
+  - **sesgo/contexto** (Draw on Liquidity, IRL/ERL, HRLR/LRLR, IPDA, PDArray Matrix) → alimenta el bias/scoring, no es zona;
+  - **modelo de entrada / composición** (IOFED, ICT Entry Model 2022, Low Hanging Fruit, Unicorn, MMXM, Silver Bullet, Power of 3) → **NO es primitiva**; vive en el **motor de razonamiento del EA** (§3.A) como combinación de primitivas + timing;
+  - **tiempo/macro** (NY Lunch/Midnight/ORG macros, RTH/ETH) → extiende §3.4 Kill Zones;
+  - **noticias** (NFP) → el **gate determinista** de ADR-005, no confluencia;
+  - **teoría propia a escrutar** (Gray Pool, Event Horizon, Price Delivery Continuum, Early Buyer/Seller) → validar valor real vs reempaque (campo 9).
+- **Entregar:** un plan de cómo se amplían las confluencias y los sprints de Fase 1 para absorber el gap **sin romper** el scoring ya validado ni la congelación ADR-002 (se define mecánica; pesos en Fase 3). El EA generaliza sobre el set ampliado.
+
 ---
 
 ## 4. Restricciones y reglas duras (no negociables)
@@ -73,3 +84,17 @@ Producir un **diagrama y una tabla de extremo a extremo**: enjambre (descubre) �
 - **Mentores SMC** (No soy liquidez ✅, Profittrading, TJ Trading, Fedex): metodología/confluencias → grounding del scoring y de qué confluencias buscar.
 - **Boxxocode** (experto estrategias/automatización-EA): backtesting, money management, construcción de EAs → insumo directo del **motor del EA** y Fase 4.
 - Cada mentor = 1 agente con **varias carpetas de knowledge** (`knowledge/<slug>/<tema>.md`). Ver `ESQUEMA-HERMES-mentor-module.md` §3.
+
+## 7. Adopciones del ecosistema (revisión de `LLMQuant/awesome-trading-agents`)
+Evaluar (no adoptar a ciegas) estos proyectos open-source para acelerar el diseño:
+- **`MobiusQuant/OpenMobius-skill`** — skill de **conocimiento ICT/SMC compatible con Hermes** (knowledge cards, datos, indicadores, gráficos). Candidato directo para (a) **grounding de los mentores** y (b) **acelerar el cierre del gap de conceptos** (§3.D). Revisar qué conceptos cubre vs nuestra matriz.
+- **`mnemox-ai/tradememory-protocol`** — **Memory MCP** que registra razonamiento de decisión + resultado + evidencia de revisión (17 tools). Candidato a **sustrato del diario de laboratorio + scoring/atribución de agentes** (§3.B) en vez de construirlo desde cero.
+- **`TauricResearch/TradingAgents`** (paper arXiv 2412.20138) — framework de **debate** (analistas + bull/bear + trader + riesgo + PM). Referencia para el **protocolo de rondas 1/2** y la estructura de prompts/roles.
+- **`flash131307/multi-agent-investment`** y **`FinStep-AI/ContestTrade`** — "LLM propone, **capa determinista decide**" y "agentes **compiten** antes de elegir": **precedente directo de ADR-007** (enjambre cualitativo + scoring determinista; combinación de votos).
+- **MT5 (Fase 4):** `ariadng/metatrader-mcp-server`, `Qoyyuum/mcp-metatrader5-server` (solo-lectura para laboratorio; la escritura la hace el EA nativo). **TV alterno de referencia:** `atilaahmettaner/tradingview-mcp`.
+
+## 8. Arquitectura de conocimiento / almacenamiento (optimización de peso)
+Con mentores de 100+ videos, las transcripciones pesan. Diseñar así:
+- **Fuente única en Obsidian**, sin duplicar a `~/.hermes/knowledge/`. El agente lee **on-demand** (toolset `file`/grep o MCP de memoria), no copia.
+- **El agente NO carga las transcripciones crudas** (millones de tokens). Su grounding = **síntesis compacta** (`ficha-mentor.md` + 1 resumen por tema). Las crudas = archivo/respaldo (comprimible tras sintetizar).
+- **Recuperación (RAG):** vía `tradememory-protocol`/`gbrain` o búsqueda por archivo. Definir el contrato de recuperación (qué se carga, cuándo).

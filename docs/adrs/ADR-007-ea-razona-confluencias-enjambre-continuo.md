@@ -53,6 +53,12 @@ Se adopta el **modelo reconciliado**, que precisa (no cambia) ADR-005:
 - **Posible refactor de Pine (Fase 3+):** exponer scores parciales por familia / normalización ATR /
   umbrales configurables para soportar la generalización. Sujeto a core-sync, anti-repaint y a la
   **congelación de umbrales hasta Fase 3 (ADR-002)** — se define la *mecánica*, no se *ajustan* valores.
+- **Gap de conceptos ICT (integración estándar):** los ~25-30 conceptos que los mentores enseñan y que
+  hoy no están en `reglas-smc-ict.md` (inventario en `docs/planes/MATRIZ-conceptos-cobertura.md`) se
+  integran al plan maestro de Pine **por el mismo proceso que todos** (spec cuantificada → detección
+  Pine → validación ≥90 → confluencia §4.8 + golden test MQL5), para que **Pine y el EA los vean,
+  identifiquen y calculen** como confluencias. El diseño de la integración es parte del handoff a Opus
+  Max (§3.D). Respeta ADR-002 (mecánica ahora, pesos en Fase 3).
 - **`docs/laboratorio/`** se crea como registro central: diario de confluencias (con autoría/resultado)
   + track-record por agente.
 - **Anti-overfitting:** ninguna idea del enjambre entra al scoring sin pasar IS/OOS (ADR-002).
