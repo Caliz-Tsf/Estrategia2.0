@@ -362,6 +362,8 @@ Familias para no duplicar máquina:
 
 ## §8 — Qué queda para la PARTE 2 (Hermes / enjambre — siguiente sesión)
 
+> **✅ ENTREGADO (S033):** la Parte 2 ya existe → **`docs/planes/ESQUELETO-P2-hermes-enjambre.md`** (documento maestro: runtime, cerebro único, repos, traza) + **`docs/planes/PLANTILLA-agente-mentor.md`** (plantilla del agente piloto NSL). Lo de abajo era el enganche; queda como índice de cobertura.
+
 Diferido por decisión del usuario (S032). Para que la siguiente sesión arranque sin re-derivar, queda pendiente diseñar el **esqueleto** de:
 - **Runtime del enjambre** (handoff §3.B): vigía/cron que toma confluencias vía TV MCP (single-instance CDP 9222), protocolo de discusión rondas 1/2 + voto estructurado, regla de registro de positivas con autoría, scoring/atribución de agentes.
 - **Agente piloto NSL completo** (handoff §3.E): perfil/skill, carpetas de knowledge, herramientas Hermes que usa, cómo entra al loop y emite voto → **plantilla parametrizable** para clonar al resto de mentores.
