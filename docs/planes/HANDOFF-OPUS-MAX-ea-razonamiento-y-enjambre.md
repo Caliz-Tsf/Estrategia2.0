@@ -106,3 +106,27 @@ Con mentores de 100+ videos, las transcripciones pesan. Diseñar así:
 - **Fuente única en Obsidian**, sin duplicar a `~/.hermes/knowledge/`. El agente lee **on-demand** (toolset `file`/grep o MCP de memoria), no copia.
 - **El agente NO carga las transcripciones crudas** (millones de tokens). Su grounding = **síntesis compacta** (`ficha-mentor.md` + 1 resumen por tema). Las crudas = archivo/respaldo (comprimible tras sintetizar).
 - **Recuperación (RAG):** vía `tradememory-protocol`/`gbrain` o búsqueda por archivo. Definir el contrato de recuperación (qué se carga, cuándo).
+
+## 9. Herramientas adicionales a evaluar (aportadas por el usuario, Sesion-031)
+
+> El usuario trajo 6 herramientas para que se valore su encaje. Investigadas y verificadas de forma independiente por Claude Code (S031). **NO instalar a ciegas:** las del plano enjambre/Hermes **solapan con las adopciones del §7/§8** — Opus Max debe ponderarlas contra lo ya propuesto y elegir el **set mínimo coherente** (un solo sustrato de memoria, un solo andamiaje de orquestación), no apilar sistemas redundantes. Los conteos de estrellas que circularon (Headroom "30k", Ponytail "33k", O2B "6") **no son fiables / no verificados** y no deben pesar en la decisión.
+
+### 9.A — Plano enjambre/Hermes (Opus Max decide su encaje en §3.B y §8)
+| Herramienta | Qué es | Encaje | Solapa con | Veredicto preliminar |
+|---|---|---|---|---|
+| **Open Second Brain** (`itechmeat/open-second-brain`) | Memoria local-first para Hermes en vault Obsidian; markdown plano bajo `Brain/`, "dream pass" agrega correcciones→preferencias con confianza; plugin Hermes + MCP | **Directo a §8** (fuente única en Obsidian, lectura on-demand, no duplicar a `~/.hermes/knowledge/`) | `tradememory-protocol`, `gbrain` (§7/§8) | Candidato fuerte al **sustrato de memoria/diario de laboratorio**. Elegir UNO entre O2B / tradememory / gbrain. O2B gana en transparencia (es Obsidian, ya es nuestro destino de backup). |
+| **Oh My Hermes** (`witt3rd/oh-my-hermes`) | Skills de orquestación multi-agente nativas Hermes: consensus planning (Planner→Architect→Critic), verified execution (ralph), triage, autopilot; estándar agentskills.io | **Directo a §3.B** (protocolo discusión rondas 1/2 + síntesis) y roster Control/Escéptico (ADR-005) | `TradingAgents` (§7, framework de debate) | Candidato al **andamiaje del loop del enjambre**. OJO: existen DOS repos homónimos — usar el de `witt3rd` (primitivos Hermes), no el de Salomondiei08. Evaluar vs construir el loop a mano. |
+| **Headroom** (`chopratejas/headroom`) | Compresión de contexto (tool outputs/logs/código/RAG) 60-95% menos tokens, reversible (CCR cache); MCP/proxy/librería; Apache-2.0 | Útil en runtime enjambre cuando los agentes leen transcripciones largas | Compresión NATIVA de Hermes (`compression.enabled` ya activo) + `tool_output.max_bytes` | **Media-baja.** Hermes ya comprime. Reconsiderar solo si los agentes del enjambre topan límites leyendo knowledge crudo. NO es palanca para el flujo Pine/Claude Code. |
+
+### 9.B — Plano Fase 4-5 (no toca diseño del enjambre ahora)
+| Herramienta | Qué es | Encaje | Veredicto |
+|---|---|---|---|
+| **Ponytail** (`DietrichGebert/ponytail`) | Skill "dev senior flojo": escalera YAGNI 6 peldaños, reduce código generado | Filosofía idéntica a `reglas-dev.md` + regla dura #7 | **Media-baja.** Valor incremental limitado en Pine. Posible uso en **Fase 4 (MQL5)** para frenar sobre-ingeniería del EA. No prioridad. |
+| **CallMeBot** (API, no repo) | GET HTTP gratis → WhatsApp/Telegram/Signal | **Canal de alertas** del EA vivo (Fase 4-5) o del gate de noticias del enjambre (§3.B) | **Alta pero tardía.** Encaja como notificador. Nota: publica datos a un tercero — solo alertas, nada sensible. Anotar para Fase 4. |
+
+### 9.C — ZenMux + NVIDIA Nemotron (OPERATIVO, NO requiere a Opus Max)
+**Esto es config de Hermes, fuera del alcance de diseño de Opus Max.** Lo ejecuta Claude Code (S031+) directamente. Se documenta aquí solo para trazabilidad.
+- **ZenMux** = gateway OpenAI-compatible (`https://zenmux.ai/api/v1`), 200+ modelos, tier free con rate-limit, guía nativa Hermes/OpenClaw. Da **redundancia de proveedor** para el enjambre (historia de dolor: Puter 402 → Qwen3.5 thinking inusable → Gemini único hoy).
+- **NVIDIA Nemotron** = endpoint OpenAI-compatible `https://integrate.api.nvidia.com/v1`, modelos Nemotron (razonamiento). El usuario YA tiene una API key de NVIDIA en el sistema (el `auxiliary.vision` de Hermes usa una `nvapi` dedicada operativa — ver `MODELO-GUIA.md` §Visión).
+- **Objetivo del usuario:** dejar ZenMux (2 modelos free) + NVIDIA Nemotron como **opciones al iniciar Hermes** (selector del launcher + `providers`/`fallback_providers` en `config.yaml`), junto al Gemini actual. Esto da al enjambre varios proveedores donde repartir agentes según criticidad (Gemini para razonamiento SMC pesado; ZenMux free / Nemotron para agentes de bajo coste como router/doc/sync).
+- **Pendiente para ejecutar:** API key de ZenMux + confirmar los 2 modelos free exactos + confirmar/localizar la NVIDIA key. Actualizar `MODELO-GUIA.md` (hoy desactualizado: dice Puter primario, pero `config.yaml` ya es Gemini único).
