@@ -104,6 +104,24 @@ Refina `MATRIZ §C` en **6 rutas**. Solo se listan ❌ y 🔶; los ✅ (T01–T1
 
 ---
 
+## §2.1 — Cruce anti-duplicados (Sesion-034)
+
+> Verificación pedida al oficializar el Sprint 1.6: que el set nuevo (T26–T40) **no repita** un concepto ya implementado (§1–§4 de `reglas-smc-ict.md`). **Resultado: cero duplicados exactos.** Todo lo nuevo es primitiva genuina o variante con comportamiento propio. Pero hay **5 solapes de riesgo** que se vuelven duplicado si la spec no los blinda — cada uno lleva un **guard obligatorio** que el `[impl]` debe escribir en la ficha antes de codear.
+
+| # | Concepto nuevo | Solapa con | Veredicto | **Guard obligatorio en la spec** |
+|---|---|---|---|---|
+| 1 | **T32 CISD** | §1.4 CHoCH / §1.5 MSS | Variante (riesgo alto) | Definir el criterio de *delivery* por cierre que lo distingue de un CHoCH/MSS simple. Si no aporta señal distinguible → NO se implementa (sería duplicado de #5). |
+| 2 | **T30 gaps de apertura** (NWOG/NDOG/ORG/NYMO) | §4.2 Session Opens | Variante/extensión | §4.2 detecta el *nivel* de apertura; T30 detecta el *gap* (cierre previo ↔ apertura). Reusar `f_sessionOpens` como ancla; **no crear un segundo nivel idéntico** al de §4.2. |
+| 3 | **T30 Breakaway Gap / T33 Vacuum Block / T30 NWOG-NDOG** (entre sí) | — (familia "gap" interna) | 3 conceptos distintos | Delinear en la ficha: Vacuum = zona-vacío imán de retorno · Breakaway = gap de *ruptura* con dirección · NWOG/NDOG = gap de *frontera de sesión*. Si dos colapsan al mismo objeto → fusionar, no duplicar. |
+| 4 | **T26 True FVG / T27 IFVG / T31 Volume Imbalance** | §2.2 FVG | Variantes (misma máquina) | Comparten `f_detectFVG`/`f_updateZoneMitigation` pero son objetos distintos. **Anti doble-conteo (P-05):** True FVG *refina* #18/#20 (no suma #); IFVG y VI = confluencias propias pero **1 sola c/u** (VI no cuenta 3× por SIVI/BIVI/VI). |
+| 5 | **"Opening Range"**: T30 ORG (nivel-gap) vs T39 Opening Range Macro (ventana horaria) | — (colisión de nombre) | Conceptos diferentes | Etiquetar sin ambigüedad: `ORG` = nivel-gap (Ruta A); `OR-Macro` = ventana de minutos de KZ (Ruta D). No mezclar en el panel ni en el scoring. |
+
+**Limpios (variante sin riesgo de duplicado):** T34 Propulsion *refina* §2.1 OB · T28 BPR y T35 IPR derivan de §2.2/§2.3 pero son zonas propias (balanceada / desbalanceada — opuestas, no iguales) · T29 IR es el *negativo* del FVG (sin gap) · T36–T38 (StdDev/Inside Day/SMT) no tienen análogo previo.
+
+**Regla de cierre:** ningún concepto del Sprint 1.6 se marca "hecho" sin que su ficha resuelva explícitamente el guard que le toque (cuando aplique). El guard es parte del criterio de validación ≥90.
+
+---
+
 ## §3 — Esqueleto del MOTOR DE RAZONAMIENTO DEL EA (handoff §3.A · Fase 4 · spec, no código)
 
 > **Línea dura (ADR-007):** el EA razona **determinista y generalizable**; **nunca** consulta LLM en runtime. Aquí se define la *mecánica*, no se calibran pesos (ADR-002 — eso es Fase 3). Reutiliza `f_scoreConfluences` y `f_computeSLTP` (`PINE-PLAN §3.5`); **señala los refactors de Pine** que necesita.

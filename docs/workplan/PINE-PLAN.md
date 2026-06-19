@@ -280,6 +280,12 @@ Protocolo por concepto: **implementar → compilar 0 errores/0 warnings → scre
 **Sprint 1.5 — Tier 2:**
 16. Displacement → 17. IDM → 18. Judas → 19. Breaker → 20. Rejection → 21. Flip → 22. OTE + Golden Pocket → 23. EMAs (estado, cruces, rebotes) → 24. False Breakout → 25. Impulsive/Corrective
 
+**Sprint 1.6 — Gap de conceptos ICT (primitivas nuevas)** `[NUEVO · Sesion-032/034 · detalle en docs/planes/ESQUELETO-P1-conceptos-EA-pine-repos.md]`
+Integra los conceptos ICT que los cursos de mentores enseñan y el Pine aún no detecta (`docs/planes/MATRIZ-conceptos-cobertura.md`). **Continúa tras T25**, mismo pipeline de 7 etapas. Solo las **primitivas de detección** (Rutas A y D) son Fase 1; el sesgo (Ruta B) va a Sprint 2.1, los modelos de entrada (Ruta C) al motor del EA (Fase 4), noticias (Ruta E) al gate determinista (Fase 4/5) y las teorías (Ruta F) al bucket experimental post-Fase 3. Orden por palanca (primero lo que reusa máquinas validadas):
+26. True FVG — *variante de §2.2, reusa máquina FVG; refina confluencia, NO suma #* → 27. IFVG (Inversion FVG) → 28. BPR (Balanced Price Range) → 29. Immediate Rebalance → 30. Serie de gaps de apertura (NWOG/NDOG/NYMO/ORG + Breakaway Gap — extiende §4.2, no re-detecta el nivel de Session Opens) → 31. Volume Imbalance (+SIVI/BIVI) → 32. CISD — *familia estructura; la spec DEBE distinguirlo de §1.4 CHoCH / §1.5 MSS o es duplicado* → 33. Vacuum Block (delinear vs T30) → 34. Propulsion Block (*variante de §2.1 OB, refina*) → 35. IPR (Imbalanced Price Range) → 36. Standard Deviation (*herramienta de proyección → insumo de `f_computeSLTP`, NO confluencia*) → 37. Inside Day → 38. SMT Divergence (**requiere ADR de símbolo correlacionado antes de implementar**).
+**Ruta D (tiempo/sesión, extiende §3.4 Kill Zones):** 39. Macros intradía (NY Lunch / Opening Range / NY Lunch Hour — sub-ventanas de KZ) → 40. RTH vs ETH.
+**Anti-duplicados:** cruce completo en `ESQUELETO-P1 §2.1` — cero duplicados exactos; 5 guards de delineación obligatorios (CISD↔CHoCH/MSS, gaps↔Session Opens, familia gap entre sí, familia FVG↔§2.2 sin doble conteo P-05, colisión de nombre "Opening Range"). **Confluencias:** ~8–9 candidatas nuevas (#43–#51 tentativas, `ESQUELETO-P1 §5`); el número final y pesos se cierran en F2-T01 / Fase 3.
+
 **Sprint 2.1 — Strategy:** scoring direccional + filtros duros + entrada/SL/TP/trailing + alert_message JSON
 **Sprint 2.2 — Calibración técnica:** verificar en Strategy Tester que ejecuta trades correctamente (sin pesos optimizados aún), registro y export CSV.
 
