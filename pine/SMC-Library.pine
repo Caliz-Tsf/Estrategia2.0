@@ -51,6 +51,14 @@ export const int ZS_INVALID   = 3
 export const int PD_DISCOUNT    = -1
 export const int PD_EQUILIBRIUM = 0
 export const int PD_PREMIUM     = 1
+// Kill Zones / sesiones y perfiles [§3.4 · ADR-001 · T11]
+export const int KZ_NONE   = 0
+export const int KZ_LONDON = 1
+export const int KZ_NY     = 2
+export const int KZ_TOKYO  = 3
+export const int SP_NONE      = 0
+export const int SP_LONDON_NY = 1
+export const int SP_ASIA      = 2
 
 // --- Limites de arrays por TF (performance, reglas-dev §1.6) ---
 export const int MAX_ZONES  = 50
@@ -553,3 +561,23 @@ export f_prunePools(array<SMC_Pool> pools, int maxN) =>
                 break
         array.remove(pools, rm >= 0 ? rm : 0)
     pools
+
+// f_killZone [T11, §3.4 · ADR-001]: confluencia ponderada (NO filtro duro). Identifica que sesion
+// institucional esta activa y si es la PRIMERA MITAD (requerido por el Judas §3.5). PURA: la membresia
+// de sesion en hora local con DST (time(timeframe.period, session, tz), P-25) se extrae consumer-side y
+// se pasa como booleanos -> portabilidad MQL5 (ADR-002). Perfiles SP_LONDON_NY (London+NY) / SP_ASIA
+// (+Tokyo) / SP_NONE. Prioridad London > NY > Tokyo. Devuelve [int session, bool firstHalf].
+export f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, bool inTokyo, bool inTokyoFirst, int sessionProfile) =>
+    int  session   = KZ_NONE
+    bool firstHalf = false
+    if sessionProfile != SP_NONE
+        if inLondon
+            session   := KZ_LONDON
+            firstHalf := inLondonFirst
+        else if inNY
+            session   := KZ_NY
+            firstHalf := inNYFirst
+        else if sessionProfile == SP_ASIA and inTokyo
+            session   := KZ_TOKYO
+            firstHalf := inTokyoFirst
+    [session, firstHalf]

@@ -13,6 +13,7 @@ GRP_FVG    = "Fair Value Gaps"
 GRP_PD     = "Premium/Discount"
 GRP_EQHL   = "Equal Highs/Lows"
 GRP_LIQ    = "Liquidez"
+GRP_KZ     = "Kill Zones / Sesiones"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 // Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
@@ -43,6 +44,8 @@ i_minTouches   = input.int(2,      "Toques minimos para pool", minval = 2, group
 i_showSwept    = input.bool(true,  "Mostrar pools barridos (historial)", group = GRP_LIQ)
 i_showSweeps   = input.bool(true,  "Mostrar marcadores de sweep (trampa)", group = GRP_LIQ)
 i_maxShowSweeps= input.int(20,     "Max marcadores de sweep (recientes)", minval = 1, group = GRP_LIQ)
+i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
+i_showKZ         = input.bool(true, "Sombrear Kill Zone activa", group = GRP_KZ)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -87,6 +90,13 @@ ZS_INVALID   = 3
 PD_DISCOUNT    = -1
 PD_EQUILIBRIUM = 0
 PD_PREMIUM     = 1
+KZ_NONE   = 0
+KZ_LONDON = 1
+KZ_NY     = 2
+KZ_TOKYO  = 3
+SP_NONE      = 0
+SP_LONDON_NY = 1
+SP_ASIA      = 2
 MAX_ZONES  = 50
 MAX_EVENTS = 100
 MAX_SWINGS = 100
@@ -636,6 +646,30 @@ f_prunePools(array<SMC_Pool> pools, int maxN) =>
         array.remove(pools, rm >= 0 ? rm : 0)
     pools
 
+// --- Kill Zones / sesiones [reglas-smc-ict §3.4 · ADR-001] · T11 ---
+// Confluencia ponderada, NO filtro duro: identifica que sesion institucional esta activa y si es la
+// PRIMERA MITAD (requerido por el Judas §3.5). f_killZone es PURA: la membresia de sesion en hora
+// LOCAL con DST automatico (time(timeframe.period, session, tz), P-25) se extrae en el consumidor y se
+// pasa como booleanos — mismo patron que el buffer del OB — para portabilidad MQL5 (golden tests,
+// ADR-002). Perfiles: SP_LONDON_NY = London+NY · SP_ASIA = London+NY+Tokyo · SP_NONE = sin sesiones
+// (cripto / indices 24h). Prioridad en solapamiento London > NY > Tokyo. Devuelve [int session, bool
+// firstHalf]. NO bloquea la entrada: la sesion activa solo aporta peso a la confluencia #34 (calibrado
+// por simbolo, Fase 3/5); con SP_NONE la confluencia #34 no aporta.
+f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, bool inTokyo, bool inTokyoFirst, int sessionProfile) =>
+    int  session   = KZ_NONE
+    bool firstHalf = false
+    if sessionProfile != SP_NONE
+        if inLondon
+            session   := KZ_LONDON
+            firstHalf := inLondonFirst
+        else if inNY
+            session   := KZ_NY
+            firstHalf := inNYFirst
+        else if sessionProfile == SP_ASIA and inTokyo
+            session   := KZ_TOKYO
+            firstHalf := inTokyoFirst
+    [session, firstHalf]
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -873,6 +907,20 @@ if barstate.isconfirmed
     if not na(evSweep)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
     f_prunePools(SMC_pools, MAX_POOLS)
+
+// --- Kill Zones / sesiones [§3.4 · ADR-001] · T11 ---
+// Membresia en hora LOCAL con DST automatico (P-25): time(timeframe.period, session, tz) es na fuera
+// de la ventana. Se calcula consumer-side (necesita contexto de barra) y se pasa a la f_killZone pura.
+// Ventanas §3.4: London 07:00-10:00 Europe/London (1ª mitad 07:00-08:30), NY AM 08:00-11:00
+// America/New_York (1ª mitad 08:00-09:30), Tokyo 09:00-11:00 Asia/Tokyo (1ª mitad 09:00-10:00).
+int kzProfile = i_sessionProfile == "FX-Asia" ? SP_ASIA : i_sessionProfile == "None" ? SP_NONE : SP_LONDON_NY
+bool kzInLondon      = kzProfile != SP_NONE and not na(time(timeframe.period, "0700-1000", "Europe/London"))
+bool kzInLondonFirst = kzProfile != SP_NONE and not na(time(timeframe.period, "0700-0830", "Europe/London"))
+bool kzInNY          = kzProfile != SP_NONE and not na(time(timeframe.period, "0800-1100", "America/New_York"))
+bool kzInNYFirst     = kzProfile != SP_NONE and not na(time(timeframe.period, "0800-0930", "America/New_York"))
+bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1100", "Asia/Tokyo"))
+bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
+[curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
 
 // === MTF ===
 // request.security D1/H1 (max 4 en Visual). Pendiente Sprint 1.4 (T13).
@@ -1118,11 +1166,15 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
     array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(color.gray, 80),  textcolor = color.gray,  size = size.small))
     array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_left, color = color.new(color.green, 80), textcolor = color.green, size = size.small))
 
+// Kill Zone activa: sombreado de fondo (T11). London azul / NY AM naranja / Tokyo violeta. Solo informa
+// la sesion institucional activa (§3.4 · ADR-001); NO marca entradas ni bloquea (eso es el scoring #34).
+bgcolor(i_showKZ and curKZ != KZ_NONE ? (curKZ == KZ_LONDON ? color.new(color.blue, 90) : curKZ == KZ_NY ? color.new(color.orange, 90) : color.new(color.purple, 90)) : na, title = "Kill Zone activa")
+
 // === PANEL ===
 // Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
 // globales. El panel completo (PINE-PLAN §5) llega en T14.
 if i_showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 10, border_width = 1)
+    var table panel = table.new(position.top_right, 2, 11, border_width = 1)
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
     color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
     // Bias dominante (50) [T07B]: lo fija structMajor.bias (no chartState, que es swing) -> el
@@ -1134,7 +1186,7 @@ if i_showPanel and barstate.islast
     color  pdCol = pdZone == PD_PREMIUM ? color.red : pdZone == PD_DISCOUNT ? color.green : color.gray
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
     table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "T09b",                text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "T11",                 text_color = color.white, bgcolor = color.new(color.blue, 0))
     table.cell(panel, 0, 1, "Bias dom. (50)", text_color = color.gray)
     table.cell(panel, 1, 1, majTxt, text_color = majCol)
     table.cell(panel, 0, 2, "Bias",    text_color = color.gray)
@@ -1153,6 +1205,11 @@ if i_showPanel and barstate.islast
     table.cell(panel, 1, 8, str.tostring(array.size(SMC_eqhl)),  text_color = color.gray)
     table.cell(panel, 0, 9, "Pools", text_color = color.gray)
     table.cell(panel, 1, 9, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
+    string kzTxt  = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY AM" : curKZ == KZ_TOKYO ? "Tokyo" : "—"
+    string kzCell = curKZ == KZ_NONE ? "—" : kzTxt + (curKZFirst ? " (1ª½)" : "")
+    color  kzCol  = curKZ == KZ_NONE ? color.gray : color.aqua
+    table.cell(panel, 0, 10, "Kill Zone", text_color = color.gray)
+    table.cell(panel, 1, 10, kzCell, text_color = kzCol)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).

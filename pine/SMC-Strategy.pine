@@ -11,6 +11,7 @@ GRP_STRUCT = "Estructura"
 GRP_OB     = "Order Blocks"
 GRP_FVG    = "Fair Value Gaps"
 GRP_SCORE  = "Scoring"
+GRP_KZ     = "Kill Zones / Sesiones"
 // Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
 // NUESTRO swingLen=5 ~= interno de LuxAlgo; esta capa es la que faltaba [T07B].
 i_majorLen    = input.int(50, "Swing dominante (estructura grande)", minval = 10, group = GRP_STRUCT)
@@ -26,6 +27,7 @@ i_eqThreshold = input.float(0.1, "Umbral igualdad EQH/EQL (x ATR14)", minval = 0
 i_eqlLength   = input.int(3, "Barras confirmacion EQH/EQL", minval = 1, group = GRP_SCORE)
 i_poolTol     = input.float(0.1, "Tolerancia cluster pools (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_SCORE)
 i_minTouches  = input.int(2, "Toques minimos para pool", minval = 2, group = GRP_SCORE)
+i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -70,6 +72,13 @@ ZS_INVALID   = 3
 PD_DISCOUNT    = -1
 PD_EQUILIBRIUM = 0
 PD_PREMIUM     = 1
+KZ_NONE   = 0
+KZ_LONDON = 1
+KZ_NY     = 2
+KZ_TOKYO  = 3
+SP_NONE      = 0
+SP_LONDON_NY = 1
+SP_ASIA      = 2
 MAX_ZONES  = 50
 MAX_EVENTS = 100
 MAX_SWINGS = 100
@@ -619,6 +628,30 @@ f_prunePools(array<SMC_Pool> pools, int maxN) =>
         array.remove(pools, rm >= 0 ? rm : 0)
     pools
 
+// --- Kill Zones / sesiones [reglas-smc-ict §3.4 · ADR-001] · T11 ---
+// Confluencia ponderada, NO filtro duro: identifica que sesion institucional esta activa y si es la
+// PRIMERA MITAD (requerido por el Judas §3.5). f_killZone es PURA: la membresia de sesion en hora
+// LOCAL con DST automatico (time(timeframe.period, session, tz), P-25) se extrae en el consumidor y se
+// pasa como booleanos — mismo patron que el buffer del OB — para portabilidad MQL5 (golden tests,
+// ADR-002). Perfiles: SP_LONDON_NY = London+NY · SP_ASIA = London+NY+Tokyo · SP_NONE = sin sesiones
+// (cripto / indices 24h). Prioridad en solapamiento London > NY > Tokyo. Devuelve [int session, bool
+// firstHalf]. NO bloquea la entrada: la sesion activa solo aporta peso a la confluencia #34 (calibrado
+// por simbolo, Fase 3/5); con SP_NONE la confluencia #34 no aporta.
+f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, bool inTokyo, bool inTokyoFirst, int sessionProfile) =>
+    int  session   = KZ_NONE
+    bool firstHalf = false
+    if sessionProfile != SP_NONE
+        if inLondon
+            session   := KZ_LONDON
+            firstHalf := inLondonFirst
+        else if inNY
+            session   := KZ_NY
+            firstHalf := inNYFirst
+        else if sessionProfile == SP_ASIA and inTokyo
+            session   := KZ_TOKYO
+            firstHalf := inTokyoFirst
+    [session, firstHalf]
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -822,6 +855,19 @@ if barstate.isconfirmed
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
     f_prunePools(SMC_pools, MAX_POOLS)
 
+// --- Kill Zones / sesiones [§3.4 · ADR-001] · T11 ---
+// Membresia en hora LOCAL con DST automatico (P-25): time(timeframe.period, session, tz) es na fuera
+// de la ventana. Se calcula consumer-side (necesita contexto de barra) y se pasa a la f_killZone pura.
+// Wiring para la confluencia #34 del scoring (Sprint 2.1); curKZFirst alimentara el Judas (§3.5, T18).
+int kzProfile = i_sessionProfile == "FX-Asia" ? SP_ASIA : i_sessionProfile == "None" ? SP_NONE : SP_LONDON_NY
+bool kzInLondon      = kzProfile != SP_NONE and not na(time(timeframe.period, "0700-1000", "Europe/London"))
+bool kzInLondonFirst = kzProfile != SP_NONE and not na(time(timeframe.period, "0700-0830", "Europe/London"))
+bool kzInNY          = kzProfile != SP_NONE and not na(time(timeframe.period, "0800-1100", "America/New_York"))
+bool kzInNYFirst     = kzProfile != SP_NONE and not na(time(timeframe.period, "0800-0930", "America/New_York"))
+bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1100", "Asia/Tokyo"))
+bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
+[curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
+
 // === MTF ===
 // request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
 
@@ -846,7 +892,9 @@ if barstate.islastconfirmedhistory
     [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
     string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
-    lbl := label.new(bar_index, high, "SMC Strategy — T09b\nbias=" + biasTxt + "  P/D=" + pdCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    string kzTxt  = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY AM" : curKZ == KZ_TOKYO ? "Tokyo" : "—"
+    string kzCell = curKZ == KZ_NONE ? "—" : kzTxt + (curKZFirst ? " (1ª½)" : "")
+    lbl := label.new(bar_index, high, "SMC Strategy — T11\nbias=" + biasTxt + "  P/D=" + pdCell + "  KZ=" + kzCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.
