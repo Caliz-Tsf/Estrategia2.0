@@ -265,17 +265,17 @@ Protocolo por concepto: **implementar → compilar 0 errores/0 warnings → scre
 7B. Estructura BOS/CHoCH DOMINANTE (swing 50) — capa aditiva sobre el CORE, no toca T01–T07 `[T07B · ADR-004]`
 8. EQH/EQL
 
-**Sprint 1.3 — Liquidez (corazón SMC):**
-9. Pools (clustering EQH/EQL + swings)
-10. Sweeps + Grabs
-11. Kill Zones (background + estado)
-12. MSS
+**Sprint 1.3 — Liquidez (corazón SMC) ✅ COMPLETADO:**
+9. ✅ Pools (clustering EQH/EQL + swings, Sesion-027, commit 139e1c1, core-sync 503 líneas, validación ≥90 pendiente)
+10. ✅ Sweeps + Grabs (T09b/T10 cierre formal, Sesion-030, commit 45c4b40, core-sync 592 líneas, validación 93/100 ✅)
+11. ✅ Kill Zones (background + estado, Sesion-035, commit 68f2946, core-sync 623 líneas, validación 95/100 ✅, f_killZone + perfiles FX-London-NY/FX-Asia, confluencia #34)
+12. ✅ MSS (Market Structure Shift, Sesion-036, commits 114a62b/4b4f3cc/88c8e92/f561b34, core-sync 644 líneas SHA 2de06be3, validación 95/100 ✅, f_detectMSS puro, unificación CHoCH/MSS, tooling pine_check/pine_inject, panel reescrito, consolidación f_drawStructure)
 
 **Sprint 1.4 — MTF + panel:**
 13. Snapshots D1/H1 vía security + dibujo diferenciado de zonas/eventos MTF
 14. Panel de estado completo
 15. Alertas (16 base + nuevas)
-→ **Gate Fase 1:** validación visual completa con smc-validator-agent, score ≥ 90% por concepto Tier 1.
+→ **Gate Fase 1 (pendiente):** validación visual completa con smc-validator-agent, score ≥ 90% por concepto Tier 1 (T01–T12 validados individual; gate global tras T15).
 
 **Sprint 1.5 — Tier 2:**
 16. Displacement → 17. IDM → 18. Judas → 19. Breaker → 20. Rejection → 21. Flip → 22. OTE + Golden Pocket → 23. EMAs (estado, cruces, rebotes) → 24. False Breakout → 25. Impulsive/Corrective
