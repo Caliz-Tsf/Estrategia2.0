@@ -16,6 +16,7 @@ GRP_LIQ    = "Liquidez"
 GRP_KZ     = "Kill Zones / Sesiones"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
+i_panelCompact = input.bool(false, "Panel compacto (Bias / dom. / P-D / Kill Zone)", group = GRP_PANEL)
 // Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
 // NUESTRO swingLen=5 ~= interno de LuxAlgo; esta capa es la que faltaba [T07B].
 i_majorLen    = input.int(50, "Swing dominante (estructura grande)", minval = 10, group = GRP_STRUCT)
@@ -981,9 +982,12 @@ f_drawSwing(int barIdx, float price, int kind) =>
 // BOS/CHoCH centrada en el midpoint (bar_index). SIN recuadro (fondo transparente) con gap,
 // como los LL/HH (pref. usuario): ALCISTA encima de la linea (style_label_down), BAJISTA
 // debajo (style_label_up). Alcista teal / bajista rojo; swing solido / interno punteado.
-f_drawStructure(int pivotBarIdx, float level, int breakBarIdx, int kind, int dir, bool internal) =>
+// isMSS [T12]: si el CHoCH swing fue calificado como MSS (§1.5), la etiqueta dice "CHoCH MSS"
+// en el MISMO color direccional (sin capa fucsia aparte -> una sola marca, menos ruido,
+// pref. usuario). Solo aplica a la escala swing (el interno/dominante nunca llevan MSS).
+f_drawStructure(int pivotBarIdx, float level, int breakBarIdx, int kind, int dir, bool internal, bool isMSS) =>
     col = dir == DIR_BULL ? color.teal : color.red
-    txt = kind == KIND_CHOCH ? "CHoCH" : "BOS"
+    txt = kind == KIND_CHOCH ? (isMSS ? "CHoCH MSS" : "CHoCH") : "BOS"
     line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = internal ? line.style_dashed : line.style_solid, width = internal ? 1 : 2)
     int midIdx = math.round((pivotBarIdx + breakBarIdx) / 2.0)
     label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = internal ? size.tiny : size.small)
@@ -993,26 +997,14 @@ if i_showSwings and newSwingHigh
 if i_showSwings and newSwingLow
     f_drawSwing(bar_index - i_swingLen, swingLow, swingLowKind)
 
+// [T12] El MSS ya NO es una capa fucsia aparte: si el CHoCH swing es MSS, la propia
+// etiqueta dice "CHoCH MSS" (mismo color direccional). isMSS = i_showMSS and not na(evMSS).
 if i_showStruct and not na(evStructSwing)
     int originIdx = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
-    f_drawStructure(originIdx, evStructSwing.price, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, false)
+    f_drawStructure(originIdx, evStructSwing.price, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, false, i_showMSS and not na(evMSS))
 if i_showInternal and not na(evStructInt)
     int originIdx = evStructInt.dir == DIR_BULL ? structInternal.highBarIdx : structInternal.lowBarIdx
-    f_drawStructure(originIdx, evStructInt.price, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, true)
-
-// f_drawMSS [T12]: marca el CHoCH swing calificado como MSS (giro con conviccion, §1.5).
-// Se dibuja ENCIMA del CHoCH (que ya traza f_drawStructure si i_showStruct): linea del
-// nivel roto en FUCSIA (distinta del teal/rojo del CHoCH para que el peso del MSS sea
-// visible) + etiqueta "MSS" en la vela de ruptura. Origen = pivote protector roto (misma
-// ancla que f_drawStructure). ALCISTA encima (label_down) / BAJISTA debajo (label_up).
-f_drawMSS(int pivotBarIdx, float level, int breakBarIdx, int dir) =>
-    col = color.fuchsia
-    line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = line.style_solid, width = 2)
-    label.new(breakBarIdx, level, "MSS", style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.normal)
-
-if i_showMSS and not na(evMSS)
-    int originIdx = evMSS.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
-    f_drawMSS(originIdx, evMSS.price, evMSS.barIdx, evMSS.dir)
+    f_drawStructure(originIdx, evStructInt.price, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, true, false)
 
 // f_drawStructureMajor [T07B]: estructura dominante (50). Color teal/rojo como el swing.
 // Etiqueta SIN recuadro con gap (igual que f_drawStructure): ALCISTA encima (style_label_down),
@@ -1221,46 +1213,126 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
 // la sesion institucional activa (§3.4 · ADR-001); NO marca entradas ni bloquea (eso es el scoring #34).
 bgcolor(i_showKZ and curKZ != KZ_NONE ? (curKZ == KZ_LONDON ? color.new(color.blue, 90) : curKZ == KZ_NY ? color.new(color.orange, 90) : color.new(color.purple, 90)) : na, title = "Kill Zone activa")
 
+// --- Helpers de panel [adelanto parcial de PINE-PLAN §5 / T14] (Visual-only) ---
+// Buscan el evento/zona/pool mas relevante para mostrar en el panel. Son de PRESENTACION:
+// viven aqui y NO en el === LIBRARY CORE === byte-identico (no rompen check-core-sync). En
+// Sprint 2.1 (scoring) algunas podran promoverse a CORE puro y reutilizarse en Strategy.
+// Devuelven na si no hay candidato (el llamador formatea "—").
+f_pLastEvent(array<SMC_Event> a) =>
+    array.size(a) > 0 ? array.last(a) : na
+
+f_pNearZone(array<SMC_Zone> a, int kind, float price) =>
+    SMC_Zone best = na
+    float    bestD = na
+    if array.size(a) > 0
+        for i = 0 to array.size(a) - 1
+            SMC_Zone z = array.get(a, i)
+            if z.kind == kind and z.state != ZS_INVALID
+                float d = math.abs((z.top + z.bottom) / 2.0 - price)
+                if na(bestD) or d < bestD
+                    bestD := d
+                    best  := z
+    best
+
+f_pNearPool(array<SMC_Pool> a, float price) =>
+    SMC_Pool best = na
+    float    bestD = na
+    if array.size(a) > 0
+        for i = 0 to array.size(a) - 1
+            SMC_Pool p = array.get(a, i)
+            if not p.swept
+                float d = math.abs(p.level - price)
+                if na(bestD) or d < bestD
+                    bestD := d
+                    best  := p
+    best
+
 // === PANEL ===
-// Esqueleto: confirma que el core carga y reporta el tamaño de los arrays
-// globales. El panel completo (PINE-PLAN §5) llega en T14.
+// Una fila por concepto implementado (Sprint 1.1-1.3), diseño PINE-PLAN §5 adaptado a UN
+// solo TF (las columnas MTF D1/H1 dependen de request.security = T13/T14, diferidas). El
+// toggle i_panelCompact reduce a Bias / Bias dom. / Premium-Discount / Kill Zone. El on/off
+// POR concepto se hace desde Ajustes (los i_show*): las tablas Pine no reciben clicks.
 if i_showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 11, border_width = 1)
+    int nrows = i_panelCompact ? 5 : 13
+    table panel = table.new(position.top_right, 2, nrows, border_width = 1)
+    // --- valores ---
     string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
     color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
-    // Bias dominante (50) [T07B]: lo fija structMajor.bias (no chartState, que es swing) -> el
-    // headline NO cambia (§1.3/§1.4). Fila informativa; su papel en scoring = Fase 3.
+    // Bias dominante (50) [T07B]: lo fija structMajor.bias (no chartState, que es swing).
     string majTxt = structMajor.bias == DIR_BULL ? "Alcista" : structMajor.bias == DIR_BEAR ? "Bajista" : "—"
     color  majCol = structMajor.bias == DIR_BULL ? color.teal : structMajor.bias == DIR_BEAR ? color.red : color.gray
     [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
     string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
     color  pdCol = pdZone == PD_PREMIUM ? color.red : pdZone == PD_DISCOUNT ? color.green : color.gray
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
-    table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "T11",                 text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 0, 1, "Bias dom. (50)", text_color = color.gray)
-    table.cell(panel, 1, 1, majTxt, text_color = majCol)
-    table.cell(panel, 0, 2, "Bias",    text_color = color.gray)
-    table.cell(panel, 1, 2, biasTxt, text_color = biasCol)
-    table.cell(panel, 0, 3, "Premium/Discount", text_color = color.gray)
-    table.cell(panel, 1, 3, pdCell, text_color = pdCol)
-    table.cell(panel, 0, 4, "Swings",  text_color = color.gray)
-    table.cell(panel, 1, 4, str.tostring(array.size(SMC_swings)), text_color = color.gray)
-    table.cell(panel, 0, 5, "Eventos", text_color = color.gray)
-    table.cell(panel, 1, 5, str.tostring(array.size(SMC_events)), text_color = color.gray)
-    table.cell(panel, 0, 6, "Zonas",   text_color = color.gray)
-    table.cell(panel, 1, 6, str.tostring(array.size(SMC_zones)),  text_color = color.gray)
-    table.cell(panel, 0, 7, "Ev. dom.", text_color = color.gray)
-    table.cell(panel, 1, 7, str.tostring(array.size(SMC_eventsMajor)),  text_color = color.gray)
-    table.cell(panel, 0, 8, "EQ H/L", text_color = color.gray)
-    table.cell(panel, 1, 8, str.tostring(array.size(SMC_eqhl)),  text_color = color.gray)
-    table.cell(panel, 0, 9, "Pools", text_color = color.gray)
-    table.cell(panel, 1, 9, str.tostring(array.size(SMC_pools)),  text_color = color.gray)
     string kzTxt  = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY AM" : curKZ == KZ_TOKYO ? "Tokyo" : "—"
     string kzCell = curKZ == KZ_NONE ? "—" : kzTxt + (curKZFirst ? " (1ª½)" : "")
     color  kzCol  = curKZ == KZ_NONE ? color.gray : color.aqua
-    table.cell(panel, 0, 10, "Kill Zone", text_color = color.gray)
-    table.cell(panel, 1, 10, kzCell, text_color = kzCol)
+    // Ultimo BOS / CHoCH (escala swing, desde chartState [T04])
+    string bosCell = na(chartState.lastBOSPrice) ? "—" : str.tostring(chartState.lastBOSPrice, format.mintick) + " · " + str.format_time(chartState.lastBOSTime, "dd-MM HH:mm", "GMT")
+    color  bosCol  = chartState.lastBOSDir == DIR_BULL ? color.teal : chartState.lastBOSDir == DIR_BEAR ? color.red : color.gray
+    string chCell  = na(chartState.lastCHoCHPrice) ? "—" : str.tostring(chartState.lastCHoCHPrice, format.mintick) + " · " + str.format_time(chartState.lastCHoCHTime, "dd-MM HH:mm", "GMT")
+    color  chCol   = chartState.lastCHoCHDir == DIR_BULL ? color.teal : chartState.lastCHoCHDir == DIR_BEAR ? color.red : color.gray
+    // Ultimo MSS [T12]
+    SMC_Event mssE = f_pLastEvent(SMC_eventsMSS)
+    string mssCell = na(mssE) ? "—" : str.tostring(mssE.price, format.mintick) + " · " + str.format_time(mssE.barTime, "dd-MM HH:mm", "GMT")
+    color  mssCol  = na(mssE) ? color.gray : mssE.dir == DIR_BULL ? color.teal : color.red
+    // OB / FVG activos mas cercanos al precio
+    SMC_Zone obZ = f_pNearZone(SMC_zones, KIND_OB, close)
+    string obCell = na(obZ) ? "—" : "[" + str.tostring(obZ.bottom, format.mintick) + ", " + str.tostring(obZ.top, format.mintick) + "]"
+    color  obCol  = na(obZ) ? color.gray : obZ.dir == DIR_BULL ? color.teal : color.red
+    SMC_Zone fvgZ = f_pNearZone(SMC_zones, KIND_FVG, close)
+    string fvgCell = na(fvgZ) ? "—" : "[" + str.tostring(fvgZ.bottom, format.mintick) + ", " + str.tostring(fvgZ.top, format.mintick) + "]"
+    color  fvgCol  = na(fvgZ) ? color.gray : fvgZ.dir == DIR_BULL ? color.lime : color.orange
+    // Pool mas cercano no barrido
+    SMC_Pool poolP = f_pNearPool(SMC_pools, close)
+    string poolCell = na(poolP) ? "—" : str.tostring(poolP.level, format.mintick) + " " + (poolP.dir == DIR_BULL ? "BSL" : "SSL") + " ·" + str.tostring(poolP.touches)
+    color  poolCol  = na(poolP) ? color.gray : poolP.dir == DIR_BULL ? color.orange : color.aqua
+    // Ultimo Sweep [T10]
+    SMC_Event swE = f_pLastEvent(SMC_sweeps)
+    string swCell = na(swE) ? "—" : str.tostring(swE.price, format.mintick) + (swE.dir == DIR_BULL ? " ↑BULL" : " ↓BEAR") + " · " + str.format_time(swE.barTime, "dd-MM HH:mm", "GMT")
+    color  swCol  = na(swE) ? color.gray : swE.dir == DIR_BULL ? color.teal : color.red
+    string eqCell = str.tostring(array.size(SMC_eqhl))
+    // --- pintado (contador de fila r; las filas extra solo en modo completo) ---
+    table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
+    table.cell(panel, 1, 0, "T12", text_color = color.white, bgcolor = color.new(color.blue, 0))
+    int r = 1
+    table.cell(panel, 0, r, "Bias", text_color = color.gray)
+    table.cell(panel, 1, r, biasTxt, text_color = biasCol)
+    r := r + 1
+    table.cell(panel, 0, r, "Bias dom. (50)", text_color = color.gray)
+    table.cell(panel, 1, r, majTxt, text_color = majCol)
+    r := r + 1
+    table.cell(panel, 0, r, "Premium/Discount", text_color = color.gray)
+    table.cell(panel, 1, r, pdCell, text_color = pdCol)
+    r := r + 1
+    if not i_panelCompact
+        table.cell(panel, 0, r, "Último BOS", text_color = color.gray)
+        table.cell(panel, 1, r, bosCell, text_color = bosCol)
+        r := r + 1
+        table.cell(panel, 0, r, "Último CHoCH", text_color = color.gray)
+        table.cell(panel, 1, r, chCell, text_color = chCol)
+        r := r + 1
+        table.cell(panel, 0, r, "Último MSS", text_color = color.gray)
+        table.cell(panel, 1, r, mssCell, text_color = mssCol)
+        r := r + 1
+        table.cell(panel, 0, r, "OB cercano", text_color = color.gray)
+        table.cell(panel, 1, r, obCell, text_color = obCol)
+        r := r + 1
+        table.cell(panel, 0, r, "FVG cercano", text_color = color.gray)
+        table.cell(panel, 1, r, fvgCell, text_color = fvgCol)
+        r := r + 1
+        table.cell(panel, 0, r, "Pool cercano", text_color = color.gray)
+        table.cell(panel, 1, r, poolCell, text_color = poolCol)
+        r := r + 1
+        table.cell(panel, 0, r, "Último Sweep", text_color = color.gray)
+        table.cell(panel, 1, r, swCell, text_color = swCol)
+        r := r + 1
+        table.cell(panel, 0, r, "EQ H/L", text_color = color.gray)
+        table.cell(panel, 1, r, eqCell, text_color = color.gray)
+        r := r + 1
+    table.cell(panel, 0, r, "Kill Zone", text_color = color.gray)
+    table.cell(panel, 1, r, kzCell, text_color = kzCol)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).
