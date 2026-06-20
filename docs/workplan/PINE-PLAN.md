@@ -271,11 +271,15 @@ Protocolo por concepto: **implementar → compilar 0 errores/0 warnings → scre
 11. ✅ Kill Zones (background + estado, Sesion-035, commit 68f2946, core-sync 623 líneas, validación 95/100 ✅, f_killZone + perfiles FX-London-NY/FX-Asia, confluencia #34)
 12. ✅ MSS (Market Structure Shift, Sesion-036, commits 114a62b/4b4f3cc/88c8e92/f561b34, core-sync 644 líneas SHA 2de06be3, validación 95/100 ✅, f_detectMSS puro, unificación CHoCH/MSS, tooling pine_check/pine_inject, panel reescrito, consolidación f_drawStructure)
 
-**Sprint 1.4 — MTF + panel:**
-13. Snapshots D1/H1 vía security + dibujo diferenciado de zonas/eventos MTF
-14. Panel de estado completo
-15. Alertas (16 base + nuevas)
-→ **Gate Fase 1 (pendiente):** validación visual completa con smc-validator-agent, score ≥ 90% por concepto Tier 1 (T01–T12 validados individual; gate global tras T15).
+**Sprint 1.4 — MTF + panel** `[ampliado · Sesion-038 · detalle en docs/planes/ESQUELETO-P3-mapa-mtf-confluencias.md]`
+El usuario amplió T13 de "snapshot mínimo" a **mapa MTF rico** (cada concepto, sus últimos N por dirección, en cascada D1→{H1,M5}, H1→{M5}) + base de la capa de decisión **confluencia→entrada**. Se desdobla T13 para no arriesgar lo validado (T01–T12):
+13a. **Mapa MTF núcleo** — encapsular bias + BOS/CHoCH/MSS + P/D + EMAs en `f_computeTFState` (CORE byte-idéntico) + 2 `request.security` (D1, H1) + dibujo diferenciado de esos escalares. *Precede:* **spike test** de no-contaminación del estado por-contexto (`ESQUELETO-P3 §6 R-1`).
+13b. **Mapa MTF rico** — `N_htf` zonas/lado (OB/FVG/pool/sweep) en tuple plano capado (presupuesto ~127, `ESQUELETO-P3 §2.2`) + `f_nearestN` pura en CORE + reconstitución y dibujo en cascada con cuota de objetos.
+14. Panel de estado completo (multi-columna: propio / H1 / D1)
+15. Alertas (16 base + nuevas; `alertcondition()` Visual)
+→ **Gate T13a→T13b:** spike test R-P3-1 debe pasar antes de encapsular la cadena completa. **Gate Fase 1 (pendiente):** validación visual completa con smc-validator-agent, score ≥ 90% por concepto Tier 1 (T01–T12 validados individual; gate global tras T15).
+> **Capa de decisión confluencia→entrada** (lo que el usuario llama "el fondo de todo"): el motor que lee el mapa MTF y **decide en qué zona entrar** (scoring direccional + selector de POI con R:R≥1:3 + catálogo de setups de las 5 imágenes) se especifica en `ESQUELETO-P3 §3`. Su implementación es **Fase 2** (scoring lee el mapa → `f_selectEntryPOI` → setups en Strategy) y **Fase 4** (motor del EA). El enjambre la testea (replay+vivo, entradas demo) y entrega offline lo validado (`ESQUELETO-P3 §3.6`, ADR-008).
+> **Dos gates duros `[Sesion-038, decisión Freddy]`:** (1) **Spike test T13a→T13b** — si falla, DETENER y escalar a Opus ultracode, no improvisar. (2) **Gate pre-testeo de setups** — el testeo del enjambre (replay+demo → IS/OOS) NO arranca hasta que el **Pine esté completo** (todos los conceptos + motor confluencia→entrada) **Y** el **enjambre esté completo** (perfiles + archivos + skills + MCP + workflow + loop). Detalle: `ESQUELETO-P3 §5.3`.
 
 **Sprint 1.5 — Tier 2:**
 16. Displacement → 17. IDM → 18. Judas → 19. Breaker → 20. Rejection → 21. Flip → 22. OTE + Golden Pocket → 23. EMAs (estado, cruces, rebotes) → 24. False Breakout → 25. Impulsive/Corrective

@@ -379,6 +379,8 @@ SEÑAL: en vela confirmada, si score_dir ≥ threshold ∧ score_dir > score_opu
 ```
 > **Expansión Sprint 1.6 `[Sesion-034]`:** la lista crece con las primitivas del gap ICT — ~8–9 confluencias candidatas nuevas (#43–#51 tentativas: IFVG, BPR, Breakaway Gap, Volume Imbalance, CISD, Vacuum Block, IPR, Inside Day, SMT). Varias **refinan** una existente en vez de sumar # (True FVG→#18/#20, Propulsion→#17/#19, macros→#34) para no inflar el score (P-05). El número final y los pesos se cierran en F2-T01 y se calibran en Fase 3. Detalle: `docs/planes/ESQUELETO-P1-conceptos-EA-pine-repos.md §5`.
 
+> **Capa de setups sobre las atómicas `[Sesion-038]`:** por ENCIMA de estas confluencias atómicas (capa a) hay una capa **(b) setups/secuencias** — la gramática `contexto→liquidez→POI→trigger→SL→target (R:R≥1:3)` de las 5 imágenes del usuario (Sell Setup, Simple BOS, Smart Money, SMC Beginners, Institutional). NO recalcula el score ni añade números a esta lista: es el patrón de alto valor que el scoring + el **selector de POI** producen, y que el enjambre testea. Mapa MTF rico (de dónde salen los booleanos direccionales) + motor confluencia→entrada + catálogo de setups: `docs/planes/ESQUELETO-P3-mapa-mtf-confluencias.md §3`. Reconciliación de carriles/pared dura: **ADR-008**.
+
 ### 4.9 Protocolo de sesión
 ```
 STARTUP (/smc-session-startup)                 CIERRE (/smc-session-close)
