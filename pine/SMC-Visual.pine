@@ -23,7 +23,6 @@ i_majorLen    = input.int(50, "Swing dominante (estructura grande)", minval = 10
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
 i_showMajor   = input.bool(true,  "Mostrar estructura dominante (50)", group = GRP_STRUCT)
-i_showMajorSwings = input.bool(false, "Mostrar HH/HL/LH/LL dominantes", group = GRP_STRUCT)
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
@@ -978,19 +977,35 @@ f_drawSwing(int barIdx, float price, int kind) =>
         => ["?", color.gray]
     label.new(barIdx, price, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.gray, 100), textcolor = col, size = size.small)
 
+// Escalas de estructura (Visual-only): UNA sola f_drawStructure para las 3 variantes del
+// MISMO concepto BOS/CHoCH (anti-duplicacion; antes habia f_drawStructure + f_drawStructureMajor
+// casi gemelas). La escala parametriza grosor/estilo/xloc/sufijo/size.
+SC_INTERNAL = 0
+SC_SWING    = 1
+SC_MAJOR    = 2
+
 // f_drawStructure: linea del nivel roto (origen pivote -> barra de ruptura) + etiqueta
 // BOS/CHoCH centrada en el midpoint (bar_index). SIN recuadro (fondo transparente) con gap,
 // como los LL/HH (pref. usuario): ALCISTA encima de la linea (style_label_down), BAJISTA
-// debajo (style_label_up). Alcista teal / bajista rojo; swing solido / interno punteado.
-// isMSS [T12]: si el CHoCH swing fue calificado como MSS (§1.5), la etiqueta dice "CHoCH MSS"
-// en el MISMO color direccional (sin capa fucsia aparte -> una sola marca, menos ruido,
-// pref. usuario). Solo aplica a la escala swing (el interno/dominante nunca llevan MSS).
-f_drawStructure(int pivotBarIdx, float level, int breakBarIdx, int kind, int dir, bool internal, bool isMSS) =>
+// debajo (style_label_up). Alcista teal / bajista rojo.
+// scale [variantes del concepto estructura]:
+//   SC_INTERNAL -> width 1, dashed, xloc bar_index, size tiny
+//   SC_SWING    -> width 2, solid,  xloc bar_index, size small
+//   SC_MAJOR    -> width 3, solid,  xloc bar_TIME (robusto en spans largos), sufijo " +", size normal
+// isMSS [T12]: solo escala swing; si el CHoCH es MSS (§1.5) la etiqueta dice "CHoCH MSS" en el
+// MISMO color direccional (una sola marca, sin capa fucsia). pivotTime/breakTime solo se usan
+// en SC_MAJOR (xloc.bar_time); las otras escalas anclan por bar_index.
+f_drawStructure(int pivotTime, int pivotBarIdx, float level, int breakTime, int breakBarIdx, int kind, int dir, int scale, bool isMSS) =>
     col = dir == DIR_BULL ? color.teal : color.red
-    txt = kind == KIND_CHOCH ? (isMSS ? "CHoCH MSS" : "CHoCH") : "BOS"
-    line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = internal ? line.style_dashed : line.style_solid, width = internal ? 1 : 2)
+    bool isInt = scale == SC_INTERNAL
+    bool isMaj = scale == SC_MAJOR
+    string txt = (kind == KIND_CHOCH ? (isMSS ? "CHoCH MSS" : "CHoCH") : "BOS") + (isMaj ? " +" : "")
+    if isMaj
+        line.new(pivotTime, level, breakTime, level, xloc = xloc.bar_time, color = col, style = line.style_solid, width = 3)
+    else
+        line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = isInt ? line.style_dashed : line.style_solid, width = isInt ? 1 : 2)
     int midIdx = math.round((pivotBarIdx + breakBarIdx) / 2.0)
-    label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = internal ? size.tiny : size.small)
+    label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = isMaj ? size.normal : isInt ? size.tiny : size.small)
 
 if i_showSwings and newSwingHigh
     f_drawSwing(bar_index - i_swingLen, swingHigh, swingHighKind)
@@ -999,32 +1014,25 @@ if i_showSwings and newSwingLow
 
 // [T12] El MSS ya NO es una capa fucsia aparte: si el CHoCH swing es MSS, la propia
 // etiqueta dice "CHoCH MSS" (mismo color direccional). isMSS = i_showMSS and not na(evMSS).
+// Las 3 escalas (interno/swing/dominante) usan la MISMA f_drawStructure (anti-duplicacion).
 if i_showStruct and not na(evStructSwing)
-    int originIdx = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
-    f_drawStructure(originIdx, evStructSwing.price, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, false, i_showMSS and not na(evMSS))
+    bool up = evStructSwing.dir == DIR_BULL
+    int originIdx = up ? structSwing.highBarIdx : structSwing.lowBarIdx
+    int originT   = up ? structSwing.highTime  : structSwing.lowTime
+    f_drawStructure(originT, originIdx, evStructSwing.price, evStructSwing.barTime, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, SC_SWING, i_showMSS and not na(evMSS))
 if i_showInternal and not na(evStructInt)
-    int originIdx = evStructInt.dir == DIR_BULL ? structInternal.highBarIdx : structInternal.lowBarIdx
-    f_drawStructure(originIdx, evStructInt.price, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, true, false)
+    bool up = evStructInt.dir == DIR_BULL
+    int originIdx = up ? structInternal.highBarIdx : structInternal.lowBarIdx
+    int originT   = up ? structInternal.highTime  : structInternal.lowTime
+    f_drawStructure(originT, originIdx, evStructInt.price, evStructInt.barTime, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, SC_INTERNAL, false)
 
-// f_drawStructureMajor [T07B]: estructura dominante (50). Color teal/rojo como el swing.
-// Etiqueta SIN recuadro con gap (igual que f_drawStructure): ALCISTA encima (style_label_down),
-// BAJISTA debajo (style_label_up). Se distingue del swing(5)/interno(3) por el GROSOR (width
-// 3) y el sufijo "+", size.normal.
-// LINEA por bar_time (xloc.bar_time): robusta en spans largos (los ejemplos abarcan hasta
-// 15 dias). ETIQUETA por bar_index (midIdx): el eje de TV NO es lineal en tiempo (los gaps
-// de fin de semana lo comprimen), asi que el punto medio en TIEMPO no cae en el medio
-// visual -> la etiqueta se "corria". El punto medio por bar_index (uniforme) si centra.
-f_drawStructureMajor(int pivotTime, int pivotBarIdx, float level, int breakTime, int breakBarIdx, int kind, int dir) =>
-    col = dir == DIR_BULL ? color.teal : color.red
-    txt = kind == KIND_CHOCH ? "CHoCH +" : "BOS +"
-    line.new(pivotTime, level, breakTime, level, xloc = xloc.bar_time, color = col, style = line.style_solid, width = 3)
-    int midIdx = math.round((pivotBarIdx + breakBarIdx) / 2.0)
-    label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.normal)
-
+// Estructura dominante (50) [T07B]: misma f_drawStructure con escala SC_MAJOR (grosor 3,
+// sufijo " +", linea por bar_time). Antes era una funcion aparte f_drawStructureMajor.
 if i_showMajor and not na(evStructMajor)
-    int pivotT = evStructMajor.dir == DIR_BULL ? structMajor.highTime : structMajor.lowTime
-    int pivotB = evStructMajor.dir == DIR_BULL ? structMajor.highBarIdx : structMajor.lowBarIdx
-    f_drawStructureMajor(pivotT, pivotB, evStructMajor.price, evStructMajor.barTime, evStructMajor.barIdx, evStructMajor.kind, evStructMajor.dir)
+    bool up = evStructMajor.dir == DIR_BULL
+    int pivotT = up ? structMajor.highTime : structMajor.lowTime
+    int pivotB = up ? structMajor.highBarIdx : structMajor.lowBarIdx
+    f_drawStructure(pivotT, pivotB, evStructMajor.price, evStructMajor.barTime, evStructMajor.barIdx, evStructMajor.kind, evStructMajor.dir, SC_MAJOR, false)
 
 // f_drawEQHL [T08]: linea punteada conectando los dos pivotes "iguales" + etiqueta
 // EQH/EQL en el midpoint (bar_index). AZUL para ambos (EQH y EQL, pref. usuario): doble
