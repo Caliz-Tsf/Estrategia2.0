@@ -12,13 +12,13 @@ Completar **F1-S1.3-T12 MSS (Market Structure Shift)**, el último concepto del 
 **Especificación previa:** `reglas-smc-ict.md §1.5` (poblada en VER-05). MSS = CHoCH de nivel swing + calificadores de displacement/cuerpo.
 
 **CORE byte-idéntico (Visual/Strategy, export Library):**
-- **Función pura** `f_detectMSS(chochEv, oBreak, hBreak, lBreak, cBreak, atr14, dispFactor, bodyPct)` → `[isMSS, kind]`
+- **Función pura** `f_detectMSS(chochEv, oBreak, hBreak, lBreak, cBreak, atr14, dispFactor, bodyPct)` → `SMC_Event` (KIND_MSS) o `na`
   - Recibe: CHoCH (evento de estructura) ya producido por `f_detectStructure(len=5)` + OHLC de la vela de ruptura + ATR14
-  - Cálculos:
-    - `rango = abs(hBreak - lBreak)`
-    - `cuerpo = abs(cBreak - oBreak)`
-    - `isMSS = (rango >= dispFactor × ATR14) && (cuerpo >= bodyPct × rango)` (default: dispFactor=1.5, bodyPct=0.70)
-  - Retorna: `isMSS=true` → produce `SMC_Event` con `KIND_MSS` (#5)
+  - Cálculos (solo si `chochEv.kind == KIND_CHOCH` y `not na(atr14)`):
+    - `rng  = hBreak - lBreak`
+    - `body = math.abs(cBreak - oBreak)`
+    - `isDisp = rng > 0 and rng >= dispFactor × ATR14 and body >= bodyPct × rng` (default: dispFactor=1.5, bodyPct=0.70)
+  - Retorna: si `isDisp` → `SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)`; si no → `na`
 - **Almacenamiento:** array dedicado `SMC_eventsMSS[]` (capa ADITIVA, no contamina `SMC_events` del BOS)
 - **Arquitectura:** patrón ADITIVO (como T07B dominantes): la detección de ruptura es unitaria (en `f_detectStructure`); la calificación ocurre post-hoc. Garantiza paridad MQL5 (función pura sobre datos históricos, zero lookahead).
 - **Confluencia:** #5 en §4.8 (Sprint 2.1 scoring)
