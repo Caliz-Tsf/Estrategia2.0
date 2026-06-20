@@ -17,6 +17,8 @@ GRP_KZ     = "Kill Zones / Sesiones"
 i_majorLen    = input.int(50, "Swing dominante (estructura grande)", minval = 10, group = GRP_STRUCT)
 i_swingLen    = input.int(5, "Swing length",    minval = 2, group = GRP_STRUCT)
 i_internalLen = input.int(3, "Internal length", minval = 1, group = GRP_STRUCT)
+i_mssDispFactor= input.float(1.5,  "MSS: rango vela ruptura (x ATR14)", minval = 0.5, step = 0.1, group = GRP_STRUCT)
+i_mssBodyPct   = input.float(0.70, "MSS: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_STRUCT)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño FVG (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
@@ -271,6 +273,27 @@ f_updateTFState(SMC_TFState state, SMC_Event ev) =>
             state.lastCHoCHDir   := ev.dir
             state.lastCHoCHTime  := ev.barTime
     state
+
+// --- MSS — Market Structure Shift [reglas-smc-ict §1.5] · T12 ---
+// f_detectMSS: un MSS es un CHoCH de escala SWING (§1.4) cuya vela de ruptura es un
+// displacement institucional (giro CON conviccion). NO recalcula la ruptura: recibe el
+// evento swing ya producido por f_detectStructure y lo CALIFICA. Solo si chochEv es un
+// CHoCH (no BOS, no na) y la vela que cerro la ruptura cumple displacement (§4.1):
+// rango >= dispFactor*ATR14 Y cuerpo >= bodyPct*rango (defaults 1.5 / 0.70). Devuelve un
+// SMC_Event KIND_MSS (capa ADITIVA: el CHoCH se conserva en su array; el MSS es la
+// confluencia #5 de mayor peso esperado, §1.5) o na. Solo escala swing -> el consumidor
+// no lo invoca con el evento interno (un MSS nunca es interno, §1.5). La vela de ruptura
+// es la barra confirmada que produjo el cierre; su OHLC entra por parametro -> funcion
+// PURA, portable a golden tests MQL5 (ADR-002). Con rango 0 (defensivo) isDisp = false.
+f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, float cBreak, float atr14, float dispFactor, float bodyPct) =>
+    SMC_Event ev = na
+    if not na(chochEv) and chochEv.kind == KIND_CHOCH and not na(atr14)
+        float rng  = hBreak - lBreak
+        float body = math.abs(cBreak - oBreak)
+        bool  isDisp = rng > 0 and rng >= (dispFactor * atr14) and body >= (bodyPct * rng)
+        if isDisp
+            ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
+    ev
 
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // Porta el algoritmo de Order Blocks de LuxAlgo (storeOrdeBlock :502-525,
@@ -811,6 +834,18 @@ if barstate.isconfirmed
     SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time, i_fvgThreshold * atr14, KIND_FVG)
     if not na(fvgZone)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
+
+// --- MSS — Market Structure Shift [T12] ---
+// Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_eventsMSS para
+// el scoring (confluencia #5, Sprint 2.1). Califica el CHoCH swing de ESTA barra como MSS
+// si su vela de ruptura (la barra confirmada actual) es displacement (§1.5). atr14 ya
+// disponible arriba. La vela de ruptura es la barra confirmada actual -> OHLC builtin.
+var array<SMC_Event> SMC_eventsMSS = array.new<SMC_Event>()
+SMC_Event evMSS = na
+if barstate.isconfirmed and not na(evStructSwing)
+    evMSS := f_detectMSS(evStructSwing, open, high, low, close, atr14, i_mssDispFactor, i_mssBodyPct)
+    if not na(evMSS)
+        f_pushEvent(SMC_eventsMSS, evMSS, MAX_EVENTS)
 
 // --- Equal Highs / Equal Lows [T08] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_eqhl para el

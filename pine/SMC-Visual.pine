@@ -26,6 +26,9 @@ i_showMajorSwings = input.bool(false, "Mostrar HH/HL/LH/LL dominantes", group = 
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
+i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
+i_mssDispFactor= input.float(1.5,  "MSS: rango vela ruptura (x ATR14)", minval = 0.5, step = 0.1, group = GRP_STRUCT)
+i_mssBodyPct   = input.float(0.70, "MSS: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_STRUCT)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
@@ -289,6 +292,27 @@ f_updateTFState(SMC_TFState state, SMC_Event ev) =>
             state.lastCHoCHDir   := ev.dir
             state.lastCHoCHTime  := ev.barTime
     state
+
+// --- MSS — Market Structure Shift [reglas-smc-ict §1.5] · T12 ---
+// f_detectMSS: un MSS es un CHoCH de escala SWING (§1.4) cuya vela de ruptura es un
+// displacement institucional (giro CON conviccion). NO recalcula la ruptura: recibe el
+// evento swing ya producido por f_detectStructure y lo CALIFICA. Solo si chochEv es un
+// CHoCH (no BOS, no na) y la vela que cerro la ruptura cumple displacement (§4.1):
+// rango >= dispFactor*ATR14 Y cuerpo >= bodyPct*rango (defaults 1.5 / 0.70). Devuelve un
+// SMC_Event KIND_MSS (capa ADITIVA: el CHoCH se conserva en su array; el MSS es la
+// confluencia #5 de mayor peso esperado, §1.5) o na. Solo escala swing -> el consumidor
+// no lo invoca con el evento interno (un MSS nunca es interno, §1.5). La vela de ruptura
+// es la barra confirmada que produjo el cierre; su OHLC entra por parametro -> funcion
+// PURA, portable a golden tests MQL5 (ADR-002). Con rango 0 (defensivo) isDisp = false.
+f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, float cBreak, float atr14, float dispFactor, float bodyPct) =>
+    SMC_Event ev = na
+    if not na(chochEv) and chochEv.kind == KIND_CHOCH and not na(atr14)
+        float rng  = hBreak - lBreak
+        float body = math.abs(cBreak - oBreak)
+        bool  isDisp = rng > 0 and rng >= (dispFactor * atr14) and body >= (bodyPct * rng)
+        if isDisp
+            ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
+    ev
 
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // Porta el algoritmo de Order Blocks de LuxAlgo (storeOrdeBlock :502-525,
@@ -839,6 +863,19 @@ if barstate.isconfirmed
     if not na(fvgZone)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
 
+// --- MSS — Market Structure Shift [T12] ---
+// Califica el CHoCH swing de ESTA barra como MSS si su vela de ruptura (la barra
+// confirmada actual) es displacement (§1.5). Capa ADITIVA: el CHoCH ya esta en
+// SMC_events; el MSS va a su array dedicado SMC_eventsMSS (confluencia #5, mayor peso),
+// igual que la estructura dominante usa SMC_eventsMajor [T07B]. atr14 ya disponible
+// arriba. La vela de ruptura es la barra confirmada actual -> OHLC = open/high/low/close.
+var array<SMC_Event> SMC_eventsMSS = array.new<SMC_Event>()
+SMC_Event evMSS = na
+if barstate.isconfirmed and not na(evStructSwing)
+    evMSS := f_detectMSS(evStructSwing, open, high, low, close, atr14, i_mssDispFactor, i_mssBodyPct)
+    if not na(evMSS)
+        f_pushEvent(SMC_eventsMSS, evMSS, MAX_EVENTS)
+
 // --- Equal Highs / Equal Lows [T08] ---
 // Pivotes a escala PROPIA eqlLength (3) — no los swing(5)/major(50). Mismo guard anti-
 // repaint (el pivote pertenece a t = bar_index - i_eqlLength). El pivote recien confirmado
@@ -962,6 +999,20 @@ if i_showStruct and not na(evStructSwing)
 if i_showInternal and not na(evStructInt)
     int originIdx = evStructInt.dir == DIR_BULL ? structInternal.highBarIdx : structInternal.lowBarIdx
     f_drawStructure(originIdx, evStructInt.price, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, true)
+
+// f_drawMSS [T12]: marca el CHoCH swing calificado como MSS (giro con conviccion, §1.5).
+// Se dibuja ENCIMA del CHoCH (que ya traza f_drawStructure si i_showStruct): linea del
+// nivel roto en FUCSIA (distinta del teal/rojo del CHoCH para que el peso del MSS sea
+// visible) + etiqueta "MSS" en la vela de ruptura. Origen = pivote protector roto (misma
+// ancla que f_drawStructure). ALCISTA encima (label_down) / BAJISTA debajo (label_up).
+f_drawMSS(int pivotBarIdx, float level, int breakBarIdx, int dir) =>
+    col = color.fuchsia
+    line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = line.style_solid, width = 2)
+    label.new(breakBarIdx, level, "MSS", style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.normal)
+
+if i_showMSS and not na(evMSS)
+    int originIdx = evMSS.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
+    f_drawMSS(originIdx, evMSS.price, evMSS.barIdx, evMSS.dir)
 
 // f_drawStructureMajor [T07B]: estructura dominante (50). Color teal/rojo como el swing.
 // Etiqueta SIN recuadro con gap (igual que f_drawStructure): ALCISTA encima (style_label_down),

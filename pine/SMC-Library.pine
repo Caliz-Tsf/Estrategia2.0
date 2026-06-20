@@ -251,6 +251,27 @@ export f_updateTFState(SMC_TFState state, SMC_Event ev) =>
             state.lastCHoCHTime  := ev.barTime
     state
 
+// --- MSS — Market Structure Shift [reglas-smc-ict §1.5] · T12 ---
+// f_detectMSS: un MSS es un CHoCH de escala SWING (§1.4) cuya vela de ruptura es un
+// displacement institucional (giro CON conviccion). NO recalcula la ruptura: recibe el
+// evento swing ya producido por f_detectStructure y lo CALIFICA. Solo si chochEv es un
+// CHoCH (no BOS, no na) y la vela que cerro la ruptura cumple displacement (§4.1):
+// rango >= dispFactor*ATR14 Y cuerpo >= bodyPct*rango (defaults 1.5 / 0.70). Devuelve un
+// SMC_Event KIND_MSS (capa ADITIVA: el CHoCH se conserva en su array; el MSS es la
+// confluencia #5 de mayor peso esperado, §1.5) o na. Solo escala swing -> el consumidor
+// no lo invoca con el evento interno (un MSS nunca es interno, §1.5). La vela de ruptura
+// es la barra confirmada que produjo el cierre; su OHLC entra por parametro -> funcion
+// PURA, portable a golden tests MQL5 (ADR-002). Con rango 0 (defensivo) isDisp = false.
+export f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, float cBreak, float atr14, float dispFactor, float bodyPct) =>
+    SMC_Event ev = na
+    if not na(chochEv) and chochEv.kind == KIND_CHOCH and not na(atr14)
+        float rng  = hBreak - lBreak
+        float body = math.abs(cBreak - oBreak)
+        bool  isDisp = rng > 0 and rng >= (dispFactor * atr14) and body >= (bodyPct * rng)
+        if isDisp
+            ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
+    ev
+
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // f_detectOB: porta el algoritmo OB de LuxAlgo (storeOrdeBlock :502-525,
 // deleteOrderBlocks :478-500; v5->v6). El OB es la vela origen del impulso que rompe
