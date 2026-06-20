@@ -229,7 +229,7 @@ Cada tarea lleva los **7 checkboxes del proceso canónico** de `ESQUELETO-P1 §1
 | Tarea | Qué | Done medible | Depende de |
 |---|---|---|---|
 | **T13a · Mapa MTF núcleo** | encapsular el bias + BOS/CHoCH/MSS + P/D + EMAs en `f_computeTFState` (escalares, los que casi están en `chartState` `SMC-Visual.pine:739`); 2 `request.security` (D1, H1); dibujo diferenciado + cascada de esos escalares | compila 0/0 los 3, core-sync OK, D1/H1 bias y niveles visibles en M5/H1 con prefijo; **anti-repaint verificado** | T03/T04/T07/T12 (✅) |
-| **T13b · Mapa MTF rico** | ampliar `f_computeTFState` a **N_htf zonas/lado** (OB/FVG/pool/sweep) con el tuple plano capado (§2.2); `f_nearestN` pura en CORE; reconstitución + dibujo en cascada con cuota de objetos | N_htf OB/FVG/pool de D1 y H1 dibujados en cascada; presupuesto de objetos bajo 500/tipo; **spike test R-P3-1 pasado** | **T13a** + spike R-P3-1 (§6) |
+| **T13b · Mapa MTF rico** | ampliar `f_computeTFState` a **N_htf zonas/lado** (OB/FVG/pool/sweep) con el tuple plano capado (§2.2); `f_nearestN` pura en CORE; reconstitución + dibujo en cascada con cuota de objetos | N_htf OB/FVG/pool de D1 y H1 dibujados en cascada; presupuesto de objetos bajo 500/tipo; **spike test R-P3-1 ✅ PASADO (S039)** | **T13a** + spike R-P3-1 (§6) ✅ SUPERADO |
 | **T14 · Panel multi-columna** | panel con columnas propio / H1 / D1 (bias, último evento, POI más cercana, sesión) | tabla con 3 columnas coherentes con el mapa | T13b |
 | **T15 · Alertas MTF** | `alertcondition()` en Visual para eventos del mapa (confluencia/POI) — plantilla `PINE-PLAN §5` | alertas disparan en eventos confirmados, sin repaint | T13b/T14 |
 | **F2-T01′ · Scoring lee el mapa** | `f_scoreConfluences` consume el mapa MTF (§3.3) → `scoreLong/scoreShort/activeList` | scores en panel; confluencias #17–#21 leen del mapa correcto | T13b + F2-T01 base |
@@ -275,7 +275,7 @@ Cada tarea lleva los **7 checkboxes del proceso canónico** de `ESQUELETO-P1 §1
 ### §5.2 — Tabla de dependencias (global)
 
 ```
-T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1] ──► T13b (rico) ──► T14 (panel) ──► T15 (alertas)
+T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1 ✅ PASA S039] ──► T13b (rico) ──► T14 (panel) ──► T15 (alertas)
                                                               │
    Sprint 1.5 (Tier 2) ── Sprint 1.6 (gap T26–T40, ESQUELETO-P1) ──┤ (conceptos que el mapa transportará)
                                                               ▼
@@ -289,7 +289,7 @@ T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1] ──► T1
 ### §5.3 — Gates (no se saltan, regla #8)
 
 - **Gate T13a→T13b (spike test R-P3-1):** el estado por-contexto no contamina el chart **debe pasar** antes de encapsular la cadena completa. **Protocolo de resultado (decisión Freddy, S038):**
-  - **✅ Si pasa (todo OK):** se continúa el plan tal cual → T13b → T14 → T15.
+  - **✅ Si pasa (todo OK) — RESULTADO: ✅ PASÓ en Sesion-039:** se continúa el plan tal cual → T13b → T14 → T15. Determinista: `var` interno en `request.security(..., D, ..., lookahead_off)` acumula PER-CONTEXTO sin contaminar chart.
   - **❌ Si NO pasa / aparece cualquier problema:** **DETENER. NO improvisar un workaround** (no forzar detección HTF simplificada por cuenta propia). **Avisar a Freddy** con el diagnóstico exacto (qué se probó, qué falló, hipótesis) para que él **escale a Opus ultracode (Opus Max)** y se decida el rediseño del transporte MTF antes de tocar nada más. T13b queda en pausa hasta esa resolución.
 - **GATE PRE-TESTEO DE SETUPS (nuevo, decisión Freddy S038) — el más importante de esta capa.** El testeo de setups del enjambre (replay+demo que alimenta IS/OOS) **NO arranca** hasta que estén listas **las DOS cosas, completas, no parciales**:
   - **(A) Pine COMPLETO:** todos los conceptos integrados y validados — Tier 1 (T01–T15) + Tier 2 (Sprint 1.5) + gap ICT (Sprint 1.6, T26–T40) + el motor confluencia→entrada en Strategy (scoring lee el mapa §3.3 + `f_selectEntryPOI` §3.4 + catálogo de setups §3.5). Nada "casi listo".
@@ -302,7 +302,7 @@ T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1] ──► T1
 ### §5.4 — Orden paso a paso (el plan que se sigue)
 
 1. **(este sprint, S038)** Aprobar P3 + ADR-008 + edits de workplan. **Sin Pine.**
-2. **Spike R-P3-1** (sesión Pine corta): probar `request.security` con función de estado `var` interno en D1 → confirmar que no contamina el chart. **✅ OK → paso 3. ❌ Problemas → DETENER + avisar a Freddy → escalar a Opus ultracode** (protocolo en §5.3). No se improvisa.
+2. **Spike R-P3-1** (sesión Pine corta): probar `request.security` con función de estado `var` interno en D1 → confirmar que no contamina el chart. **✅ PASÓ en Sesion-039 → paso 3. ❌ Hipótesis: Problemas → DETENER + avisar a Freddy → escalar a Opus ultracode** (protocolo en §5.3). No se improvisa.
 3. **T13a** núcleo MTF (escalares) → compila 0/0 → core-sync → validación → commit.
 4. **T13b** mapa rico (N_htf zonas/lado, `f_nearestN` CORE, cascada) → validación → commit.
 5. **T14** panel multi-columna → **T15** alertas → **gate Fase 1** (≥90 + global).
