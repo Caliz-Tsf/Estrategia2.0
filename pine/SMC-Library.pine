@@ -118,11 +118,16 @@ export type SMC_TFState
     float  lastCHoCHPrice = na
     int    lastCHoCHDir   = 0
     int    lastCHoCHTime  = 0
+    float  lastMSSPrice   = na
+    int    lastMSSDir     = 0
+    int    lastMSSTime    = 0
     float  pdHigh         = na
     float  pdLow          = na
+    float  pdMid          = na
     float  ema20          = na
     float  ema50          = na
     float  ema200         = na
+    float  atr14          = na
 
 // --- Helpers de arrays acotados [reglas-dev §1.6] ---
 // Tras cada push, si se supera el limite se descarta el mas antiguo (FIFO).
@@ -602,3 +607,49 @@ export f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, 
             session   := KZ_TOKYO
             firstHalf := inTokyoFirst
     [session, firstHalf]
+
+// f_computeTFState [Sprint 1.4 · T13a · ESQUELETO-P3 §2.4/§4.1]: encapsula la cadena de
+// deteccion de ESCALARES de un TF en UNA funcion con estado INTERNO (var locales), para
+// evaluarla via request.security(sym, tf, f_computeTFState(...), lookahead_off) SIN
+// contaminar el contexto del chart (R-P3-1, verificado en spike-R-P3-1.md, S039). Corre la
+// estructura swing (bias + ultimo BOS/CHoCH), el MSS de la barra, el dealing range P/D y
+// las EMAs/ATR sobre el TF de EJECUCION (el que fija request.security) y devuelve un TUPLE
+// PLANO de escalares (R-P3-2: security NO transporta UDT/array, solo numeros) -> paridad
+// MQL5 Fase 4 (SMC_MTF.mqh). Anti-repaint (regla #1): eventos solo en barstate.isconfirmed;
+// EMAs/ATR/expand del rango corren cada barra (series consistentes); el llamador usa
+// lookahead_off. SOLO escalares: el mapa rico (N zonas/lado) es T13b.
+// CONTRATO DEL TUPLE (orden exacto, replicar en MQL5):
+//   [ bias, bosP,bosD,bosT, chochP,chochD,chochT, mssP,mssD,mssT,
+//     pdHigh,pdLow,pdMid, ema20,ema50,ema200, atr14 ]
+export f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
+    var SMC_TFState   st       = SMC_TFState.new()
+    var SMC_Structure structTf = SMC_Structure.new()
+    var SMC_Trailing  trailTf  = SMC_Trailing.new()
+    float atr14 = ta.atr(14)
+    [sh, sl]   = f_detectSwings(swingLen)
+    [pdH, pdL] = f_detectSwings(pdLen)
+    if barstate.isconfirmed and not na(sh)
+        f_setStructureHigh(structTf, sh, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(sl)
+        f_setStructureLow(structTf, sl, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(pdH)
+        f_resetTrailingHigh(trailTf, pdH, bar_index - pdLen, time[pdLen])
+    if barstate.isconfirmed and not na(pdL)
+        f_resetTrailingLow(trailTf, pdL, bar_index - pdLen, time[pdLen])
+    f_updateTrailing(trailTf, high, low, time)
+    if barstate.isconfirmed
+        st.pdHigh := trailTf.top
+        st.pdLow  := trailTf.bottom
+        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        f_updateTFState(st, ev)
+        SMC_Event evM = f_detectMSS(ev, open, high, low, close, atr14, dispFactor, bodyPct)
+        if not na(evM)
+            st.lastMSSPrice := evM.price
+            st.lastMSSDir   := evM.dir
+            st.lastMSSTime  := evM.barTime
+    st.pdMid  := na(st.pdHigh) or na(st.pdLow) ? na : (st.pdHigh + st.pdLow) / 2.0
+    st.ema20  := ta.ema(close, 20)
+    st.ema50  := ta.ema(close, 50)
+    st.ema200 := ta.ema(close, 200)
+    st.atr14  := atr14
+    [ st.bias, st.lastBOSPrice, st.lastBOSDir, st.lastBOSTime, st.lastCHoCHPrice, st.lastCHoCHDir, st.lastCHoCHTime, st.lastMSSPrice, st.lastMSSDir, st.lastMSSTime, st.pdHigh, st.pdLow, st.pdMid, st.ema20, st.ema50, st.ema200, st.atr14 ]

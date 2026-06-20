@@ -127,11 +127,16 @@ type SMC_TFState
     float  lastCHoCHPrice = na
     int    lastCHoCHDir   = 0
     int    lastCHoCHTime  = 0
+    float  lastMSSPrice   = na
+    int    lastMSSDir     = 0
+    int    lastMSSTime    = 0
     float  pdHigh         = na
     float  pdLow          = na
+    float  pdMid          = na
     float  ema20          = na
     float  ema50          = na
     float  ema200         = na
+    float  atr14          = na
 f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
     array.push(a, z)
     if array.size(a) > maxN
@@ -675,6 +680,52 @@ f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, bool in
             firstHalf := inTokyoFirst
     [session, firstHalf]
 
+// f_computeTFState [Sprint 1.4 · T13a · ESQUELETO-P3 §2.4/§4.1]: encapsula la cadena de
+// deteccion de ESCALARES de un TF en UNA funcion con estado INTERNO (var locales), para
+// evaluarla via request.security(sym, tf, f_computeTFState(...), lookahead_off) SIN
+// contaminar el contexto del chart (R-P3-1, verificado en spike-R-P3-1.md, S039). Corre la
+// estructura swing (bias + ultimo BOS/CHoCH), el MSS de la barra, el dealing range P/D y
+// las EMAs/ATR sobre el TF de EJECUCION (el que fija request.security) y devuelve un TUPLE
+// PLANO de escalares (R-P3-2: security NO transporta UDT/array, solo numeros) -> paridad
+// MQL5 Fase 4 (SMC_MTF.mqh). Anti-repaint (regla #1): eventos solo en barstate.isconfirmed;
+// EMAs/ATR/expand del rango corren cada barra (series consistentes); el llamador usa
+// lookahead_off. SOLO escalares: el mapa rico (N zonas/lado) es T13b.
+// CONTRATO DEL TUPLE (orden exacto, replicar en MQL5):
+//   [ bias, bosP,bosD,bosT, chochP,chochD,chochT, mssP,mssD,mssT,
+//     pdHigh,pdLow,pdMid, ema20,ema50,ema200, atr14 ]
+f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
+    var SMC_TFState   st       = SMC_TFState.new()
+    var SMC_Structure structTf = SMC_Structure.new()
+    var SMC_Trailing  trailTf  = SMC_Trailing.new()
+    float atr14 = ta.atr(14)
+    [sh, sl]   = f_detectSwings(swingLen)
+    [pdH, pdL] = f_detectSwings(pdLen)
+    if barstate.isconfirmed and not na(sh)
+        f_setStructureHigh(structTf, sh, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(sl)
+        f_setStructureLow(structTf, sl, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(pdH)
+        f_resetTrailingHigh(trailTf, pdH, bar_index - pdLen, time[pdLen])
+    if barstate.isconfirmed and not na(pdL)
+        f_resetTrailingLow(trailTf, pdL, bar_index - pdLen, time[pdLen])
+    f_updateTrailing(trailTf, high, low, time)
+    if barstate.isconfirmed
+        st.pdHigh := trailTf.top
+        st.pdLow  := trailTf.bottom
+        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        f_updateTFState(st, ev)
+        SMC_Event evM = f_detectMSS(ev, open, high, low, close, atr14, dispFactor, bodyPct)
+        if not na(evM)
+            st.lastMSSPrice := evM.price
+            st.lastMSSDir   := evM.dir
+            st.lastMSSTime  := evM.barTime
+    st.pdMid  := na(st.pdHigh) or na(st.pdLow) ? na : (st.pdHigh + st.pdLow) / 2.0
+    st.ema20  := ta.ema(close, 20)
+    st.ema50  := ta.ema(close, 50)
+    st.ema200 := ta.ema(close, 200)
+    st.atr14  := atr14
+    [ st.bias, st.lastBOSPrice, st.lastBOSDir, st.lastBOSTime, st.lastCHoCHPrice, st.lastCHoCHDir, st.lastCHoCHTime, st.lastMSSPrice, st.lastMSSDir, st.lastMSSTime, st.pdHigh, st.pdLow, st.pdMid, st.ema20, st.ema50, st.ema200, st.atr14 ]
+
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
 // Las detecciones que los pueblan llegan en T02+ (swings, BOS/CHoCH, ...).
@@ -903,8 +954,16 @@ bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0
 bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
 [curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
 
-// === MTF ===
-// request.security D1/H1 (max 2 en Strategy). Pendiente Sprint 1.4 (T13).
+// === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
+// Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
+// transporta UDT/array). f_computeTFState se evalua en el contexto del HTF con estado var
+// INTERNO por-contexto (R-P3-1, spike S039 ✅) -> no contamina el chart. lookahead_off
+// SIEMPRE (regla #1, anti-repaint). Se reconstituyen a SMC_TFState ligeros (orden de campos
+// = orden del tuple, .new posicional) que el scoring consumira (Sprint 2.1). Mapa rico = T13b.
+[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
+[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
+SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
+SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
 
 // === SCORING ===
 // f_scoreConfluences -> scoreLong/scoreShort (42 confluencias canonicas,
@@ -929,7 +988,10 @@ if barstate.islastconfirmedhistory
     string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
     string kzTxt  = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY AM" : curKZ == KZ_TOKYO ? "Tokyo" : "—"
     string kzCell = curKZ == KZ_NONE ? "—" : kzTxt + (curKZFirst ? " (1ª½)" : "")
-    lbl := label.new(bar_index, high, "SMC Strategy — T11\nbias=" + biasTxt + "  P/D=" + pdCell + "  KZ=" + kzCell + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
+    // Mapa MTF [T13a]: bias HTF heredado (escalares via request.security). Wiring para el scoring (Sprint 2.1).
+    string d1Txt  = d1State.bias == DIR_BULL ? "Alcista" : d1State.bias == DIR_BEAR ? "Bajista" : "—"
+    string h1Txt  = h1State.bias == DIR_BULL ? "Alcista" : h1State.bias == DIR_BEAR ? "Bajista" : "—"
+    lbl := label.new(bar_index, high, "SMC Strategy — T13a\nbias=" + biasTxt + "  P/D=" + pdCell + "  KZ=" + kzCell + "\nMTF: D1=" + d1Txt + "  H1=" + h1Txt + "  swings=" + str.tostring(array.size(SMC_swings)) + "  eventos=" + str.tostring(array.size(SMC_events)) + "  zonas=" + str.tostring(array.size(SMC_zones)) + "  eqhl=" + str.tostring(array.size(SMC_eqhl)) + "  pools=" + str.tostring(array.size(SMC_pools)), style = label.style_label_down, color = color.new(color.blue, 0), textcolor = color.white)
 
 // === ALERTAS ===
 // alert_message JSON por entrada (plantilla PINE-PLAN §5). Pendiente Sprint 2.1.
