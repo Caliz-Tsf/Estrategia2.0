@@ -44,6 +44,7 @@ export const int KIND_VI  = 46
 export const int KIND_BAG = 47
 export const int KIND_CISD = 48
 export const int KIND_VACUUM = 49
+export const int KIND_IPR  = 50
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -580,6 +581,35 @@ export f_detectVacuumBlock(float openNew, float closePrev, float atr14, float va
         if math.abs(g) >= vacuumFactor * atr14
             int dir = g > 0 ? DIR_BULL : DIR_BEAR
             z := SMC_Zone.new(math.max(openNew, closePrev), math.min(openNew, closePrev), dir, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VACUUM)
+    z
+
+// --- IPR — Imbalanced Price Range [reglas-smc-ict §5.9] · T35 ---
+// f_detectIPR: >= iprMinGaps FVG del MISMO dir en iprWindow velas, SIN opuesto -> rango desbalanceado
+// (contexto de bias, opuesto al BPR). Rango [min(bottoms), max(tops)]. PURA. Devuelve KIND_IPR o na. #49.
+export f_detectIPR(array<SMC_Zone> zones, int curBarIdx, int curBarTime, int iprWindow, int iprMinGaps) =>
+    SMC_Zone z = na
+    int   bullN = 0
+    int   bearN = 0
+    float bTop = na
+    float bBot = na
+    float sTop = na
+    float sBot = na
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone zz = array.get(zones, i)
+            if zz.kind == KIND_FVG and zz.state < ZS_MITIGATED and (curBarIdx - zz.barIdx) <= iprWindow
+                if zz.dir == DIR_BULL
+                    bullN += 1
+                    bTop := na(bTop) ? zz.top : math.max(bTop, zz.top)
+                    bBot := na(bBot) ? zz.bottom : math.min(bBot, zz.bottom)
+                else
+                    bearN += 1
+                    sTop := na(sTop) ? zz.top : math.max(sTop, zz.top)
+                    sBot := na(sBot) ? zz.bottom : math.min(sBot, zz.bottom)
+    if bullN >= iprMinGaps and bearN == 0
+        z := SMC_Zone.new(bTop, bBot, DIR_BULL, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
+    else if bearN >= iprMinGaps and bullN == 0
+        z := SMC_Zone.new(sTop, sBot, DIR_BEAR, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
     z
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---

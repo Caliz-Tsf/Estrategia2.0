@@ -51,6 +51,8 @@ i_bprMinOverlap= input.float(0.05, "BPR: solape minimo (x ATR14)", minval = 0.0,
 i_irFactor     = input.float(1.0, "IR: rango vela impulso (x ATR14, §5.4)", minval = 0.3, step = 0.1, group = GRP_SCORE)
 i_irBodyPct    = input.float(0.60, "IR: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_SCORE)
 i_viThreshold  = input.float(0.05, "VI: gap minimo de cuerpo (x ATR14, §5.5)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_SCORE)
+i_iprWindow    = input.int(10, "IPR: ventana (velas, §5.9)", minval = 2, group = GRP_SCORE)
+i_iprMinGaps   = input.int(3,  "IPR: FVG min. mismo lado", minval = 2, group = GRP_SCORE)
 i_gapMin       = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14, §5.10)", minval = 0.0, step = 0.1, group = GRP_SCORE)
 i_cisdMinRun   = input.int(2, "CISD: velas minimas del run de delivery (§5.6)", minval = 1, group = GRP_SCORE)
 i_propOverlap  = input.float(0.5, "Propulsion: solape minimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_SCORE)
@@ -112,6 +114,7 @@ KIND_VI  = 46
 KIND_BAG = 47
 KIND_CISD = 48
 KIND_VACUUM = 49
+KIND_IPR  = 50
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -668,6 +671,38 @@ f_detectVacuumBlock(float openNew, float closePrev, float atr14, float vacuumFac
         if math.abs(g) >= vacuumFactor * atr14
             int dir = g > 0 ? DIR_BULL : DIR_BEAR
             z := SMC_Zone.new(math.max(openNew, closePrev), math.min(openNew, closePrev), dir, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VACUUM)
+    z
+
+// --- IPR — Imbalanced Price Range [reglas-smc-ict §5.9] · T35 ---
+// f_detectIPR: rango DESBALANCEADO = acumulacion de >= iprMinGaps FVG (§2.2) del MISMO dir en una ventana
+// de iprWindow velas, SIN ningun FVG opuesto que lo neutralice. El rango [min(bottoms), max(tops)] de esos
+// gaps "tira" hacia ese lado -> CONTEXTO de bias (no zona puntual de entrada). Opuesto conceptual del BPR
+// (§5.3: alli los gaps son opuestos y se cruzan; aqui del mismo lado y se apilan). PURA: escanea los FVG
+// vivos de zones. Devuelve SMC_Zone KIND_IPR (dir = el comun) o na. Confluencia candidata #49.
+f_detectIPR(array<SMC_Zone> zones, int curBarIdx, int curBarTime, int iprWindow, int iprMinGaps) =>
+    SMC_Zone z = na
+    int   bullN = 0
+    int   bearN = 0
+    float bTop = na
+    float bBot = na
+    float sTop = na
+    float sBot = na
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone zz = array.get(zones, i)
+            if zz.kind == KIND_FVG and zz.state < ZS_MITIGATED and (curBarIdx - zz.barIdx) <= iprWindow
+                if zz.dir == DIR_BULL
+                    bullN += 1
+                    bTop := na(bTop) ? zz.top : math.max(bTop, zz.top)
+                    bBot := na(bBot) ? zz.bottom : math.min(bBot, zz.bottom)
+                else
+                    bearN += 1
+                    sTop := na(sTop) ? zz.top : math.max(sTop, zz.top)
+                    sBot := na(sBot) ? zz.bottom : math.min(sBot, zz.bottom)
+    if bullN >= iprMinGaps and bearN == 0
+        z := SMC_Zone.new(bTop, bBot, DIR_BULL, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
+    else if bearN >= iprMinGaps and bullN == 0
+        z := SMC_Zone.new(sTop, sBot, DIR_BEAR, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
     z
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
@@ -1774,6 +1809,19 @@ if barstate.isconfirmed
         cisdRunDir  := cisdCol
         cisdRunLen  := cisdCol == 0 ? 0 : 1
         cisdRunOrig := cisdCol == 0 ? na : open
+
+// --- IPR — Imbalanced Price Range [§5.9] · T35 ---
+// Mismo wiring que Visual (sin dibujo). currentIpr = IPR vigente (contexto bias); SMC_ipr registra al
+// formarse uno nuevo (transicion de dir).
+var array<SMC_Zone> SMC_ipr = array.new<SMC_Zone>()
+var SMC_Zone currentIpr = na
+var int lastIprDir = 0
+if barstate.isconfirmed
+    currentIpr := f_detectIPR(SMC_zones, bar_index, time, i_iprWindow, i_iprMinGaps)
+    int curIprDir = na(currentIpr) ? 0 : currentIpr.dir
+    if curIprDir != 0 and curIprDir != lastIprDir
+        f_pushZone(SMC_ipr, currentIpr, MAX_ZONES)
+    lastIprDir := curIprDir
 
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Mismo wiring que Visual pero SIN dibujo: la Strategy solo pobla SMC_legs para el scoring (clasificador

@@ -85,6 +85,9 @@ i_maxShowIR    = input.int(20,     "Max marcadores de IR (recientes)", minval = 
 i_showVI       = input.bool(false, "Mostrar Volume Imbalance (§5.5, micro)", group = GRP_FVG)
 i_viThreshold  = input.float(0.05, "VI: gap mínimo de cuerpo (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_FVG)
 i_maxShowVI    = input.int(15,     "Max cajas de VI (recientes)", minval = 1, group = GRP_FVG)
+i_showIPR      = input.bool(true,  "Mostrar IPR (rango desbalanceado, §5.9)", group = GRP_FVG)
+i_iprWindow    = input.int(10,     "IPR: ventana (velas)", minval = 2, group = GRP_FVG)
+i_iprMinGaps   = input.int(3,      "IPR: FVG mín. mismo lado", minval = 2, group = GRP_FVG)
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
 i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
@@ -171,6 +174,7 @@ KIND_VI  = 46
 KIND_BAG = 47
 KIND_CISD = 48
 KIND_VACUUM = 49
+KIND_IPR  = 50
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -727,6 +731,38 @@ f_detectVacuumBlock(float openNew, float closePrev, float atr14, float vacuumFac
         if math.abs(g) >= vacuumFactor * atr14
             int dir = g > 0 ? DIR_BULL : DIR_BEAR
             z := SMC_Zone.new(math.max(openNew, closePrev), math.min(openNew, closePrev), dir, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VACUUM)
+    z
+
+// --- IPR — Imbalanced Price Range [reglas-smc-ict §5.9] · T35 ---
+// f_detectIPR: rango DESBALANCEADO = acumulacion de >= iprMinGaps FVG (§2.2) del MISMO dir en una ventana
+// de iprWindow velas, SIN ningun FVG opuesto que lo neutralice. El rango [min(bottoms), max(tops)] de esos
+// gaps "tira" hacia ese lado -> CONTEXTO de bias (no zona puntual de entrada). Opuesto conceptual del BPR
+// (§5.3: alli los gaps son opuestos y se cruzan; aqui del mismo lado y se apilan). PURA: escanea los FVG
+// vivos de zones. Devuelve SMC_Zone KIND_IPR (dir = el comun) o na. Confluencia candidata #49.
+f_detectIPR(array<SMC_Zone> zones, int curBarIdx, int curBarTime, int iprWindow, int iprMinGaps) =>
+    SMC_Zone z = na
+    int   bullN = 0
+    int   bearN = 0
+    float bTop = na
+    float bBot = na
+    float sTop = na
+    float sBot = na
+    if array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone zz = array.get(zones, i)
+            if zz.kind == KIND_FVG and zz.state < ZS_MITIGATED and (curBarIdx - zz.barIdx) <= iprWindow
+                if zz.dir == DIR_BULL
+                    bullN += 1
+                    bTop := na(bTop) ? zz.top : math.max(bTop, zz.top)
+                    bBot := na(bBot) ? zz.bottom : math.min(bBot, zz.bottom)
+                else
+                    bearN += 1
+                    sTop := na(sTop) ? zz.top : math.max(sTop, zz.top)
+                    sBot := na(sBot) ? zz.bottom : math.min(sBot, zz.bottom)
+    if bullN >= iprMinGaps and bearN == 0
+        z := SMC_Zone.new(bTop, bBot, DIR_BULL, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
+    else if bearN >= iprMinGaps and bullN == 0
+        z := SMC_Zone.new(sTop, sBot, DIR_BEAR, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
     z
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
@@ -1856,6 +1892,20 @@ if barstate.isconfirmed
         cisdRunLen  := cisdCol == 0 ? 0 : 1
         cisdRunOrig := cisdCol == 0 ? na : open
 
+// --- IPR — Imbalanced Price Range [§5.9] · T35 ---
+// Contexto de bias: rango con FVG apilados del mismo lado. currentIpr = el IPR vigente (recomputado cada
+// barra, NO entra a SMC_zones: es contexto, no zona operable). Se registra en SMC_ipr solo al FORMARSE
+// uno nuevo (transicion de dir) para dejar traza de que/donde paso, sin spamear.
+var array<SMC_Zone> SMC_ipr = array.new<SMC_Zone>()
+var SMC_Zone currentIpr = na
+var int lastIprDir = 0
+if barstate.isconfirmed
+    currentIpr := f_detectIPR(SMC_zones, bar_index, time, i_iprWindow, i_iprMinGaps)
+    int curIprDir = na(currentIpr) ? 0 : currentIpr.dir
+    if curIprDir != 0 and curIprDir != lastIprDir
+        f_pushZone(SMC_ipr, currentIpr, MAX_ZONES)
+    lastIprDir := curIprDir
+
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
 // hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
@@ -2739,6 +2789,18 @@ if i_showVacuum and barstate.islast
                 color vacc = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(color.rgb(190, 195, 205), 84)
                 array.push(SMC_vacBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = vacc, border_color = color.new(color.rgb(170, 175, 190), 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index))
                 array.push(SMC_vacLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = color.rgb(200, 205, 215), size = size.small, xloc = xloc.bar_index))
+
+// Zona IPR vigente [T35 · §5.9] (solo Visual): rango desbalanceado (contexto de bias). Borde fino sin
+// relleno (es contexto, no zona de entrada), color por dir. Solo la actual (currentIpr), repintada-en-islast.
+var box   SMC_iprBox = na
+var label SMC_iprLbl = na
+if i_showIPR and barstate.islast
+    box.delete(SMC_iprBox)
+    label.delete(SMC_iprLbl)
+    if not na(currentIpr)
+        color iprc = currentIpr.dir == DIR_BULL ? color.green : color.red
+        SMC_iprBox := box.new(left = currentIpr.barIdx - i_iprWindow, top = currentIpr.top, right = bar_index, bottom = currentIpr.bottom, bgcolor = color.new(iprc, 95), border_color = color.new(iprc, 40), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
+        SMC_iprLbl := label.new(bar_index, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, "IPR", style = label.style_label_left, color = color.new(iprc, 85), textcolor = iprc, size = size.tiny, xloc = xloc.bar_index)
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
 // vela media (z.barIdx-1, cf. LuxAlgo lastTime=time[1]) para cubrir el desplazamiento
