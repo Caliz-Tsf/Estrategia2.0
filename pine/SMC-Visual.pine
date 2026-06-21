@@ -59,6 +59,8 @@ i_showEmaStack    = input.bool(true,  "Marcar Stack Flip 20&50 vs 200 (§4.3)", 
 i_maxShowEmaX     = input.int(20,     "Max marcadores de cruce EMA (recientes)", minval = 1, group = GRP_CTX)
 i_showLegs        = input.bool(true,  "Marcar tramos Impulsivo/Correctivo (§4.4)", group = GRP_CTX)
 i_maxShowLegs     = input.int(20,     "Max marcadores de tramo (recientes)", minval = 1, group = GRP_CTX)
+i_showInsideDay   = input.bool(true,  "Marcar Inside Day (compresión D1, §5.12)", group = GRP_CTX)
+i_maxShowID       = input.int(10,     "Max marcadores de Inside Day (recientes)", minval = 1, group = GRP_CTX)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
@@ -175,6 +177,7 @@ KIND_BAG = 47
 KIND_CISD = 48
 KIND_VACUUM = 49
 KIND_IPR  = 50
+KIND_INSIDEDAY = 51
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -764,6 +767,18 @@ f_detectIPR(array<SMC_Zone> zones, int curBarIdx, int curBarTime, int iprWindow,
     else if bearN >= iprMinGaps and bullN == 0
         z := SMC_Zone.new(sTop, sBot, DIR_BEAR, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
     z
+
+// --- Inside Day [reglas-smc-ict §5.12] · T37 ---
+// f_detectInsideDay: dia cuyo rango esta CONTENIDO en el del dia previo (high1 < high2 y low1 > low2,
+// donde 1 = dia recien cerrado, 2 = el anterior) -> COMPRESION de volatilidad (suele preceder expansion).
+// Geometria pura sobre el snapshot D1 (el consumidor trae los niveles via request.security, lookahead_off,
+// y llama en la transicion de dia). dir = 0 (neutro: la direccion la da la ruptura posterior del rango).
+// Devuelve SMC_Event KIND_INSIDEDAY anclado al medio del rango interior, o na. Confluencia candidata #50.
+f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(h1) and not na(h2) and h1 < h2 and l1 > l2
+        ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
+    ev
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
@@ -1906,6 +1921,17 @@ if barstate.isconfirmed
         f_pushZone(SMC_ipr, currentIpr, MAX_ZONES)
     lastIprDir := curIprDir
 
+// --- Inside Day [§5.12] · T37 ---
+// Snapshot D1 via request.security (lookahead_off, anti-repaint): high/low del dia recien cerrado (1) y
+// el previo (2). Se evalua en la TRANSICION de dia (reusa ogNewDay del T30). Compresion -> SMC_insideDays.
+[id_h1, id_l1, id_h2, id_l2] = request.security(syminfo.tickerid, "D", [high[1], low[1], high[2], low[2]], lookahead = barmerge.lookahead_off)
+var array<SMC_Event> SMC_insideDays = array.new<SMC_Event>()
+SMC_Event evInsideDay = na
+if barstate.isconfirmed and ogNewDay
+    evInsideDay := f_detectInsideDay(id_h1, id_l1, id_h2, id_l2, bar_index, time)
+    if not na(evInsideDay)
+        f_pushEvent(SMC_insideDays, evInsideDay, MAX_EVENTS)
+
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
 // hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
@@ -2579,6 +2605,19 @@ if i_showLegs and barstate.islast
             string ltxt = (impulsive ? "IMP " : "CORR ") + (bullLeg ? "↑" : "↓")
             array.push(SMC_legLabels, label.new(lg.barTime + legOffMs, lg.price, ltxt, style = label.style_label_left, color = color.new(lcol, 75), textcolor = lcol, size = size.tiny, xloc = xloc.bar_time))
 
+// Marcadores de Inside Day [T37 · §5.12]. Compresion D1 -> etiqueta gris "ID" en el medio del rango
+// interior, anclada al dia. Acotado a i_maxShowID, repintado-en-islast.
+var array<label> SMC_idLabels = array.new<label>()
+if i_showInsideDay and barstate.islast
+    for lb in SMC_idLabels
+        label.delete(lb)
+    array.clear(SMC_idLabels)
+    int nID = array.size(SMC_insideDays)
+    if nID > 0
+        int firstID = math.max(0, nID - i_maxShowID)
+        for i = firstID to nID - 1
+            SMC_Event idv = array.get(SMC_insideDays, i)
+            array.push(SMC_idLabels, label.new(idv.barTime, idv.price, "ID", style = label.style_label_down, color = color.new(color.gray, 65), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
 // origen no repinta). Alcista VERDE OSCURO / bajista ROJO OSCURO (pref. usuario, para no

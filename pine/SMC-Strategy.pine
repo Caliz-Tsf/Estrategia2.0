@@ -115,6 +115,7 @@ KIND_BAG = 47
 KIND_CISD = 48
 KIND_VACUUM = 49
 KIND_IPR  = 50
+KIND_INSIDEDAY = 51
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -704,6 +705,18 @@ f_detectIPR(array<SMC_Zone> zones, int curBarIdx, int curBarTime, int iprWindow,
     else if bearN >= iprMinGaps and bullN == 0
         z := SMC_Zone.new(sTop, sBot, DIR_BEAR, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
     z
+
+// --- Inside Day [reglas-smc-ict §5.12] · T37 ---
+// f_detectInsideDay: dia cuyo rango esta CONTENIDO en el del dia previo (high1 < high2 y low1 > low2,
+// donde 1 = dia recien cerrado, 2 = el anterior) -> COMPRESION de volatilidad (suele preceder expansion).
+// Geometria pura sobre el snapshot D1 (el consumidor trae los niveles via request.security, lookahead_off,
+// y llama en la transicion de dia). dir = 0 (neutro: la direccion la da la ruptura posterior del rango).
+// Devuelve SMC_Event KIND_INSIDEDAY anclado al medio del rango interior, o na. Confluencia candidata #50.
+f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(h1) and not na(h2) and h1 < h2 and l1 > l2
+        ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
+    ev
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
@@ -1822,6 +1835,17 @@ if barstate.isconfirmed
     if curIprDir != 0 and curIprDir != lastIprDir
         f_pushZone(SMC_ipr, currentIpr, MAX_ZONES)
     lastIprDir := curIprDir
+
+// --- Inside Day [§5.12] · T37 ---
+// Mismo wiring que Visual (sin dibujo). Snapshot D1 via security (lookahead_off); evalua en transicion de
+// dia (ogNewDay). Compresion -> SMC_insideDays para el scoring (#50).
+[id_h1, id_l1, id_h2, id_l2] = request.security(syminfo.tickerid, "D", [high[1], low[1], high[2], low[2]], lookahead = barmerge.lookahead_off)
+var array<SMC_Event> SMC_insideDays = array.new<SMC_Event>()
+SMC_Event evInsideDay = na
+if barstate.isconfirmed and ogNewDay
+    evInsideDay := f_detectInsideDay(id_h1, id_l1, id_h2, id_l2, bar_index, time)
+    if not na(evInsideDay)
+        f_pushEvent(SMC_insideDays, evInsideDay, MAX_EVENTS)
 
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Mismo wiring que Visual pero SIN dibujo: la Strategy solo pobla SMC_legs para el scoring (clasificador

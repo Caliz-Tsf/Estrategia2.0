@@ -45,6 +45,7 @@ export const int KIND_BAG = 47
 export const int KIND_CISD = 48
 export const int KIND_VACUUM = 49
 export const int KIND_IPR  = 50
+export const int KIND_INSIDEDAY = 51
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -611,6 +612,16 @@ export f_detectIPR(array<SMC_Zone> zones, int curBarIdx, int curBarTime, int ipr
     else if bearN >= iprMinGaps and bullN == 0
         z := SMC_Zone.new(sTop, sBot, DIR_BEAR, curBarIdx, curBarTime, ZS_ACTIVE, 0.0, "", KIND_IPR)
     z
+
+// --- Inside Day [reglas-smc-ict §5.12] · T37 ---
+// f_detectInsideDay: dia contenido en el previo (h1<h2 y l1>l2; 1=dia recien cerrado) -> compresion.
+// Geometria pura sobre snapshot D1 (consumidor trae niveles via security). dir=0. Devuelve KIND_INSIDEDAY
+// o na. Confluencia #50.
+export f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(h1) and not na(h2) and h1 < h2 and l1 > l2
+        ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
+    ev
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: cierre que cruza el ORIGEN (open de la 1a vela) del ultimo run de delivery (>= cisdMinRun
