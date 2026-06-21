@@ -799,4 +799,65 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 
 **Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1)*: **13 Volume Imbalances** — p.ej. SIVI 05-26 21:00 (gap cuerpo 0.00031), BIVI 05-27 21:00 (0.00022), SIVI 05-31 21:00 (0.00078). (En M5 son mucho más frecuentes, 53 — coherente con su naturaleza micro.)
 
-> **Lote 1 (familia FVG/imbalance T26–T29, T31) — definido y verificado contra `eurusd_h1.csv`.** Pendientes de esta sección §5: T30 (gaps de apertura), T32 (CISD), T33 (Vacuum), T34 (Propulsion), T35 (IPR), T36 (Std Dev), T37 (Inside Day), T38 (SMT — requiere ADR), T39 (macros), T40 (RTH/ETH).
+### 5.6 CISD — Change in State of Delivery `f_detectCISD` · T32
+
+**Concepto.** El **cambio en el estado de entrega**: el precio venía "entregando" en una dirección (un run de velas del mismo color = la pierna de delivery) y **cierra de vuelta cruzando el origen de ese run**. Es un giro **más temprano y fino** que el CHoCH (§1.4): el CHoCH rompe un *pivote swing*; el CISD rompe el *open de la pierna de entrega*, que ocurre antes. **Distinto de CHoCH/MSS** — no los duplica (guard obligatorio del esqueleto).
+
+**Definición cuantificada.** Sea el **último run de delivery** = la secuencia maximal de `≥ cisdMinRun` velas consecutivas del mismo color que termina en la vela previa. Su **origen** = el `open` de la primera vela del run. **CISD alcista:** tras un run **bajista** (≥cisdMinRun velas `close<open`), una vela **cierra por encima** del `open` origen (`close > openOrigen` con `open ≤ openOrigen`). Bajista simétrico (tras run alcista, cierra bajo el origen). `KIND_CISD`, `dir` = el del giro. Anti-repaint por cierre. **El gate `cisdMinRun` es lo que lo hace distinguible:** exige una pierna de entrega real (no un cierre de 1 vela = ruido).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `cisdMinRun` | **2** | velas consecutivas mínimas del run de delivery. Con 1 sería ruido (39 señales/300 velas); con ≥2 → señal distinguible. |
+
+**Contraejemplo.** Un cierre que cruza el open de **una sola** vela contraria (run de 1) NO es CISD — es ruido intrabar, no un cambio del estado de entrega. Y un CISD **no** es un CHoCH: puede dispararse sin que se haya roto aún ningún pivote swing (es anterior); si además rompe el swing, ya es CHoCH/MSS (§1.4/§1.5).
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1, cisdMinRun 2)*: **8 CISD** en la ventana. Destacan: **CISD bajista 06-05 12:00** (run de 6 velas bajistas, el gran shift de entrega que abrió la caída) y **CISD alcista 06-09 08:00** (run de 3, inicio del rally correctivo). Con cisdMinRun 1 saldrían 39 (ruido, descartado); con ≥2 quedan 8 (distinguibles). Confluencia **candidata #47**.
+
+### 5.7 Vacuum Block `f_detectVacuumBlock` · T33
+
+**Concepto.** Un **vacío de precio** por apertura (frontera de sesión/día/semana o noticia): un gap **grande** donde no hubo negociación → actúa como **imán de retorno** (el precio tiende a volver a rellenarlo).
+
+**Definición cuantificada.** En la frontera de vela (en FX 24h, el salto `close[i-1] → open[i]` en la frontera de día/semana del broker), si `|open[i] − close[i-1]| ≥ vacuumFactor×ATR14` → `SMC_Zone` `KIND_VACUUM` = `[min, max]` de `(close[i-1], open[i])`, `dir` = signo del gap. Ciclo de vida vía `f_updateZoneMitigation` (se "mitiga" al rellenarse). **Distinto de:** Volume Imbalance (§5.5, micro, mechas solapan) y FVG (§2.2, hueco de 3 velas) — el Vacuum es **un único gap grande** de apertura.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `vacuumFactor` | **0.5** | × ATR14, tamaño mínimo del gap de apertura. |
+
+**Contraejemplo.** Un micro-gap de cuerpo con mechas solapadas (< 0.5×ATR) es **Volume Imbalance** (§5.5), no Vacuum — el Vacuum exige un salto grande de apertura (vacío real de negociación).
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1, vacuumFactor 0.5)*: **3 Vacuum Blocks**, todos en la frontera de día del broker (21:00 GMT en este feed): 05-31 21:00 (gap 0.72×ATR ↓), 06-04 21:00 (0.53×ATR ↑), 06-07 21:00 (0.85×ATR ↓). Confluencia **candidata #48**. *(Nota: en FX los gaps grandes son escasos y de frontera; en índices/futuros con cierre nocturno serían más frecuentes — símbolo-agnóstico, ADR-001.)*
+
+### 5.8 Propulsion Block `f_detectPropulsionBlock` · T34
+
+**Concepto.** Un **OB anidado dentro de otro OB** del mismo sentido: tras respetar la zona del OB original, el precio forma un OB más pequeño **dentro** de ella y **propulsa** en la dirección de continuación. Es un OB de **continuación** → refuerza el OB, no es objeto nuevo.
+
+**Definición cuantificada.** Sobre la detección de OB existente (§2.1, `f_detectOB`): un OB recién formado es **Propulsion Block** si su zona `[bottom, top]` está **contenida** (o solapa ≥ `propOverlap` de su altura) dentro de un OB **vivo previo del mismo `dir`** (`ZS_ACTIVE/ZS_PARTIAL`). `KIND_PROPULSION`, hereda `f_updateZoneMitigation`. **No suma confluencia** propia: eleva el **peso** del OB de continuación (#17/#19).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `propOverlap` | **0.5** | fracción mínima de solape (altura) del OB nuevo dentro del OB previo del mismo dir. |
+
+**Contraejemplo.** Un OB nuevo de **dirección opuesta** al que lo contiene, o uno que cae **fuera** de cualquier OB vivo: es un OB normal (§2.1), no Propulsion — el Propulsion exige anidamiento mismo-sentido (continuación).
+
+**Casos de prueba** *(EURUSD; H1)*: como **refinamiento de `f_detectOB`** (máquina ya validada en T05), las instancias de Propulsion son el **subconjunto** de OBs anidados mismo-sentido; la verificación de instancias se hace al cablear sobre `f_detectOB` (no requiere detector independiente). Definición congelada; conteo exacto en la pasada de validación visual con el resto del set.
+
+### 5.9 IPR — Imbalanced Price Range `f_detectIPR` · T35
+
+**Concepto.** Un **rango de precio desbalanceado**: una zona donde se acumulan **varias ineficiencias del mismo lado** (FVG/imbalances apilados en una dirección) → el rango "tira" hacia ese lado (contexto de bias, no zona puntual de entrada).
+
+**Definición cuantificada.** En una ventana de `iprWindow` velas, si hay **≥ iprMinGaps** FVG (§2.2) **del mismo `dir`** (y ninguno opuesto que lo neutralice) → el rango `[min(bottoms), max(tops)]` de esos gaps es un `KIND_IPR`, `dir` = el común. Es **contexto/bias** (alimenta el sesgo y el motor EA), no una zona operable independiente. Opuesto conceptual del **BPR** (§5.3: ahí los gaps son *opuestos y se cruzan*; aquí son *del mismo lado y se apilan*).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `iprWindow` | **10** | velas de la ventana de búsqueda. |
+| `iprMinGaps` | **3** | FVG del mismo lado mínimos para declarar desbalance. |
+
+**Contraejemplo.** Una ventana con FVG **mezclados** (alcistas y bajistas) está **balanceada** → no es IPR (tiende a BPR/equilibrio, §5.3). El IPR exige acumulación **unidireccional**.
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1, iprWindow 10 / iprMinGaps 3)*: **5 ventanas IPR** (≥3 FVG del mismo lado en 10 velas) — concentradas en los tramos de impulso direccional (donde el precio deja huecos apilados al avanzar). Confluencia **candidata #49** (probable input de bias más que voto puntual).
+
+> **Lote 2 (familia estructura/OB T32–T35) — definido y verificado contra `eurusd_h1.csv`** (Propulsion = refinamiento de OB, conteo al cablear). Pendientes §5: T30 (gaps apertura), T36 (Std Dev), T37 (Inside Day), T38 (SMT — requiere ADR), T39 (macros), T40 (RTH/ETH).
