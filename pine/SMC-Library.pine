@@ -558,6 +558,37 @@ export f_updateFlip(SMC_Flip f, float barHigh, float barLow, float barClose) =>
                 f.state := LF_FLIPPED
     f
 
+// --- OTE / Golden Pocket [reglas-smc-ict §2.5] · T22 ---
+// f_detectOTE: tras un BOS, zonas de retroceso fib para entrar A FAVOR del impulso. Fib 0 en origen, 1
+// en extremo de la pierna (rango [swLow, swHigh]). GP = [r1,r2]=[50%,61.8%] (#28); OTE = [r2,r3]=
+// [61.8%,79%] (#27). Alcista -> zonas LONG (dir BULL); bajista simetrico. Solo sobre BOS (§2.5). PURA.
+// Devuelve [gp, ote] (KIND_GP/KIND_OTE) o [na, na]. Ciclo de vida via f_updateZoneMitigation (P2).
+export f_detectOTE(SMC_Event bosEv, float swHigh, float swLow, int barIdx, int barTime, float r1, float r2, float r3) =>
+    SMC_Zone gp  = na
+    SMC_Zone ote = na
+    if not na(bosEv) and bosEv.kind == KIND_BOS and not na(swHigh) and not na(swLow) and swHigh > swLow
+        float rng = swHigh - swLow
+        if bosEv.dir == DIR_BULL
+            float l1 = swHigh - r1 * rng
+            float l2 = swHigh - r2 * rng
+            float l3 = swHigh - r3 * rng
+            gp  := SMC_Zone.new(l1, l2, DIR_BULL, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_GP)
+            ote := SMC_Zone.new(l2, l3, DIR_BULL, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_OTE)
+        else
+            float l1 = swLow + r1 * rng
+            float l2 = swLow + r2 * rng
+            float l3 = swLow + r3 * rng
+            gp  := SMC_Zone.new(l2, l1, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_GP)
+            ote := SMC_Zone.new(l3, l2, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_OTE)
+    [gp, ote]
+
+// f_expireOTE: caduca una zona OTE/GP superseded por un nuevo impulso (§2.5 redibuja con cada BOS) ->
+// ZS_INVALID. La invalidacion por retroceso profundo la cubre f_updateZoneMitigation. PURA.
+export f_expireOTE(SMC_Zone z, bool superseded) =>
+    if z.state != ZS_INVALID and superseded
+        z.state := ZS_INVALID
+    z
+
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Dealing range basado en trailing extremes de LuxAlgo (trailingExtremes :181,
 // updateTrailingExtremes :709-713; v5->v6). El rango [bottom, top] se ANCLA al ultimo
