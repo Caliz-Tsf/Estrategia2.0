@@ -34,10 +34,14 @@ final**, sobre el set completo de conceptos dibujados. Abre Sprint 1.5.
   refinamiento de **PESO en scoring (Fase 3)**, NO en el primitivo; aquí se emite el grab interno.
 - Consumer → `SMC_idm`; Visual marcadores amarillos "IDM ↑/↓" (GRP_LIQ). Strategy sin dibujo.
 
-### fix marcadores ✅ COMMITEADO (756cc6e)
+### fix marcadores ✅ COMMITEADO (756cc6e + c629076)
 - Disp/IDM usaban `label.style_label_up/down` anclado en la vela → la vela los tapaba (feedback
-  usuario). Cambio a **`style_label_left`** (punta en la vela, texto a la derecha, sin solape;
-  mismo patrón que las etiquetas de pool). Solo Visual → CORE intacto.
+  usuario). (756cc6e) Cambio a **`style_label_left`**. Seguía pegado en velas grandes →
+  (c629076) **desplazamiento ~3 barras a la derecha** (`dispOffMs/idmOffMs = 3*(time-time[1])`,
+  en bar_time) → flota despejado (misma filosofía que etiquetas de pool con bar_index+2). Solo
+  Visual → CORE intacto.
+- **FOLLOW-UP cosmético pendiente (usuario):** reubicar la marca **DEBAJO de la vela** en su
+  propia barra (no a la derecha). No bloquea — la lógica de detección es correcta.
 
 ---
 
@@ -50,9 +54,10 @@ final**, sobre el set completo de conceptos dibujados. Abre Sprint 1.5.
 ---
 
 ## PENDIENTE / Bloqueos
-- **Validación smc-validator-agent de T16 + T17: NO COMPLETADA** — el agente se invocó (TF H1
-  para Disp §4.1, M5 para IDM §3.6) pero **se cortó por tope de sesión** (agentId
-  `a524ef8022f813cff`, resetea 6:40am Santiago). **Re-correr en la próxima sesión.**
+- **Validación smc-validator-agent de T16 + T17: PENDIENTE (decisión del usuario, dejarla para
+  después).** Se preparó todo (caps de marcadores a 500 para ver casos históricos, prompt listo
+  con TF H1 para Disp §4.1 y M5 para IDM §3.6) pero el usuario decidió aplazarla. **Re-correr en
+  próxima sesión** (subir caps a 500 antes, restaurar a 20 después).
 - **Caveat a juzgar en esa validación (Displacement):** `requireContraction=true` (default) puede
   hacer que un caso ✓ de §4.1 NO se marque si no hubo ≥3 velas de contracción previa → sería
   tensión REGLA-vs-CASO (no bug). Decidir: relajar default o documentar contracción en los casos.
