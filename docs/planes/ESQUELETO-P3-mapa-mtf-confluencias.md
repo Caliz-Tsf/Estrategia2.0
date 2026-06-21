@@ -229,10 +229,11 @@ Cada tarea lleva los **7 checkboxes del proceso canónico** de `ESQUELETO-P1 §1
 | Tarea | Qué | Done medible | Depende de |
 |---|---|---|---|
 | **T13a · Mapa MTF núcleo** | encapsular el bias + BOS/CHoCH/MSS + P/D + EMAs en `f_computeTFState` (escalares, los que casi están en `chartState` `SMC-Visual.pine:739`); 2 `request.security` (D1, H1); dibujo diferenciado + cascada de esos escalares | compila 0/0 los 3, core-sync OK, D1/H1 bias y niveles visibles en M5/H1 con prefijo; **anti-repaint verificado** | T03/T04/T07/T12 (✅) |
-| **T13b · Mapa MTF rico** | ampliar `f_computeTFState` a **N_htf zonas/lado** (OB/FVG/pool/sweep) con el tuple plano capado (§2.2); `f_nearestN` pura en CORE; reconstitución + dibujo en cascada con cuota de objetos | N_htf OB/FVG/pool de D1 y H1 dibujados en cascada; presupuesto de objetos bajo 500/tipo; **spike test R-P3-1 ✅ PASADO (S039)** | **T13a** + spike R-P3-1 (§6) ✅ SUPERADO |
-| **T14 · Panel multi-columna** | panel con columnas propio / H1 / D1 (bias, último evento, POI más cercana, sesión) | tabla con 3 columnas coherentes con el mapa | T13b |
-| **T15 · Alertas MTF** | `alertcondition()` en Visual para eventos del mapa (confluencia/POI) — plantilla `PINE-PLAN §5` | alertas disparan en eventos confirmados, sin repaint | T13b/T14 |
-| **F2-T01′ · Scoring lee el mapa** | `f_scoreConfluences` consume el mapa MTF (§3.3) → `scoreLong/scoreShort/activeList` | scores en panel; confluencias #17–#21 leen del mapa correcto | T13b + F2-T01 base |
+| **T13b · Mapa MTF rico** | ampliar `f_computeTFState` a **N_htf zonas/lado** (OB/FVG/pool/sweep) con el tuple plano capado (§2.2); `f_nearestN` pura en CORE; reconstitución + dibujo en cascada con cuota de objetos | N_htf OB/FVG/pool de D1 y H1 dibujados en cascada; presupuesto de objetos bajo 500/tipo; **spike test R-P3-1 ✅ PASADO (S039)** | **T13a** + spike R-P3-1 (§6) ✅ SUPERADO · ✅ **COMPLETO (S041)** — entrega *mapa de niveles* |
+| **T13c · Mapa MTF geométrico** `[NUEVO S041 · ADR-010]` | corregir T13b: ranura **6 campos** `[kind,top,bottom,dir,tA,tB]` (anclaje temporal) + consumidor **reconstruye forma NATIVA por `xloc.bar_time`** (OB/FVG=caja, EQH/EQL=línea, BOS/CHoCH=origen→ruptura, sweep=▲▼ en barra, pool=línea) + **cap 0-10 por concepto para TODOS** + emitir BOS/CHoCH/EQH/EQL al buffer. Buffer genérico de ADR-009 conservado | objetos HTF se dibujan **anclados a su barra real con su forma propia** en M5/H1; cap por concepto efectivo; compila 0/0, core-sync OK, validación ≥90 (paridad vs cambio manual de TF) | **T13b** ✅ · diseño en `revision-T13b-mtf-dibujo-nativo.md` |
+| **T14 · Panel multi-columna** | panel con columnas propio / H1 / D1 (bias, último evento, POI más cercana, sesión) | tabla con 3 columnas coherentes con el mapa | **T13c** |
+| **T15 · Alertas MTF** | `alertcondition()` en Visual para eventos del mapa (confluencia/POI) — plantilla `PINE-PLAN §5` | alertas disparan en eventos confirmados, sin repaint | **T13c**/T14 |
+| **F2-T01′ · Scoring lee el mapa** | `f_scoreConfluences` consume el mapa MTF (§3.3) → `scoreLong/scoreShort/activeList` | scores en panel; confluencias #17–#21 leen del mapa correcto | **T13c** + F2-T01 base |
 | **F2 · Selector de POI** | `f_selectEntryPOI` (§3.4) + integración con `f_computeSLTP` (R:R≥3) en Strategy | Strategy entra solo con POI seleccionada y R:R≥3; setups S-01..05 reconocibles | F2-T01′ |
 | **F4 · Motor EA** | traducción función-a-función del mapa+scoring+selector a `SMC_MTF.mqh` + motor de decisión (`ESQUELETO-P1 §3`) | golden tests de paridad (0 dif eventos, ±1 tick niveles) | toda la cadena Pine validada + gate Fable |
 
@@ -275,7 +276,7 @@ Cada tarea lleva los **7 checkboxes del proceso canónico** de `ESQUELETO-P1 §1
 ### §5.2 — Tabla de dependencias (global)
 
 ```
-T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1 ✅ PASA S039] ──► T13b (rico) ──► T14 (panel) ──► T15 (alertas)
+T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1 ✅ PASA S039] ──► T13b (rico/niveles ✅ S041) ──► T13c (geométrico/anclado, ADR-010) ──► T14 (panel) ──► T15 (alertas)
                                                               │
    Sprint 1.5 (Tier 2) ── Sprint 1.6 (gap T26–T40, ESQUELETO-P1) ──┤ (conceptos que el mapa transportará)
                                                               ▼
@@ -304,7 +305,8 @@ T01–T12 ✅ ──► T13a (núcleo MTF) ──► [spike R-P3-1 ✅ PASA S039
 1. **(este sprint, S038)** Aprobar P3 + ADR-008 + edits de workplan. **Sin Pine.**
 2. **Spike R-P3-1** (sesión Pine corta): probar `request.security` con función de estado `var` interno en D1 → confirmar que no contamina el chart. **✅ PASÓ en Sesion-039 → paso 3. ❌ Hipótesis: Problemas → DETENER + avisar a Freddy → escalar a Opus ultracode** (protocolo en §5.3). No se improvisa.
 3. **T13a** núcleo MTF (escalares) → compila 0/0 → core-sync → validación → commit.
-4. **T13b** mapa rico (N_htf zonas/lado, `f_nearestN` CORE, cascada) → validación → commit.
+4. **T13b** mapa rico (N_htf zonas/lado, `f_nearestN` CORE, cascada) → validación → commit. **✅ COMPLETO S041** (entrega *mapa de niveles*: líneas extendidas al borde, sin geometría nativa).
+4b. **T13c** mapa geométrico `[NUEVO S041, próxima sesión]` — ranura 6 campos (anclaje `tA/tB`) + dibujo nativo por `xloc.bar_time` + cap por concepto para todos + emitir BOS/CHoCH/EQH/EQL. **ADR-010** (supersede transporte ADR-009). Esqueleto implementación-ready: `docs/sprint-runs/revision-T13b-mtf-dibujo-nativo.md` §9. → compila 0/0 → core-sync → validación ≥90 → commit.
 5. **T14** panel multi-columna → **T15** alertas → **gate Fase 1** (≥90 + global).
 6. **Completar Pine (carril A):** Sprint 1.5 (Tier 2) + Sprint 1.6 (gap ICT T26–T40) + **Fase 2** (`f_scoreConfluences` lee el mapa §3.3 → `f_selectEntryPOI` §3.4 → catálogo de setups §3.5 en Strategy). Resultado: **Pine COMPLETO con todos los conceptos**.
 7. **Construir el Enjambre completo (carril B, en paralelo a 3–6):** runtime entero de `ESQUELETO-P2` — perfiles, archivos/knowledge, skills, MCP, workflow, loop (cron+kanban+swarm). No solo el piloto.
