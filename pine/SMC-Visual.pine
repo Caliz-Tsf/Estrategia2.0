@@ -122,6 +122,9 @@ i_showOpenGaps   = input.bool(true, "Mostrar gaps de apertura NWOG/NDOG/NYMO (§
 i_gapMin         = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14)", minval = 0.0, step = 0.1, group = GRP_KZ)
 i_maxShowBag     = input.int(10,    "Max marcadores de Breakaway Gap (recientes)", minval = 1, group = GRP_KZ)
 i_showMacros     = input.bool(false, "Sombrear macros intradía ICT (§5.14)", group = GRP_KZ)
+i_rthEnable      = input.bool(false, "RTH/ETH activo (índices/futuros; off=FX 24h) §5.15", group = GRP_KZ)
+i_rthStart       = input.int(570,    "RTH inicio (min del día, hora NY; 570=09:30)", minval = 0, maxval = 1439, group = GRP_KZ)
+i_rthEnd         = input.int(960,    "RTH fin (min del día, hora NY; 960=16:00)", minval = 0, maxval = 1440, group = GRP_KZ)
 // Mapa MTF [T13a]: hereda los escalares de HTF hacia TF menores (cascada D1->{H1,M5}, H1->{M5}).
 i_showD1         = input.bool(true, "Heredar D1 (bias + P/D)", group = GRP_MTF)
 i_showH1         = input.bool(true, "Heredar H1 (bias + P/D)", group = GRP_MTF)
@@ -1327,6 +1330,14 @@ f_macroActive(int nyMin) =>
         kind   := 3
     [active, kind]
 
+// --- RTH vs ETH [reglas-smc-ict §5.15] · T40 ---
+// f_sessionType: Regular Trading Hours vs Extended. Por PERFIL de simbolo (ADR-001): si enabled y la
+// hora NY (nyMin) cae en la ventana [rthStartMin, rthEndMin) -> RTH (mayor calidad); fuera -> ETH. Si NO
+// enabled (FX 24h) -> siempre RTH (no hay distincion -> el perfil neutraliza la modulacion). Modula #34
+// (calidad), no es confluencia nueva. PURA. Devuelve bool isRTH.
+f_sessionType(int nyMin, int rthStartMin, int rthEndMin, bool enabled) =>
+    enabled ? (nyMin >= rthStartMin and nyMin < rthEndMin) : true
+
 // f_nearestN [Sprint 1.4 · T13b · ADR-009]: recolecta los capN objetos de un array<SMC_Zone>
 // del 'kind' dado, NO mitigados (state < ZS_MITIGATED), MAS CERCANOS al precio px, y los anexa a
 // los arrays-candidato compartidos (ck/ct/cb/cd/cdist). Generaliza f_pNearZone (que devuelve 1)
@@ -2122,6 +2133,12 @@ int  nyMinNow = hour(time, "America/New_York") * 60 + minute(time, "America/New_
 [curMacroActive, curMacroKind] = f_macroActive(nyMinNow)
 // Sombreado tenue: gris en NY Lunch (kind 3, baja actividad/filtro), purpura en los macros de impulso.
 bgcolor(i_showMacros and curMacroActive ? color.new(curMacroKind == 3 ? color.gray : color.purple, 92) : na)
+
+// --- RTH vs ETH [§5.15] · T40 ---
+// Tipo de sesion por perfil (reusa nyMinNow). En FX (i_rthEnable off) = siempre RTH (sin modulacion).
+// Sombrea ETH tenue cuando esta activo (instrumentos con sesion acotada). Para el scoring (#34 calidad).
+bool curIsRTH = f_sessionType(nyMinNow, i_rthStart, i_rthEnd, i_rthEnable)
+bgcolor(i_rthEnable and not curIsRTH ? color.new(color.gray, 94) : na)
 
 // --- Judas Swing [§3.5] · T18 ---
 // Composicion sweep+displacement: sweep (§3.2) en 1a mitad de KZ + displacement (§4.1) en la direccion

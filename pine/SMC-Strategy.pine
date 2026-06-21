@@ -58,6 +58,9 @@ i_cisdMinRun   = input.int(2, "CISD: velas minimas del run de delivery (§5.6)",
 i_propOverlap  = input.float(0.5, "Propulsion: solape minimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_SCORE)
 i_vacuumFactor = input.float(0.5, "Vacuum: gap minimo de apertura (x ATR14, §5.7)", minval = 0.1, step = 0.1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
+i_rthEnable    = input.bool(false, "RTH/ETH activo (indices/futuros; off=FX 24h) §5.15", group = GRP_KZ)
+i_rthStart     = input.int(570, "RTH inicio (min del dia, hora NY; 570=09:30)", minval = 0, maxval = 1439, group = GRP_KZ)
+i_rthEnd       = input.int(960, "RTH fin (min del dia, hora NY; 960=16:00)", minval = 0, maxval = 1440, group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapPool  = input.int(2, "Traspaso Pools por HTF (0-10, 0=off)", minval = 0, maxval = 10, group = GRP_MTF)
@@ -1259,6 +1262,14 @@ f_macroActive(int nyMin) =>
         kind   := 3
     [active, kind]
 
+// --- RTH vs ETH [reglas-smc-ict §5.15] · T40 ---
+// f_sessionType: Regular Trading Hours vs Extended. Por PERFIL de simbolo (ADR-001): si enabled y la
+// hora NY (nyMin) cae en la ventana [rthStartMin, rthEndMin) -> RTH (mayor calidad); fuera -> ETH. Si NO
+// enabled (FX 24h) -> siempre RTH (no hay distincion -> el perfil neutraliza la modulacion). Modula #34
+// (calidad), no es confluencia nueva. PURA. Devuelve bool isRTH.
+f_sessionType(int nyMin, int rthStartMin, int rthEndMin, bool enabled) =>
+    enabled ? (nyMin >= rthStartMin and nyMin < rthEndMin) : true
+
 // f_nearestN [Sprint 1.4 · T13b · ADR-009]: recolecta los capN objetos de un array<SMC_Zone>
 // del 'kind' dado, NO mitigados (state < ZS_MITIGATED), MAS CERCANOS al precio px, y los anexa a
 // los arrays-candidato compartidos (ck/ct/cb/cd/cdist). Generaliza f_pNearZone (que devuelve 1)
@@ -2002,6 +2013,13 @@ int  nyMinNow = hour(time, "America/New_York") * 60 + minute(time, "America/New_
 var int lastMacroKind = 0
 if barstate.isconfirmed
     lastMacroKind := curMacroActive ? curMacroKind : 0
+
+// --- RTH vs ETH [§5.15] · T40 ---
+// Tipo de sesion por perfil (reusa nyMinNow). En FX (off) = siempre RTH. Para el scoring (#34 calidad).
+bool curIsRTH = f_sessionType(nyMinNow, i_rthStart, i_rthEnd, i_rthEnable)
+var bool lastIsRTH = true
+if barstate.isconfirmed
+    lastIsRTH := curIsRTH
 
 // --- Judas Swing [§3.5] · T18 ---
 // Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_judas para el scoring, Sprint

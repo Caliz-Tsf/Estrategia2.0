@@ -1078,6 +1078,12 @@ export f_macroActive(int nyMin) =>
         kind   := 3
     [active, kind]
 
+// --- RTH vs ETH [reglas-smc-ict §5.15] · T40 ---
+// f_sessionType: RTH vs ETH por perfil (ADR-001). enabled y nyMin en [rthStart,rthEnd) -> RTH; fuera ETH.
+// Si no enabled (FX 24h) -> siempre RTH (neutraliza). Modula #34, no confluencia. PURA. Devuelve isRTH.
+export f_sessionType(int nyMin, int rthStartMin, int rthEndMin, bool enabled) =>
+    enabled ? (nyMin >= rthStartMin and nyMin < rthEndMin) : true
+
 // f_nearestN [Sprint 1.4 · T13b · ADR-009]: recolecta los capN objetos de un array<SMC_Zone>
 // del 'kind' dado, NO mitigados (state < ZS_MITIGATED), MAS CERCANOS al precio px, y los anexa a
 // los arrays-candidato compartidos (ck/ct/cb/cd/cdist). Generaliza f_pNearZone (que devuelve 1)
