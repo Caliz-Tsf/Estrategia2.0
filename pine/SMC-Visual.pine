@@ -76,6 +76,9 @@ i_showIR       = input.bool(true,  "Mostrar Immediate Rebalance (§5.4)", group 
 i_irFactor     = input.float(1.0,  "IR: rango vela impulso (x ATR14)", minval = 0.3, step = 0.1, group = GRP_FVG)
 i_irBodyPct    = input.float(0.60, "IR: cuerpo mínimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_FVG)
 i_maxShowIR    = input.int(20,     "Max marcadores de IR (recientes)", minval = 1, group = GRP_FVG)
+i_showVI       = input.bool(false, "Mostrar Volume Imbalance (§5.5, micro)", group = GRP_FVG)
+i_viThreshold  = input.float(0.05, "VI: gap mínimo de cuerpo (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_FVG)
+i_maxShowVI    = input.int(15,     "Max cajas de VI (recientes)", minval = 1, group = GRP_FVG)
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
 i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
@@ -155,6 +158,7 @@ KIND_LH = 42
 KIND_LL = 43
 KIND_EQH = 44
 KIND_EQL = 45
+KIND_VI  = 46
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -648,6 +652,22 @@ f_detectImmediateRebalance(float o1, float h1, float l1, float c1, float c0, flo
             if rebalanced
                 ev := SMC_Event.new(mid, dir, barIdx, barTime, "", KIND_IR)
     ev
+
+// --- Volume Imbalance + SIVI/BIVI [reglas-smc-ict §5.5] · T31 ---
+// f_detectVolumeImbalance: micro-desequilibrio entre CUERPOS de velas consecutivas CON solape de mechas
+// (a diferencia del FVG, que es hueco entre extremos sin solape). BIVI alcista: open actual > close
+// previo con gap de cuerpo >= viThreshold*ATR Y las mechas solapan (low actual <= high previo). SIVI
+// bajista: simetrico (open < close previo, high actual >= low previo). Zona micro = [close_previo,
+// open_actual]. Una sola familia (no cuenta 3x, [FIX P-05]). PURA. Devuelve SMC_Zone KIND_VI o na.
+f_detectVolumeImbalance(float o0, float h0, float l0, float cPrev, float hPrev, float lPrev, float atr14, float viThreshold, int barIdx, int barTime) =>
+    SMC_Zone z = na
+    if not na(atr14)
+        float thr = viThreshold * atr14
+        if o0 > cPrev and (o0 - cPrev) >= thr and l0 <= hPrev
+            z := SMC_Zone.new(o0, cPrev, DIR_BULL, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
+        else if o0 < cPrev and (cPrev - o0) >= thr and h0 >= lPrev
+            z := SMC_Zone.new(cPrev, o0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
+    z
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1690,6 +1710,19 @@ if barstate.isconfirmed
     if not na(evIR)
         f_pushEvent(SMC_ir, evIR, MAX_EVENTS)
 
+// --- Volume Imbalance [§5.5] · T31 ---
+// Micro-imbalance entre cuerpos con solape de mechas. ARRAY DEDICADO SMC_vi (NO SMC_zones): es muy
+// frecuente y saturaria el cap de zonas reales (OB/FVG). Ciclo de vida propio (misma f_updateZoneMitigation)
+// para no crear su propia maquina. Detecta la vela actual vs la previa; se empuja tras mitigar las vivas.
+var array<SMC_Zone> SMC_vi = array.new<SMC_Zone>()
+if barstate.isconfirmed
+    if array.size(SMC_vi) > 0
+        for i = 0 to array.size(SMC_vi) - 1
+            f_updateZoneMitigation(array.get(SMC_vi, i), i_obMitClose)
+    SMC_Zone viZone = f_detectVolumeImbalance(open, high, low, close[1], high[1], low[1], atr14, i_viThreshold, bar_index, time)
+    if not na(viZone)
+        f_pushZone(SMC_vi, viZone, MAX_ZONES)
+
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
 // hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
@@ -2461,6 +2494,24 @@ if i_showBPR and barstate.islast
             if z.kind == KIND_BPR and z.state != ZS_INVALID
                 array.push(SMC_bprBoxes, f_drawBPR(z))
                 array.push(SMC_bprLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "BPR", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = color.rgb(160, 180, 240), size = size.small, xloc = xloc.bar_index))
+
+// Cajas de Volume Imbalance [T31 · §5.5] (solo Visual). Micro -> cajitas finas violeta tenue, solo las
+// i_maxShowVI mas recientes vivas (P4 present-mode, anti-saturacion). Off por defecto (i_showVI false:
+// son muchas; se encienden para inspeccion). Anclado por bar_index.
+var array<box> SMC_viBoxes = array.new<box>()
+if i_showVI and barstate.islast
+    for b in SMC_viBoxes
+        box.delete(b)
+    array.clear(SMC_viBoxes)
+    int nVI = array.size(SMC_vi)
+    if nVI > 0
+        int firstVI = math.max(0, nVI - i_maxShowVI)
+        for i = firstVI to nVI - 1
+            SMC_Zone z = array.get(SMC_vi, i)
+            if z.state != ZS_INVALID
+                color vcol = z.dir == DIR_BULL ? color.rgb(150, 120, 210) : color.rgb(180, 120, 170)
+                int vtransp = z.state == ZS_MITIGATED ? 92 : 82
+                array.push(SMC_viBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = color.new(vcol, vtransp), border_color = color.new(vcol, 60), border_width = 1, xloc = xloc.bar_index))
 
 // f_drawMB: caja del Mitigation Block [T-mb · §2.8] (solo Visual). Relleno de desequilibrio sin barrido.
 // AZUL ACERO, distinto del OB (verde/rojo), breaker (purpura) y OTE (dorado). Origen = vela del bloque;
