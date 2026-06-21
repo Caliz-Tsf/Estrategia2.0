@@ -41,6 +41,7 @@ i_maxShowDisp     = input.int(20,     "Max marcadores de displacement (recientes
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
+i_showBreaker    = input.bool(true,  "Mostrar Breakers (OB invalidado, §2.6)", group = GRP_OB)
 i_showFVG      = input.bool(true,  "Mostrar Fair Value Gaps",          group = GRP_FVG)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_showCE       = input.bool(true,  "Mostrar nivel CE (50%)",           group = GRP_FVG)
@@ -513,6 +514,23 @@ f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
                     z.state := ZS_PARTIAL
                 z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
     z
+
+// --- Breaker [reglas-smc-ict §2.6] · T19 ---
+// f_detectBreaker: un OB que FALLO (paso a ZS_INVALID: una vela cerro atravesando su borde protector,
+// §2.1) cambia de POLARIDAD y opera en sentido contrario (un OB alcista roto a la baja -> resistencia
+// breaker bajista en el retest). Confluencia #22. Se llama JUSTO tras f_updateZoneMitigation con el
+// estado PREVIO de la zona: si la zona ES un OB y ACABA de transicionar a ZS_INVALID (prevState !=
+// ZS_INVALID), crea una SMC_Zone KIND_BREAKER en las MISMAS coordenadas [top,bottom] con dir INVERTIDO
+// y ZS_ACTIVE -> el retest lo gestiona la MISMA maquina f_updateZoneMitigation (hereda §2.1). Un OB
+// solo MITIGADO (ZS_MITIGATED, precio toco y respeto) NO es breaker -> el guard exige INVALID (cierre a
+// traves), no un mero toque. Guard kind == KIND_OB: un breaker invalidado NO engendra otro breaker.
+// PURA (no lee series; recibe la zona ya mutada + su estado previo). Devuelve SMC_Zone KIND_BREAKER o na.
+f_detectBreaker(SMC_Zone z, int prevState) =>
+    SMC_Zone bz = na
+    if z.kind == KIND_OB and z.state == ZS_INVALID and prevState != ZS_INVALID
+        int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
+        bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
+    bz
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1233,9 +1251,22 @@ if barstate.isconfirmed
         array.shift(obBufIdx)
         array.shift(obBufTime)
         array.shift(obBufVol)
+    // Mitigacion comun + Breaker [T19]: tras mutar cada zona, si un OB ACABA de invalidarse
+    // (cierre a traves del borde protector) se engendra un KIND_BREAKER de polaridad invertida (§2.6).
+    // Se recolecta aparte y se empuja DESPUES del loop (no mutar SMC_zones mientras se itera). El
+    // breaker entra a SMC_zones y desde la barra siguiente lo gestiona la misma maquina (retest).
+    array<SMC_Zone> SMC_newBreakers = array.new<SMC_Zone>()
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
-            f_updateZoneMitigation(array.get(SMC_zones, i), i_obMitClose)
+            SMC_Zone zMit = array.get(SMC_zones, i)
+            int prevState = zMit.state
+            f_updateZoneMitigation(zMit, i_obMitClose)
+            SMC_Zone bz = f_detectBreaker(zMit, prevState)
+            if not na(bz)
+                array.push(SMC_newBreakers, bz)
+    if array.size(SMC_newBreakers) > 0
+        for i = 0 to array.size(SMC_newBreakers) - 1
+            f_pushZone(SMC_zones, array.get(SMC_newBreakers, i), MAX_ZONES)
     if not na(evStructSwing)
         int obOrigin = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
@@ -1658,6 +1689,35 @@ if i_showOB and barstate.islast
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
                 color obCol = z.dir == DIR_BULL ? color.rgb(120, 220, 120) : color.rgb(235, 120, 120)
                 array.push(SMC_obLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "OB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
+
+// f_drawBreaker: caja del Breaker [T19 · §2.6] (solo Visual). Un OB invalidado renacido con polaridad
+// invertida. PURPURA/VIOLETA para distinguirlo del verde/rojo del OB y lima/naranja del FVG; borde
+// PUNTEADO (re-rol, no zona original). dir = la NUEVA direccion (resistencia bajista / soporte alcista).
+// left = origen del OB padre (se conserva en barIdx); se extiende a la derecha hasta la barra actual.
+f_drawBreaker(SMC_Zone z) =>
+    col = z.dir == DIR_BULL ? color.rgb(90, 70, 180) : color.rgb(150, 60, 150)
+    int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
+    color bg = z.state == ZS_MITIGATED ? color.new(color.gray, 91) : color.new(col, transp)
+    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = bg, border_color = color.new(col, 45), border_width = 1, border_style = line.style_dashed, xloc = xloc.bar_index)
+
+// En la ultima barra limpia y repinta las cajas de breaker vivas (KIND_BREAKER, no invalidadas).
+var array<box>   SMC_brkBoxes  = array.new<box>()
+var array<label> SMC_brkLabels = array.new<label>()
+if i_showBreaker and barstate.islast
+    for b in SMC_brkBoxes
+        box.delete(b)
+    for lb in SMC_brkLabels
+        label.delete(lb)
+    array.clear(SMC_brkBoxes)
+    array.clear(SMC_brkLabels)
+    if array.size(SMC_zones) > 0
+        for i = 0 to array.size(SMC_zones) - 1
+            SMC_Zone z = array.get(SMC_zones, i)
+            if z.kind == KIND_BREAKER and z.state != ZS_INVALID
+                array.push(SMC_brkBoxes, f_drawBreaker(z))
+                color brkCol = z.dir == DIR_BULL ? color.rgb(150, 135, 240) : color.rgb(225, 130, 225)
+                string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
+                array.push(SMC_brkLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
 // vela media (z.barIdx-1, cf. LuxAlgo lastTime=time[1]) para cubrir el desplazamiento

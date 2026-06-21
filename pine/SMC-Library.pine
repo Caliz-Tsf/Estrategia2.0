@@ -431,6 +431,23 @@ export f_updateZoneMitigation(SMC_Zone z, bool useClose) =>
                 z.mitigatedPct := math.max(z.mitigatedPct, height > 0 ? (src - z.bottom) / height : 0.0)
     z
 
+// --- Breaker [reglas-smc-ict §2.6] · T19 ---
+// f_detectBreaker: un OB que FALLO (paso a ZS_INVALID: una vela cerro atravesando su borde protector,
+// §2.1) cambia de POLARIDAD y opera en sentido contrario (un OB alcista roto a la baja -> resistencia
+// breaker bajista en el retest). Confluencia #22. Se llama JUSTO tras f_updateZoneMitigation con el
+// estado PREVIO de la zona: si la zona ES un OB y ACABA de transicionar a ZS_INVALID (prevState !=
+// ZS_INVALID), crea una SMC_Zone KIND_BREAKER en las MISMAS coordenadas [top,bottom] con dir INVERTIDO
+// y ZS_ACTIVE -> el retest lo gestiona la MISMA maquina f_updateZoneMitigation (hereda §2.1). Un OB
+// solo MITIGADO (ZS_MITIGATED, precio toco y respeto) NO es breaker -> el guard exige INVALID (cierre a
+// traves), no un mero toque. Guard kind == KIND_OB: un breaker invalidado NO engendra otro breaker.
+// PURA (no lee series; recibe la zona ya mutada + su estado previo). Devuelve SMC_Zone KIND_BREAKER o na.
+export f_detectBreaker(SMC_Zone z, int prevState) =>
+    SMC_Zone bz = na
+    if z.kind == KIND_OB and z.state == ZS_INVALID and prevState != ZS_INVALID
+        int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
+        bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
+    bz
+
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
 // 3.a vela (la actual al confirmar) sobre offsets FIJOS [0] y [2] -> referencia
