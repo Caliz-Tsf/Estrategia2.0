@@ -300,6 +300,23 @@ export f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, 
             ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
     ev
 
+// --- IDM — Inducement [reglas-smc-ict §3.6] · T17 ---
+// f_detectIDM: la liquidez SENUELO interna. Un swing interno (internalLen) cuya liquidez se
+// barre (GRAB: la mecha perfora el nivel y el cierre vuelve del lado original) ANTES de que el
+// precio alcance el OB/FVG objetivo -> "induce" entradas tempranas que el smart money toma
+// antes del movimiento real (confluencia #33). IDM alcista = grab del internal LOW (sell-side
+// senuelo) con cierre de vuelta arriba; bajista = grab del internal HIGH con cierre de vuelta
+// abajo. OHLC de la barra confirmada + niveles internos vigentes -> funcion PURA (ADR-002). El
+// gate "antes de tocar el objetivo" refina el PESO en scoring (Fase 3), NO el primitivo.
+// Distinto del sweep de pools (escala swing/EQHL, §3.2). Devuelve SMC_Event KIND_IDM o na.
+export f_detectIDM(float intLow, float intHigh, float curLow, float curHigh, float curClose, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(intLow) and curLow < intLow and curClose > intLow
+        ev := SMC_Event.new(intLow, DIR_BULL, barIdx, barTime, "", KIND_IDM)
+    else if not na(intHigh) and curHigh > intHigh and curClose < intHigh
+        ev := SMC_Event.new(intHigh, DIR_BEAR, barIdx, barTime, "", KIND_IDM)
+    ev
+
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // f_detectOB: porta el algoritmo OB de LuxAlgo (storeOrdeBlock :502-525,
 // deleteOrderBlocks :478-500; v5->v6). El OB es la vela origen del impulso que rompe

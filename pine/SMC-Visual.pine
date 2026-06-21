@@ -56,6 +56,8 @@ i_minTouches   = input.int(2,      "Toques minimos para pool", minval = 2, group
 i_showSwept    = input.bool(true,  "Mostrar pools barridos (historial)", group = GRP_LIQ)
 i_showSweeps   = input.bool(true,  "Mostrar marcadores de sweep (trampa)", group = GRP_LIQ)
 i_maxShowSweeps= input.int(20,     "Max marcadores de sweep (recientes)", minval = 1, group = GRP_LIQ)
+i_showIDM      = input.bool(true,  "Mostrar IDM (inducement interno)", group = GRP_LIQ)
+i_maxShowIDM   = input.int(20,     "Max marcadores de IDM (recientes)", minval = 1, group = GRP_LIQ)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_showKZ         = input.bool(true, "Sombrear Kill Zone activa", group = GRP_KZ)
 // Mapa MTF [T13a]: hereda los escalares de HTF hacia TF menores (cascada D1->{H1,M5}, H1->{M5}).
@@ -360,6 +362,26 @@ f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, float c
         SMC_Event disp = f_detectDisplacement(oBreak, hBreak, lBreak, cBreak, atr14, dispFactor, bodyPct, false, false, chochEv.barIdx, chochEv.barTime)
         if not na(disp)
             ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
+    ev
+
+// --- IDM — Inducement [reglas-smc-ict §3.6] · T17 ---
+// f_detectIDM: la liquidez SENUELO interna. Un swing interno (internalLen) cuya liquidez se
+// barre (GRAB: la mecha perfora el nivel y el cierre vuelve del lado original) ANTES de que el
+// precio alcance el OB/FVG objetivo -> "induce" entradas tempranas que el smart money toma
+// antes del movimiento real (confluencia #33). IDM alcista = grab del internal LOW (sell-side
+// senuelo) con cierre de vuelta arriba -> camino limpio al alza; bajista = grab del internal
+// HIGH con cierre de vuelta abajo. Recibe los niveles internos vigentes (structInternal) + el
+// OHLC de la barra confirmada -> funcion PURA (ADR-002). El gate "antes de tocar el objetivo
+// OB/FVG" refina el PESO en el scoring (Fase 3), NO la deteccion del primitivo: aqui se emite
+// el grab interno. Distinto del sweep de pools (escala swing/EQHL, §3.2). Devuelve un
+// SMC_Event KIND_IDM en el nivel barrido, o na. Nivel na -> ese lado no dispara. Mutuamente
+// excluyente por barra (un grab por lado; alcista tiene precedencia en el raro doble grab).
+f_detectIDM(float intLow, float intHigh, float curLow, float curHigh, float curClose, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(intLow) and curLow < intLow and curClose > intLow
+        ev := SMC_Event.new(intLow, DIR_BULL, barIdx, barTime, "", KIND_IDM)
+    else if not na(intHigh) and curHigh > intHigh and curClose < intHigh
+        ev := SMC_Event.new(intHigh, DIR_BEAR, barIdx, barTime, "", KIND_IDM)
     ev
 
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
@@ -1214,6 +1236,17 @@ if barstate.isconfirmed
     if not na(evDisp)
         f_pushEvent(SMC_displacements, evDisp, MAX_EVENTS)
 
+// --- IDM — Inducement [§3.6] · T17 ---
+// Grab de liquidez INTERNA (internalLen): el nivel senuelo es la estructura interna vigente
+// (structInternal, fijada arriba). En barra confirmada, si la mecha barre el internal low/high
+// y el cierre vuelve -> IDM (confluencia #33). Distinto del sweep de pools (escala swing/EQHL).
+var array<SMC_Event> SMC_idm = array.new<SMC_Event>()
+SMC_Event evIDM = na
+if barstate.isconfirmed
+    evIDM := f_detectIDM(structInternal.lowLevel, structInternal.highLevel, low, high, close, bar_index, time)
+    if not na(evIDM)
+        f_pushEvent(SMC_idm, evIDM, MAX_EVENTS)
+
 // --- Equal Highs / Equal Lows [T08] ---
 // Pivotes a escala PROPIA eqlLength (3) — no los swing(5)/major(50). Mismo guard anti-
 // repaint (el pivote pertenece a t = bar_index - i_eqlLength). El pivote recien confirmado
@@ -1488,6 +1521,23 @@ if i_showDisp and barstate.islast
             bool bull = dp.dir == DIR_BULL
             string dtxt = bull ? "⚡ Disp ↑" : "⚡ Disp ↓"
             array.push(SMC_dispLabels, label.new(dp.barTime, dp.price, dtxt, style = bull ? label.style_label_up : label.style_label_down, color = color.new(color.orange, 75), textcolor = color.orange, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de IDM [T17 · §3.6]. Mismo patron repintado-en-islast (acotado a i_maxShowIDM).
+// IDM alcista (grab del internal low) -> marca DEBAJO apuntando arriba; bajista -> ENCIMA
+// apuntando abajo. Amarillo: lo distingue del naranja (displacement) y verde/rojo (sweep).
+var array<label> SMC_idmLabels = array.new<label>()
+if i_showIDM and barstate.islast
+    for lb in SMC_idmLabels
+        label.delete(lb)
+    array.clear(SMC_idmLabels)
+    int nI = array.size(SMC_idm)
+    if nI > 0
+        int firstI = math.max(0, nI - i_maxShowIDM)
+        for i = firstI to nI - 1
+            SMC_Event im = array.get(SMC_idm, i)
+            bool bullIdm = im.dir == DIR_BULL
+            string itxt = bullIdm ? "IDM ↑" : "IDM ↓"
+            array.push(SMC_idmLabels, label.new(im.barTime, im.price, itxt, style = bullIdm ? label.style_label_up : label.style_label_down, color = color.new(color.yellow, 75), textcolor = color.yellow, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el

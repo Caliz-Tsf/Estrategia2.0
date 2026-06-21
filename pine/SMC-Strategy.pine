@@ -335,6 +335,26 @@ f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, float c
             ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
     ev
 
+// --- IDM — Inducement [reglas-smc-ict §3.6] · T17 ---
+// f_detectIDM: la liquidez SENUELO interna. Un swing interno (internalLen) cuya liquidez se
+// barre (GRAB: la mecha perfora el nivel y el cierre vuelve del lado original) ANTES de que el
+// precio alcance el OB/FVG objetivo -> "induce" entradas tempranas que el smart money toma
+// antes del movimiento real (confluencia #33). IDM alcista = grab del internal LOW (sell-side
+// senuelo) con cierre de vuelta arriba -> camino limpio al alza; bajista = grab del internal
+// HIGH con cierre de vuelta abajo. Recibe los niveles internos vigentes (structInternal) + el
+// OHLC de la barra confirmada -> funcion PURA (ADR-002). El gate "antes de tocar el objetivo
+// OB/FVG" refina el PESO en el scoring (Fase 3), NO la deteccion del primitivo: aqui se emite
+// el grab interno. Distinto del sweep de pools (escala swing/EQHL, §3.2). Devuelve un
+// SMC_Event KIND_IDM en el nivel barrido, o na. Nivel na -> ese lado no dispara. Mutuamente
+// excluyente por barra (un grab por lado; alcista tiene precedencia en el raro doble grab).
+f_detectIDM(float intLow, float intHigh, float curLow, float curHigh, float curClose, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(intLow) and curLow < intLow and curClose > intLow
+        ev := SMC_Event.new(intLow, DIR_BULL, barIdx, barTime, "", KIND_IDM)
+    else if not na(intHigh) and curHigh > intHigh and curClose < intHigh
+        ev := SMC_Event.new(intHigh, DIR_BEAR, barIdx, barTime, "", KIND_IDM)
+    ev
+
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // Porta el algoritmo de Order Blocks de LuxAlgo (storeOrdeBlock :502-525,
 // deleteOrderBlocks :478-500; v5->v6). El OB es la vela origen del impulso que rompe
@@ -1175,6 +1195,16 @@ if barstate.isconfirmed
     evDisp := f_detectDisplacement(open, high, low, close, atr14, i_dispFactor, i_dispBodyPct, i_dispContraction, priorContraction, bar_index, time)
     if not na(evDisp)
         f_pushEvent(SMC_displacements, evDisp, MAX_EVENTS)
+
+// --- IDM — Inducement [§3.6] · T17 ---
+// Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_idm para el scoring
+// (confluencia #33, Sprint 2.1). Grab de liquidez interna (structInternal) en barra confirmada.
+var array<SMC_Event> SMC_idm = array.new<SMC_Event>()
+SMC_Event evIDM = na
+if barstate.isconfirmed
+    evIDM := f_detectIDM(structInternal.lowLevel, structInternal.highLevel, low, high, close, bar_index, time)
+    if not na(evIDM)
+        f_pushEvent(SMC_idm, evIDM, MAX_EVENTS)
 
 // --- Equal Highs / Equal Lows [T08] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_eqhl para el
