@@ -72,6 +72,10 @@ i_showIFVG     = input.bool(true,  "Mostrar IFVG (FVG invertido, §5.2)", group 
 i_showBPR      = input.bool(true,  "Mostrar BPR (solape FVG opuestos, §5.3)", group = GRP_FVG)
 i_bprWindow    = input.int(20,     "BPR: ventana máx entre FVG opuestos (velas)", minval = 1, group = GRP_FVG)
 i_bprMinOverlap= input.float(0.05, "BPR: solape mínimo (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_FVG)
+i_showIR       = input.bool(true,  "Mostrar Immediate Rebalance (§5.4)", group = GRP_FVG)
+i_irFactor     = input.float(1.0,  "IR: rango vela impulso (x ATR14)", minval = 0.3, step = 0.1, group = GRP_FVG)
+i_irBodyPct    = input.float(0.60, "IR: cuerpo mínimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_FVG)
+i_maxShowIR    = input.int(20,     "Max marcadores de IR (recientes)", minval = 1, group = GRP_FVG)
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
 i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
@@ -144,6 +148,7 @@ KIND_CORRECTIVE   = 35
 KIND_EMASTACK     = 36
 KIND_IFVG         = 37
 KIND_BPR          = 38
+KIND_IR           = 39
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -623,6 +628,26 @@ f_detectBPR(SMC_Zone newFvg, array<SMC_Zone> zones, float refClose, int curBarId
                     bpr := SMC_Zone.new(hi, lo, bdir, curBarIdx, newFvg.barTime, ZS_ACTIVE, 0.0, "", KIND_BPR)
                     break
     bpr
+
+// --- Immediate Rebalance (IR) [reglas-smc-ict §5.4] · T29 ---
+// f_detectImmediateRebalance: lo CONTRARIO al FVG. Una vela de impulso (vela `1`: rango >= irFactor*ATR
+// y cuerpo >= irBodyPct*rango) cuyo desequilibrio es REBALANCEADO de inmediato por la vela siguiente
+// (vela `0`: cierra de vuelta dentro del cuerpo de la `1`, pasado su 50%) -> no queda ineficiencia (§5.4).
+// Evento puntual (P4), `dir` = el de la vela de impulso. PURA (OHLC de la vela impulso + close del
+// rebalanceador). Devuelve SMC_Event KIND_IR (anclado en el 50% de la vela impulso) o na. atr14 na -> na.
+f_detectImmediateRebalance(float o1, float h1, float l1, float c1, float c0, float atr14, float irFactor, float irBodyPct, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(atr14)
+        float rng  = h1 - l1
+        float body = math.abs(c1 - o1)
+        bool impulse = rng > 0 and rng >= irFactor * atr14 and body >= irBodyPct * rng
+        if impulse
+            float mid = (o1 + c1) / 2.0
+            int dir = c1 >= o1 ? DIR_BULL : DIR_BEAR
+            bool rebalanced = (dir == DIR_BULL and c0 <= mid) or (dir == DIR_BEAR and c0 >= mid)
+            if rebalanced
+                ev := SMC_Event.new(mid, dir, barIdx, barTime, "", KIND_IR)
+    ev
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1655,6 +1680,16 @@ if barstate.isconfirmed
     if not na(evIDM)
         f_pushEvent(SMC_idm, evIDM, MAX_EVENTS)
 
+// --- Immediate Rebalance [§5.4] · T29 ---
+// Vela de impulso (bar[1]) rebalanceada por la vela actual (bar[0], close) sin dejar ineficiencia.
+// Evento puntual a su array dedicado SMC_ir (contraste con FVG; matiza el contexto de eficiencia).
+var array<SMC_Event> SMC_ir = array.new<SMC_Event>()
+SMC_Event evIR = na
+if barstate.isconfirmed
+    evIR := f_detectImmediateRebalance(open[1], high[1], low[1], close[1], close, atr14, i_irFactor, i_irBodyPct, bar_index - 1, time[1])
+    if not na(evIR)
+        f_pushEvent(SMC_ir, evIR, MAX_EVENTS)
+
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
 // hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
@@ -2142,6 +2177,24 @@ if i_showIDM and barstate.islast
             bool bullIdm = im.dir == DIR_BULL
             string itxt = bullIdm ? "IDM ↑" : "IDM ↓"
             array.push(SMC_idmLabels, label.new(im.barTime + idmOffMs, im.price, itxt, style = label.style_label_left, color = color.new(color.yellow, 75), textcolor = color.yellow, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de Immediate Rebalance [T29 · §5.4]. Mismo patron repintado-en-islast (acotado a
+// i_maxShowIR). OLIVA: lo distingue del resto. Anclado al 50% de la vela de impulso rebalanceada;
+// desplazado ~3 barras a la derecha (no tapa la vela). La flecha marca el dir del impulso.
+var array<label> SMC_irLabels = array.new<label>()
+if i_showIR and barstate.islast
+    for lb in SMC_irLabels
+        label.delete(lb)
+    array.clear(SMC_irLabels)
+    int irOffMs = 3 * (time - time[1])
+    int nIR = array.size(SMC_ir)
+    if nIR > 0
+        int firstIR = math.max(0, nIR - i_maxShowIR)
+        for i = firstIR to nIR - 1
+            SMC_Event ir = array.get(SMC_ir, i)
+            bool bullIr = ir.dir == DIR_BULL
+            string irtxt = bullIr ? "IR ↑" : "IR ↓"
+            array.push(SMC_irLabels, label.new(ir.barTime + irOffMs, ir.price, irtxt, style = label.style_label_left, color = color.new(color.olive, 70), textcolor = color.olive, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de Judas [T18 · §3.5]. Mismo patron repintado-en-islast (acotado a i_maxShowJudas).
 // Fucsia: lo distingue del naranja (displacement), amarillo (IDM) y verde/rojo (sweep). La trampa de
