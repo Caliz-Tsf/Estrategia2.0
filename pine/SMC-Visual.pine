@@ -56,6 +56,11 @@ i_showH1         = input.bool(true, "Heredar H1 (bias + P/D)", group = GRP_MTF)
 i_mtfCapOB       = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG      = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapPool     = input.int(2, "Traspaso Pools por HTF (0-10, 0=off)", minval = 0, maxval = 10, group = GRP_MTF)
+i_mtfCapSweep    = input.int(2, "Traspaso Sweeps por HTF (0-10, 0=off)", minval = 0, maxval = 10, group = GRP_MTF)
+i_mtfCapEQ       = input.int(2, "Traspaso EQH/EQL por HTF (0-10, 0=off)", minval = 0, maxval = 10, group = GRP_MTF)
+i_mtfCapBOS      = input.int(1, "Traspaso BOS por HTF (0-10, 0=off)",     minval = 0, maxval = 10, group = GRP_MTF)
+i_mtfCapCHoCH    = input.int(1, "Traspaso CHoCH por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
+i_mtfSweepMark   = input.bool(true, "Sweep como marca triangulo (off=etiqueta)", group = GRP_MTF)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -113,8 +118,8 @@ MAX_EVENTS = 100
 MAX_SWINGS = 100
 MAX_POOLS  = 50
 MAX_BARBUF = 500
-MTF_K    = 16
-MTF_SLOT = 4
+MTF_K    = 12
+MTF_SLOT = 6
 type SMC_Zone
     float  top
     float  bottom
@@ -713,7 +718,7 @@ f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, bool in
 // del 'kind' dado, NO mitigados (state < ZS_MITIGATED), MAS CERCANOS al precio px, y los anexa a
 // los arrays-candidato compartidos (ck/ct/cb/cd/cdist). Generaliza f_pNearZone (que devuelve 1)
 // -> al CORE porque la usa el transporte MTF (paridad MQL5 SMC_MTF.mqh). Pura.
-f_nearestN(array<SMC_Zone> src, int kind, float px, int capN, array<int> ck, array<float> ct, array<float> cb, array<int> cd, array<float> cdist) =>
+f_nearestN(array<SMC_Zone> src, int kind, float px, int capN, array<int> ck, array<float> ct, array<float> cb, array<int> cd, array<float> cdist, array<int> ctA, array<int> ctB) =>
     if capN > 0 and array.size(src) > 0
         mi = array.new<int>()
         md = array.new<float>()
@@ -733,11 +738,13 @@ f_nearestN(array<SMC_Zone> src, int kind, float px, int capN, array<int> ck, arr
                 array.push(cb, z.bottom)
                 array.push(cd, z.dir)
                 array.push(cdist, array.get(md, sidx))
+                array.push(ctA, z.barTime)
+                array.push(ctB, int(na))
     array.size(ck)
 
 // f_nearestNPools [T13b · ADR-009]: idem para pools NO barridos; nivel como top==bottom,
 // etiquetados KIND_POOL (dir = BSL/SSL). Pura.
-f_nearestNPools(array<SMC_Pool> src, float px, int capN, array<int> ck, array<float> ct, array<float> cb, array<int> cd, array<float> cdist) =>
+f_nearestNPools(array<SMC_Pool> src, float px, int capN, array<int> ck, array<float> ct, array<float> cb, array<int> cd, array<float> cdist, array<int> ctA, array<int> ctB) =>
     if capN > 0 and array.size(src) > 0
         mi = array.new<int>()
         md = array.new<float>()
@@ -757,6 +764,52 @@ f_nearestNPools(array<SMC_Pool> src, float px, int capN, array<int> ck, array<fl
                 array.push(cb, p.level)
                 array.push(cd, p.dir)
                 array.push(cdist, array.get(md, sidx))
+                array.push(ctA, p.barTime)
+                array.push(ctB, int(na))
+    array.size(ck)
+
+// f_pushMTFEvent [T13c · ADR-010]: acumula en arrays paralelos var (kind/level/dir/tA/tB) los
+// conceptos-TRAMO o -MARCA del HTF (BOS/CHoCH origen->ruptura, EQH/EQL toque->toque, Sweep en su
+// barra) para poder seleccionarlos por cercania despues. FIFO acotado a MAX_EVENTS. Pura.
+f_pushMTFEvent(array<int> sk, array<float> sl, array<int> sd, array<int> sta, array<int> stb, int k, float lvl, int d, int ta, int tb) =>
+    array.push(sk, k)
+    array.push(sl, lvl)
+    array.push(sd, d)
+    array.push(sta, ta)
+    array.push(stb, tb)
+    if array.size(sk) > MAX_EVENTS
+        array.shift(sk)
+        array.shift(sl)
+        array.shift(sd)
+        array.shift(sta)
+        array.shift(stb)
+    array.size(sk)
+
+// f_nearestNEvents [T13c · ADR-010]: idem f_nearestN pero sobre los arrays paralelos de
+// f_pushMTFEvent. Filtra por 'kind', toma los capN mas cercanos al precio px y los anexa a los
+// arrays-candidato anclando tA/tB reales (tramo BOS/CHoCH/EQ o marca sweep). top==bottom==level
+// (nivel unico). Pura -> paridad MQL5 SMC_MTF.mqh.
+f_nearestNEvents(array<int> sk, array<float> sl, array<int> sd, array<int> sta, array<int> stb, int kind, float px, int capN, array<int> ck, array<float> ct, array<float> cb, array<int> cd, array<float> cdist, array<int> ctA, array<int> ctB) =>
+    if capN > 0 and array.size(sk) > 0
+        mi = array.new<int>()
+        md = array.new<float>()
+        for i = 0 to array.size(sk) - 1
+            if array.get(sk, i) == kind
+                array.push(mi, i)
+                array.push(md, math.abs(array.get(sl, i) - px))
+        if array.size(mi) > 0
+            ord = array.sort_indices(md, order.ascending)
+            cnt = math.min(capN, array.size(ord))
+            for j = 0 to cnt - 1
+                int sidx = array.get(ord, j)
+                int src  = array.get(mi, sidx)
+                array.push(ck, kind)
+                array.push(ct, array.get(sl, src))
+                array.push(cb, array.get(sl, src))
+                array.push(cd, array.get(sd, src))
+                array.push(cdist, array.get(md, sidx))
+                array.push(ctA, array.get(sta, src))
+                array.push(ctB, array.get(stb, src))
     array.size(ck)
 
 // f_computeTFState [Sprint 1.4 · T13a escalares + T13b mapa rico · ESQUELETO-P3 §2.4 · ADR-009]:
@@ -773,9 +826,15 @@ f_nearestNPools(array<SMC_Pool> src, float px, int capN, array<int> ck, array<fl
 // (mas cupo) preparada en el consumidor, no activada aun.
 // CONTRATO DEL TUPLE (orden exacto, replicar en MQL5):
 //   [ bias, bosP,bosD,bosT, chochP,chochD,chochT, mssP,mssD,mssT, pdHigh,pdLow,pdMid,
-//     ema20,ema50,ema200, atr14,            (17 escalares T13a)
-//     {kind,top,bottom,dir} x MTF_K ]       (ranuras T13b, ADR-009)
-f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLength, float eqThreshold, float obHighVolFactor, bool obMitClose, float fvgThreshold, float poolTol, int minTouches, int capOB, int capFVG, int capPool) =>
+//     ema20,ema50,ema200, atr14,                 (17 escalares T13a)
+//     {kind,top,bottom,dir,tA,tB} x MTF_K ]      (ranuras T13c, ADR-010: 6 campos con anclaje)
+// T13c (ADR-010): la ranura crece de 4 a 6 campos -> tA=tiempo barra ORIGEN (left caja / 1er toque
+// EQ / inicio tramo BOS-CHoCH / barra del sweep o pool), tB=tiempo FIN (na=extiende al borde; 2o
+// toque EQ; barra de ruptura BOS-CHoCH). El consumidor reconstruye la FORMA NATIVA por xloc.bar_time
+// (caja OB/FVG, linea tramo EQ/estructura, marca sweep). BOS/CHoCH y EQH/EQL ahora SI se emiten al
+// buffer (antes solo escalares/pools). Cap 0-10 por concepto para TODOS (0=off). time epoch-ms cabe
+// exacto en float64 -> viaja por security sin perdida.
+f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLength, float eqThreshold, float obHighVolFactor, bool obMitClose, float fvgThreshold, float poolTol, int minTouches, int capOB, int capFVG, int capPool, int capSweep, int capEQ, int capBOS, int capCHoCH) =>
     var SMC_TFState   st       = SMC_TFState.new()
     var SMC_Structure structTf = SMC_Structure.new()
     var SMC_Trailing  trailTf  = SMC_Trailing.new()
@@ -788,7 +847,14 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     var array<float> obBufVol  = array.new<float>()
     var float prevEqHigh   = na
     var float prevEqLow    = na
-    var SMC_Event lastSweepTf = na
+    var int   prevEqHighTime = na
+    var int   prevEqLowTime  = na
+    // Buffer paralelo de conceptos-tramo/marca (BOS/CHoCH/EQH/EQL/Sweep) con anclaje tA/tB [T13c]
+    var array<int>   evK  = array.new<int>()
+    var array<float> evL  = array.new<float>()
+    var array<int>   evD  = array.new<int>()
+    var array<int>   evTA = array.new<int>()
+    var array<int>   evTB = array.new<int>()
     float atr14      = ta.atr(14)
     float volMeasure = ta.atr(200)
     [sh, sl]     = f_detectSwings(swingLen)
@@ -808,6 +874,9 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
         st.pdLow  := trailTf.bottom
         SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
         f_updateTFState(st, ev)
+        if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
+            int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
+            f_pushMTFEvent(evK, evL, evD, evTA, evTB, ev.kind, ev.price, ev.dir, origT, ev.barTime)
         SMC_Event evM = f_detectMSS(ev, open, high, low, close, atr14, dispFactor, bodyPct)
         if not na(evM)
             st.lastMSSPrice := evM.price
@@ -832,17 +901,26 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
             SMC_Zone obZone = f_detectOB(ev, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, obHighVolFactor, KIND_OB)
             if not na(obZone)
                 f_pushZone(zonesTf, obZone, MAX_ZONES)
-        SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time, fvgThreshold * atr14, KIND_FVG)
+        // FVG: barTime = vela MEDIA (time[1] = barIdx-1, el desplazamiento que crea el gap, igual
+        // que el dibujo nativo f_drawFVG) -> el transporte MTF ancla la caja exacta vela-a-vela en el
+        // LTF sin quedar "corrida" una barra a la derecha (pref. usuario S042). [T13c]
+        SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time[1], fvgThreshold * atr14, KIND_FVG)
         if not na(fvgZone)
             f_pushZone(zonesTf, fvgZone, MAX_ZONES)
         SMC_Event evEqH = na
         SMC_Event evEqL = na
         if not na(eqPH)
             evEqH := f_detectEQHL(true, eqPH, bar_index - eqlLength, time[eqlLength], prevEqHigh, eqThreshold * atr14)
-            prevEqHigh := eqPH
+            if not na(evEqH) and not na(prevEqHighTime)
+                f_pushMTFEvent(evK, evL, evD, evTA, evTB, KIND_EQH, evEqH.price, DIR_BULL, prevEqHighTime, evEqH.barTime)
+            prevEqHigh     := eqPH
+            prevEqHighTime := time[eqlLength]
         if not na(eqPL)
             evEqL := f_detectEQHL(false, eqPL, bar_index - eqlLength, time[eqlLength], prevEqLow, eqThreshold * atr14)
-            prevEqLow := eqPL
+            if not na(evEqL) and not na(prevEqLowTime)
+                f_pushMTFEvent(evK, evL, evD, evTA, evTB, KIND_EQL, evEqL.price, DIR_BEAR, prevEqLowTime, evEqL.barTime)
+            prevEqLow     := eqPL
+            prevEqLowTime := time[eqlLength]
         if not na(sh)
             f_upsertPool(poolsTf, true,  sh, 1, time[swingLen], bar_index - swingLen, poolTol * atr14)
         if not na(sl)
@@ -854,7 +932,7 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
         f_markPoolsSwept(poolsTf, high, low, time, bar_index)
         SMC_Event evSweep = f_detectSweep(poolsTf, close, bar_index, time, minTouches)
         if not na(evSweep)
-            lastSweepTf := evSweep
+            f_pushMTFEvent(evK, evL, evD, evTA, evTB, KIND_SWEEP, evSweep.price, evSweep.dir, evSweep.barTime, int(na))
         f_prunePools(poolsTf, MAX_POOLS)
     st.pdMid  := na(st.pdHigh) or na(st.pdLow) ? na : (st.pdHigh + st.pdLow) / 2.0
     st.ema20  := ta.ema(close, 20)
@@ -866,19 +944,22 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     cBot  = array.new<float>()
     cDir  = array.new<int>()
     cDist = array.new<float>()
-    f_nearestN(zonesTf, KIND_OB,  close, capOB,   cKind, cTop, cBot, cDir, cDist)
-    f_nearestN(zonesTf, KIND_FVG, close, capFVG,  cKind, cTop, cBot, cDir, cDist)
-    f_nearestNPools(poolsTf,      close, capPool, cKind, cTop, cBot, cDir, cDist)
-    if not na(lastSweepTf)
-        array.push(cKind, KIND_SWEEP)
-        array.push(cTop,  lastSweepTf.price)
-        array.push(cBot,  lastSweepTf.price)
-        array.push(cDir,  lastSweepTf.dir)
-        array.push(cDist, math.abs(lastSweepTf.price - close))
+    cTA   = array.new<int>()
+    cTB   = array.new<int>()
+    f_nearestN(zonesTf, KIND_OB,  close, capOB,   cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestN(zonesTf, KIND_FVG, close, capFVG,  cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestNPools(poolsTf,      close, capPool, cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestNEvents(evK, evL, evD, evTA, evTB, KIND_BOS,   close, capBOS,   cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestNEvents(evK, evL, evD, evTA, evTB, KIND_CHOCH, close, capCHoCH, cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestNEvents(evK, evL, evD, evTA, evTB, KIND_EQH,   close, capEQ,    cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestNEvents(evK, evL, evD, evTA, evTB, KIND_EQL,   close, capEQ,    cKind, cTop, cBot, cDir, cDist, cTA, cTB)
+    f_nearestNEvents(evK, evL, evD, evTA, evTB, KIND_SWEEP, close, capSweep, cKind, cTop, cBot, cDir, cDist, cTA, cTB)
     mk  = array.new<int>()
     mt  = array.new<float>()
     mb  = array.new<float>()
     mdr = array.new<int>()
+    mta = array.new<int>()
+    mtb = array.new<int>()
     ordG = array.size(cDist) > 0 ? array.sort_indices(cDist, order.ascending) : array.new<int>()
     for s = 0 to MTF_K - 1
         if s < array.size(ordG)
@@ -887,28 +968,28 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
             array.push(mt,  array.get(cTop,  gi))
             array.push(mb,  array.get(cBot,  gi))
             array.push(mdr, array.get(cDir,  gi))
+            array.push(mta, array.get(cTA,   gi))
+            array.push(mtb, array.get(cTB,   gi))
         else
             array.push(mk, 0)
             array.push(mt, na)
             array.push(mb, na)
             array.push(mdr, 0)
+            array.push(mta, int(na))
+            array.push(mtb, int(na))
     [ st.bias, st.lastBOSPrice, st.lastBOSDir, st.lastBOSTime, st.lastCHoCHPrice, st.lastCHoCHDir, st.lastCHoCHTime, st.lastMSSPrice, st.lastMSSDir, st.lastMSSTime, st.pdHigh, st.pdLow, st.pdMid, st.ema20, st.ema50, st.ema200, st.atr14,
-      array.get(mk, 0), array.get(mt, 0), array.get(mb, 0), array.get(mdr, 0),
-      array.get(mk, 1), array.get(mt, 1), array.get(mb, 1), array.get(mdr, 1),
-      array.get(mk, 2), array.get(mt, 2), array.get(mb, 2), array.get(mdr, 2),
-      array.get(mk, 3), array.get(mt, 3), array.get(mb, 3), array.get(mdr, 3),
-      array.get(mk, 4), array.get(mt, 4), array.get(mb, 4), array.get(mdr, 4),
-      array.get(mk, 5), array.get(mt, 5), array.get(mb, 5), array.get(mdr, 5),
-      array.get(mk, 6), array.get(mt, 6), array.get(mb, 6), array.get(mdr, 6),
-      array.get(mk, 7), array.get(mt, 7), array.get(mb, 7), array.get(mdr, 7),
-      array.get(mk, 8), array.get(mt, 8), array.get(mb, 8), array.get(mdr, 8),
-      array.get(mk, 9), array.get(mt, 9), array.get(mb, 9), array.get(mdr, 9),
-      array.get(mk, 10), array.get(mt, 10), array.get(mb, 10), array.get(mdr, 10),
-      array.get(mk, 11), array.get(mt, 11), array.get(mb, 11), array.get(mdr, 11),
-      array.get(mk, 12), array.get(mt, 12), array.get(mb, 12), array.get(mdr, 12),
-      array.get(mk, 13), array.get(mt, 13), array.get(mb, 13), array.get(mdr, 13),
-      array.get(mk, 14), array.get(mt, 14), array.get(mb, 14), array.get(mdr, 14),
-      array.get(mk, 15), array.get(mt, 15), array.get(mb, 15), array.get(mdr, 15) ]
+      array.get(mk, 0), array.get(mt, 0), array.get(mb, 0), array.get(mdr, 0), array.get(mta, 0), array.get(mtb, 0),
+      array.get(mk, 1), array.get(mt, 1), array.get(mb, 1), array.get(mdr, 1), array.get(mta, 1), array.get(mtb, 1),
+      array.get(mk, 2), array.get(mt, 2), array.get(mb, 2), array.get(mdr, 2), array.get(mta, 2), array.get(mtb, 2),
+      array.get(mk, 3), array.get(mt, 3), array.get(mb, 3), array.get(mdr, 3), array.get(mta, 3), array.get(mtb, 3),
+      array.get(mk, 4), array.get(mt, 4), array.get(mb, 4), array.get(mdr, 4), array.get(mta, 4), array.get(mtb, 4),
+      array.get(mk, 5), array.get(mt, 5), array.get(mb, 5), array.get(mdr, 5), array.get(mta, 5), array.get(mtb, 5),
+      array.get(mk, 6), array.get(mt, 6), array.get(mb, 6), array.get(mdr, 6), array.get(mta, 6), array.get(mtb, 6),
+      array.get(mk, 7), array.get(mt, 7), array.get(mb, 7), array.get(mdr, 7), array.get(mta, 7), array.get(mtb, 7),
+      array.get(mk, 8), array.get(mt, 8), array.get(mb, 8), array.get(mdr, 8), array.get(mta, 8), array.get(mtb, 8),
+      array.get(mk, 9), array.get(mt, 9), array.get(mb, 9), array.get(mdr, 9), array.get(mta, 9), array.get(mtb, 9),
+      array.get(mk, 10), array.get(mt, 10), array.get(mb, 10), array.get(mdr, 10), array.get(mta, 10), array.get(mtb, 10),
+      array.get(mk, 11), array.get(mt, 11), array.get(mb, 11), array.get(mdr, 11), array.get(mta, 11), array.get(mtb, 11) ]
 
 // === DETECCIÓN TF PROPIO ===
 // Estado global del chart actual. Arrays con prefijo SMC_ [PINE-PLAN §2].
@@ -1181,20 +1262,24 @@ bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0
 // INTERNO por-contexto (R-P3-1, spike S039 ✅) -> no contamina el chart. lookahead_off
 // SIEMPRE (regla #1, anti-repaint). Se reconstituyen a SMC_TFState ligeros (orden de campos
 // = orden del tuple, .new posicional) que el dibujo en cascada consume. Mapa rico = T13b.
-[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_k1, d1_t1, d1_b1, d1_d1, d1_k2, d1_t2, d1_b2, d1_d2, d1_k3, d1_t3, d1_b3, d1_d3, d1_k4, d1_t4, d1_b4, d1_d4, d1_k5, d1_t5, d1_b5, d1_d5, d1_k6, d1_t6, d1_b6, d1_d6, d1_k7, d1_t7, d1_b7, d1_d7, d1_k8, d1_t8, d1_b8, d1_d8, d1_k9, d1_t9, d1_b9, d1_d9, d1_k10, d1_t10, d1_b10, d1_d10, d1_k11, d1_t11, d1_b11, d1_d11, d1_k12, d1_t12, d1_b12, d1_d12, d1_k13, d1_t13, d1_b13, d1_d13, d1_k14, d1_t14, d1_b14, d1_d14, d1_k15, d1_t15, d1_b15, d1_d15] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool), lookahead = barmerge.lookahead_off)
-[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_k1, h1_t1, h1_b1, h1_d1, h1_k2, h1_t2, h1_b2, h1_d2, h1_k3, h1_t3, h1_b3, h1_d3, h1_k4, h1_t4, h1_b4, h1_d4, h1_k5, h1_t5, h1_b5, h1_d5, h1_k6, h1_t6, h1_b6, h1_d6, h1_k7, h1_t7, h1_b7, h1_d7, h1_k8, h1_t8, h1_b8, h1_d8, h1_k9, h1_t9, h1_b9, h1_d9, h1_k10, h1_t10, h1_b10, h1_d10, h1_k11, h1_t11, h1_b11, h1_d11, h1_k12, h1_t12, h1_b12, h1_d12, h1_k13, h1_t13, h1_b13, h1_d13, h1_k14, h1_t14, h1_b14, h1_d14, h1_k15, h1_t15, h1_b15, h1_d15] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool), lookahead = barmerge.lookahead_off)
+[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_ta0, d1_tb0, d1_k1, d1_t1, d1_b1, d1_d1, d1_ta1, d1_tb1, d1_k2, d1_t2, d1_b2, d1_d2, d1_ta2, d1_tb2, d1_k3, d1_t3, d1_b3, d1_d3, d1_ta3, d1_tb3, d1_k4, d1_t4, d1_b4, d1_d4, d1_ta4, d1_tb4, d1_k5, d1_t5, d1_b5, d1_d5, d1_ta5, d1_tb5, d1_k6, d1_t6, d1_b6, d1_d6, d1_ta6, d1_tb6, d1_k7, d1_t7, d1_b7, d1_d7, d1_ta7, d1_tb7, d1_k8, d1_t8, d1_b8, d1_d8, d1_ta8, d1_tb8, d1_k9, d1_t9, d1_b9, d1_d9, d1_ta9, d1_tb9, d1_k10, d1_t10, d1_b10, d1_d10, d1_ta10, d1_tb10, d1_k11, d1_t11, d1_b11, d1_d11, d1_ta11, d1_tb11] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
+[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
 SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
 SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
 // Buffer generico de ranuras reconstituido por HTF (ADR-009). 2a llamada/TF (mas cupo) se
 // activaria aqui con un 2o request.security cuando Sprint 1.5/1.6 lo exijan (no ahora).
-d1Kind = array.from(d1_k0, d1_k1, d1_k2, d1_k3, d1_k4, d1_k5, d1_k6, d1_k7, d1_k8, d1_k9, d1_k10, d1_k11, d1_k12, d1_k13, d1_k14, d1_k15)
-d1Top  = array.from(d1_t0, d1_t1, d1_t2, d1_t3, d1_t4, d1_t5, d1_t6, d1_t7, d1_t8, d1_t9, d1_t10, d1_t11, d1_t12, d1_t13, d1_t14, d1_t15)
-d1Bot  = array.from(d1_b0, d1_b1, d1_b2, d1_b3, d1_b4, d1_b5, d1_b6, d1_b7, d1_b8, d1_b9, d1_b10, d1_b11, d1_b12, d1_b13, d1_b14, d1_b15)
-d1Dir  = array.from(d1_d0, d1_d1, d1_d2, d1_d3, d1_d4, d1_d5, d1_d6, d1_d7, d1_d8, d1_d9, d1_d10, d1_d11, d1_d12, d1_d13, d1_d14, d1_d15)
-h1Kind = array.from(h1_k0, h1_k1, h1_k2, h1_k3, h1_k4, h1_k5, h1_k6, h1_k7, h1_k8, h1_k9, h1_k10, h1_k11, h1_k12, h1_k13, h1_k14, h1_k15)
-h1Top  = array.from(h1_t0, h1_t1, h1_t2, h1_t3, h1_t4, h1_t5, h1_t6, h1_t7, h1_t8, h1_t9, h1_t10, h1_t11, h1_t12, h1_t13, h1_t14, h1_t15)
-h1Bot  = array.from(h1_b0, h1_b1, h1_b2, h1_b3, h1_b4, h1_b5, h1_b6, h1_b7, h1_b8, h1_b9, h1_b10, h1_b11, h1_b12, h1_b13, h1_b14, h1_b15)
-h1Dir  = array.from(h1_d0, h1_d1, h1_d2, h1_d3, h1_d4, h1_d5, h1_d6, h1_d7, h1_d8, h1_d9, h1_d10, h1_d11, h1_d12, h1_d13, h1_d14, h1_d15)
+d1Kind = array.from(d1_k0, d1_k1, d1_k2, d1_k3, d1_k4, d1_k5, d1_k6, d1_k7, d1_k8, d1_k9, d1_k10, d1_k11)
+d1Top  = array.from(d1_t0, d1_t1, d1_t2, d1_t3, d1_t4, d1_t5, d1_t6, d1_t7, d1_t8, d1_t9, d1_t10, d1_t11)
+d1Bot  = array.from(d1_b0, d1_b1, d1_b2, d1_b3, d1_b4, d1_b5, d1_b6, d1_b7, d1_b8, d1_b9, d1_b10, d1_b11)
+d1Dir  = array.from(d1_d0, d1_d1, d1_d2, d1_d3, d1_d4, d1_d5, d1_d6, d1_d7, d1_d8, d1_d9, d1_d10, d1_d11)
+d1TA   = array.from(d1_ta0, d1_ta1, d1_ta2, d1_ta3, d1_ta4, d1_ta5, d1_ta6, d1_ta7, d1_ta8, d1_ta9, d1_ta10, d1_ta11)
+d1TB   = array.from(d1_tb0, d1_tb1, d1_tb2, d1_tb3, d1_tb4, d1_tb5, d1_tb6, d1_tb7, d1_tb8, d1_tb9, d1_tb10, d1_tb11)
+h1Kind = array.from(h1_k0, h1_k1, h1_k2, h1_k3, h1_k4, h1_k5, h1_k6, h1_k7, h1_k8, h1_k9, h1_k10, h1_k11)
+h1Top  = array.from(h1_t0, h1_t1, h1_t2, h1_t3, h1_t4, h1_t5, h1_t6, h1_t7, h1_t8, h1_t9, h1_t10, h1_t11)
+h1Bot  = array.from(h1_b0, h1_b1, h1_b2, h1_b3, h1_b4, h1_b5, h1_b6, h1_b7, h1_b8, h1_b9, h1_b10, h1_b11)
+h1Dir  = array.from(h1_d0, h1_d1, h1_d2, h1_d3, h1_d4, h1_d5, h1_d6, h1_d7, h1_d8, h1_d9, h1_d10, h1_d11)
+h1TA   = array.from(h1_ta0, h1_ta1, h1_ta2, h1_ta3, h1_ta4, h1_ta5, h1_ta6, h1_ta7, h1_ta8, h1_ta9, h1_ta10, h1_ta11)
+h1TB   = array.from(h1_tb0, h1_tb1, h1_tb2, h1_tb3, h1_tb4, h1_tb5, h1_tb6, h1_tb7, h1_tb8, h1_tb9, h1_tb10, h1_tb11)
 
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
@@ -1472,28 +1557,71 @@ f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<lab
     float  biasY   = not na(s.pdHigh) and not na(s.pdLow) ? (s.pdHigh + s.pdLow) / 2.0 : close
     array.push(labels, label.new(bar_index + 5, biasY, tf + " bias: " + biasTxt, style = label.style_label_left, color = color.new(col, 92), textcolor = col, size = size.small))
 
-// f_drawMTFZones [T13b · ADR-009]: dibuja el buffer generico de zonas/eventos heredados del HTF
-// (cada ranura kind!=0) como niveles de referencia extendidos al borde, tenues + punteados, con
-// prefijo "D1:"/"H1:". Presentacion -> fuera del CORE byte-identico. Ya capado a MTF_K en el
-// transporte; aqui solo se omiten ranuras vacias (kind=0) o na.
-f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<float> bots, array<int> dirs, array<line> lines, array<label> labels) =>
+// f_drawMTFZones [T13c · ADR-010]: dibuja el buffer generico heredado del HTF reconstruyendo la
+// FORMA NATIVA de cada concepto, ANCLADA POR TIEMPO (xloc.bar_time -> cae en su barra real del LTF,
+// porque el bar_index del contexto HTF NO mapea al chart). switch sobre kind: OB/FVG = caja (tono
+// distinto); EQH/EQL = linea de tramo tA->tB punteada; BOS/CHoCH = linea origen->ruptura; pool =
+// linea al nivel; sweep = marca triangulo en su barra. tA/tB vienen en epoch-ms (casteo a int).
+// Presentacion -> fuera del CORE byte-identico. Ya capado a MTF_K en el transporte.
+f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<float> bots, array<int> dirs, array<int> tas, array<int> tbs, array<line> lines, array<label> labels, array<box> boxes, array<SMC_Event> majEvents, float majTol, float mssLvl, int mssDir) =>
+    int nowT = time
     for i = 0 to array.size(kinds) - 1
         int   k  = array.get(kinds, i)
         float tp = array.get(tops, i)
         float bt = array.get(bots, i)
         int   dr = array.get(dirs, i)
-        if k != 0 and not na(tp) and not na(bt)
-            string nm = k == KIND_OB ? "OB" : k == KIND_FVG ? "FVG" : k == KIND_POOL ? (dr == DIR_BULL ? "BSL" : "SSL") : k == KIND_SWEEP ? "Sweep" : "?"
-            if tp == bt
-                array.push(lines, line.new(bar_index - 1, tp, bar_index, tp, xloc = xloc.bar_index, color = color.new(col, 45), style = line.style_dotted, width = 1, extend = extend.left))
-            else
-                array.push(lines, line.new(bar_index - 1, tp, bar_index, tp, xloc = xloc.bar_index, color = color.new(col, 60), style = line.style_dotted, width = 1, extend = extend.left))
-                array.push(lines, line.new(bar_index - 1, bt, bar_index, bt, xloc = xloc.bar_index, color = color.new(col, 60), style = line.style_dotted, width = 1, extend = extend.left))
-            array.push(labels, label.new(bar_index + 8, tp == bt ? tp : (tp + bt) / 2.0, tf + ": " + nm, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
+        int   tA = na(array.get(tas, i)) ? na : int(array.get(tas, i))
+        int   tB = na(array.get(tbs, i)) ? na : int(array.get(tbs, i))
+        if k != 0 and not na(tp) and not na(bt) and not na(tA)
+            switch
+                k == KIND_OB or k == KIND_FVG =>
+                    // Anclaje vela-a-vela EXACTO (pref. usuario S042): tA ya es la vela origen (OB) o la
+                    // vela media del gap (FVG, time[1] desde el productor). Caja extendida a la derecha
+                    // (zona viva) + linea 50% (CE) suave + nombre CENTRADO, como el dibujo nativo.
+                    int rgt = na(tB) ? nowT : tB
+                    float ce = (tp + bt) / 2.0
+                    color bgc = k == KIND_OB ? color.new(col, 85) : color.new(color.orange, 88)
+                    array.push(boxes, box.new(tA, tp, rgt, bt, xloc = xloc.bar_time, border_color = color.new(col, 60), border_width = 1, bgcolor = bgc, text = tf + ": " + (k == KIND_OB ? "OB" : "FVG"), text_color = col, text_size = size.tiny, text_halign = text.align_center, text_valign = text.align_center))
+                    array.push(lines, line.new(tA, ce, rgt, ce, xloc = xloc.bar_time, color = color.new(col, 55), style = line.style_dotted, width = 1))
+                k == KIND_EQH or k == KIND_EQL =>
+                    // Estilo NATIVO de f_drawEQHL: AZUL + etiqueta SIN nube (fondo transparente). Linea de
+                    // toque a toque (tA->tB = los dos pivotes iguales del HTF). Etiqueta al CENTRO de la
+                    // linea: EQH encima / EQL debajo (pref. usuario S042), con prefijo TF.
+                    int rgt = na(tB) ? nowT : tB
+                    int mid = math.round((tA + rgt) / 2.0)
+                    array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.blue, style = line.style_dotted, width = 1))
+                    array.push(labels, label.new(mid, tp, tf + ": " + (k == KIND_EQH ? "EQH" : "EQL"), xloc = xloc.bar_time, style = k == KIND_EQH ? label.style_label_down : label.style_label_up, color = color.new(color.blue, 100), textcolor = color.blue, size = size.tiny))
+                k == KIND_BOS or k == KIND_CHOCH =>
+                    int rgt = na(tB) ? nowT : tB
+                    int mid = math.round((tA + rgt) / 2.0)
+                    // ANTI-DUPLICADO (pref. usuario S042): si este BOS/CHoCH del HTF COINCIDE con un evento
+                    // de estructura grande del M5 (misma dir, nivel +-majTol, ruptura dentro del tramo), el
+                    // nativo ya lo dibuja como "BOS+/CHoCH+" -> la capa MTF NO dibuja nada (evita el nombre
+                    // duplicado). Si NO coincide, es una estructura SOLO-HTF: se dibuja linea + etiqueta al
+                    // CENTRO, arriba (alcista) / abajo (bajista), con su TF. CHoCH MSS si matchea el MSS del TF.
+                    bool merged = false
+                    if array.size(majEvents) > 0
+                        for mi = 0 to array.size(majEvents) - 1
+                            SMC_Event me = array.get(majEvents, mi)
+                            if me.dir == dr and math.abs(me.price - tp) <= majTol and me.barTime >= tA and me.barTime <= nowT
+                                merged := true
+                                break
+                    if not merged
+                        bool isMSS = k == KIND_CHOCH and not na(mssLvl) and mssDir == dr and math.abs(mssLvl - tp) <= majTol
+                        string baseTxt = k == KIND_CHOCH ? (isMSS ? "CHoCH MSS" : "CHoCH") : "BOS"
+                        array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.new(col, 20), style = line.style_solid, width = 2))
+                        array.push(labels, label.new(mid, tp, baseTxt + " (" + tf + ")", xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
+                k == KIND_POOL =>
+                    array.push(lines, line.new(tA, tp, nowT, tp, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dashed, width = 1))
+                    array.push(labels, label.new(nowT, tp, tf + ": " + (dr == DIR_BULL ? "BSL" : "SSL"), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
+                k == KIND_SWEEP =>
+                    string mk = i_mtfSweepMark ? (dr == DIR_BULL ? "▲" : "▼") : (tf + ": Sweep")
+                    array.push(labels, label.new(tA, tp, mk, xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
 
 // Cascada: el HTF solo se hereda si es estrictamente MAYOR que el chart (D1->{H1,M5}, H1->{M5}).
 var array<line>  SMC_mtfLines  = array.new<line>()
 var array<label> SMC_mtfLabels = array.new<label>()
+var array<box>   SMC_mtfBoxes  = array.new<box>()
 bool mtfShowD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
 bool mtfShowH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
 if barstate.islast and (mtfShowD1 or mtfShowH1)
@@ -1501,14 +1629,18 @@ if barstate.islast and (mtfShowD1 or mtfShowH1)
         line.delete(l)
     for lb in SMC_mtfLabels
         label.delete(lb)
+    for bx in SMC_mtfBoxes
+        box.delete(bx)
     array.clear(SMC_mtfLines)
     array.clear(SMC_mtfLabels)
+    array.clear(SMC_mtfBoxes)
+    float mtfMajTol = atr14 * 0.3
     if mtfShowD1
         f_drawMTFState(d1State, "D1", color.new(color.blue, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, SMC_mtfLines, SMC_mtfLabels)
+        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir)
     if mtfShowH1
         f_drawMTFState(h1State, "H1", color.new(color.fuchsia, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, SMC_mtfLines, SMC_mtfLabels)
+        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir)
 
 // --- Helpers de panel [adelanto parcial de PINE-PLAN §5 / T14] (Visual-only) ---
 // Buscan el evento/zona/pool mas relevante para mostrar en el panel. Son de PRESENTACION:
