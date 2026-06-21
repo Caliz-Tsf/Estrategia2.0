@@ -46,6 +46,8 @@ i_emaSlow      = input.int(200, "EMA lenta",  minval = 1, group = GRP_SCORE)
 i_emaCrossBars = input.int(20,  "EMA: antiguedad max cruce (velas) §4.3 #40", minval = 1, group = GRP_SCORE)
 i_raidTouches  = input.int(3, "Raid: toques minimos del pool (§3.7 #16)", minval = 2, group = GRP_SCORE)
 i_fbBars       = input.int(2, "False Breakout: max velas para revertir (§3.7 #14)", minval = 1, group = GRP_SCORE)
+i_bprWindow    = input.int(20, "BPR: ventana max entre FVG opuestos (velas, §5.3)", minval = 1, group = GRP_SCORE)
+i_bprMinOverlap= input.float(0.05, "BPR: solape minimo (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -91,6 +93,7 @@ KIND_IMPULSIVE    = 34
 KIND_CORRECTIVE   = 35
 KIND_EMASTACK     = 36
 KIND_IFVG         = 37
+KIND_BPR          = 38
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -547,6 +550,29 @@ f_detectIFVG(SMC_Zone z, int prevState) =>
         int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
         iz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_IFVG)
     iz
+
+// --- BPR — Balanced Price Range [reglas-smc-ict §5.3] · T28 ---
+// f_detectBPR: zona de "precio balanceado" = INTERSECCION de un FVG alcista y uno bajista que se
+// solapan (§5.3). Recibe el FVG recien creado (newFvg) y busca en zones un FVG vivo de dir OPUESTO,
+// creado en <= bprWindow velas, cuya interseccion `[max(bottoms), min(tops)]` tenga altura >= minOverlap.
+// La `dir` del BPR se fija por el LADO desde el que el precio retesteara (refClose): si el precio esta
+// ARRIBA de la zona entrara desde arriba -> tratarla como SOPORTE (DIR_BULL); si esta ABAJO ->
+// RESISTENCIA (DIR_BEAR); dentro -> hereda la del newFvg. Asi reutiliza limpio f_updateZoneMitigation
+// (la regla la llama "neutra"; aqui el sesgo lo da el contexto de aproximacion). PURA. Devuelve KIND_BPR
+// o na. Confluencia candidata #44.
+f_detectBPR(SMC_Zone newFvg, array<SMC_Zone> zones, float refClose, int curBarIdx, int bprWindow, float minOverlap) =>
+    SMC_Zone bpr = na
+    if not na(newFvg) and newFvg.kind == KIND_FVG and array.size(zones) > 0
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone z = array.get(zones, i)
+            if z.kind == KIND_FVG and z.dir != newFvg.dir and z.state < ZS_MITIGATED and (curBarIdx - z.barIdx) <= bprWindow
+                float lo = math.max(newFvg.bottom, z.bottom)
+                float hi = math.min(newFvg.top, z.top)
+                if hi - lo >= minOverlap
+                    int bdir = refClose > hi ? DIR_BULL : refClose < lo ? DIR_BEAR : newFvg.dir
+                    bpr := SMC_Zone.new(hi, lo, bdir, curBarIdx, newFvg.barTime, ZS_ACTIVE, 0.0, "", KIND_BPR)
+                    break
+    bpr
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1506,7 +1532,11 @@ if barstate.isconfirmed
         // el FVG (refina #18/#20), eleva su peso en el scoring. Mismo wiring que Visual (sin dibujo).
         SMC_Event fvgMidDisp = f_detectDisplacement(open[1], high[1], low[1], close[1], atr14, i_dispFactor, i_dispBodyPct, false, false, bar_index - 1, time[1])
         fvgZone.trueFvg := not na(fvgMidDisp)
+        // BPR [T28 · §5.3]: solape con FVG vivo de dir opuesto reciente -> zona balanceada (sin dibujo).
+        SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
+        if not na(bprZone)
+            f_pushZone(SMC_zones, bprZone, MAX_ZONES)
     // --- OTE / Golden Pocket [T22 · §2.5] ---
     // Mismo wiring que Visual pero SIN dibujo. Sobre un BOS: expira GP/OTE de la pierna anterior y crea
     // las nuevas (rango estructural [lowLevel, highLevel]); el ciclo de vida lo gestiona el loop de
