@@ -87,6 +87,8 @@ KIND_FLIP         = 30
 KIND_FALSEBREAK   = 31
 KIND_SPRING       = 32
 KIND_RAID         = 33
+KIND_IMPULSIVE    = 34
+KIND_CORRECTIVE   = 35
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -728,6 +730,25 @@ f_classifySweep(array<SMC_Pool> pools, float swLevel, int swDir, int swBarIdx, f
     bool isRaid   = touches >= raidTouches
     bool isSpring = swDir == DIR_BULL and not na(rangeLow) and math.abs(swLevel - rangeLow) <= tol
     isRaid ? KIND_RAID : isSpring ? KIND_SPRING : KIND_SWEEP
+
+// --- Impulsive / Corrective [reglas-smc-ict §4.4] · T25 ---
+// f_classifyLeg: CLASIFICADOR DE ESTADO (no confluencia aditiva, §4.4). El discriminador NO es tamaño ni
+// eficiencia (el ER pivote-a-pivote no separa: verificado contra datos reales), sino ROMPER ESTRUCTURA
+// CON FUERZA ALINEADA AL SESGO DOMINANTE. Se evalua cuando confirma una ruptura: IMPULSIVO si hay
+// displacement en el tramo (legHadDisp) Y la ruptura es un BOS ALINEADO con el sesgo dominante
+// (continuacion) O un MSS (§1.5, voltea con conviccion). CORRECTIVO en caso contrario (retroceso
+// contra-sesgo: puede tener una vela fuerte aislada o micro-BOS interno, pero no rompe la estructura
+// dominante a su favor). PURA: recibe los eventos ya detectados + el sesgo dominante + el flag de
+// displacement del tramo (lo mantiene el consumidor). Devuelve KIND_IMPULSIVE / KIND_CORRECTIVE / 0
+// (sin ruptura este barra). El consumidor toma dir/price del MSS (si hay) o del evento de estructura.
+f_classifyLeg(SMC_Event structEv, SMC_Event mssEv, int dominantBias, bool legHadDisp) =>
+    int k = 0
+    if not na(mssEv)
+        k := KIND_IMPULSIVE
+    else if not na(structEv)
+        bool aligned = structEv.kind == KIND_BOS and structEv.dir == dominantBias and legHadDisp
+        k := aligned ? KIND_IMPULSIVE : KIND_CORRECTIVE
+    k
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1494,6 +1515,25 @@ if barstate.isconfirmed
     evIDM := f_detectIDM(structInternal.lowLevel, structInternal.highLevel, low, high, close, bar_index, time)
     if not na(evIDM)
         f_pushEvent(SMC_idm, evIDM, MAX_EVENTS)
+
+// --- Impulsive / Corrective [§4.4] · T25 ---
+// Mismo wiring que Visual pero SIN dibujo: la Strategy solo pobla SMC_legs para el scoring (clasificador
+// de estado, califica el contexto). legHadDisp recuerda displacement desde la ultima ruptura;
+// f_classifyLeg -> IMPULSIVO (displacement + BOS alineado al sesgo dominante o MSS) vs CORRECTIVO.
+var array<SMC_Event> SMC_legs = array.new<SMC_Event>()
+var bool legHadDisp = false
+SMC_Event evLeg = na
+if barstate.isconfirmed
+    if not na(evDisp)
+        legHadDisp := true
+    if not na(evStructSwing) or not na(evMSS)
+        int legKind = f_classifyLeg(evStructSwing, evMSS, structMajor.bias, legHadDisp)
+        if legKind != 0
+            int   legDir = not na(evMSS) ? evMSS.dir : evStructSwing.dir
+            float legPx  = not na(evMSS) ? evMSS.price : evStructSwing.price
+            evLeg := SMC_Event.new(legPx, legDir, bar_index, time, "", legKind)
+            f_pushEvent(SMC_legs, evLeg, MAX_EVENTS)
+        legHadDisp := false
 
 // --- Equal Highs / Equal Lows [T08] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_eqhl para el

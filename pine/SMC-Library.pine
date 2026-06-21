@@ -52,6 +52,8 @@ export const int ZS_INVALID   = 3
 export const int KIND_FALSEBREAK = 31
 export const int KIND_SPRING     = 32
 export const int KIND_RAID       = 33
+export const int KIND_IMPULSIVE  = 34
+export const int KIND_CORRECTIVE = 35
 // Estados del ciclo de vida del Flip [§2.8 · T21]
 export const int LF_PENDING = 0
 export const int LF_FLIPPED = 1
@@ -640,6 +642,19 @@ export f_classifySweep(array<SMC_Pool> pools, float swLevel, int swDir, int swBa
     bool isRaid   = touches >= raidTouches
     bool isSpring = swDir == DIR_BULL and not na(rangeLow) and math.abs(swLevel - rangeLow) <= tol
     isRaid ? KIND_RAID : isSpring ? KIND_SPRING : KIND_SWEEP
+
+// --- Impulsive / Corrective [reglas-smc-ict §4.4] · T25 ---
+// f_classifyLeg: clasificador de ESTADO (no confluencia, §4.4). IMPULSIVO si displacement en el tramo
+// (legHadDisp) Y ruptura BOS ALINEADA con el sesgo dominante O un MSS (§1.5); CORRECTIVO si no (retroceso
+// contra-sesgo). El ER no separa (verificado). PURA. Devuelve KIND_IMPULSIVE / KIND_CORRECTIVE / 0.
+export f_classifyLeg(SMC_Event structEv, SMC_Event mssEv, int dominantBias, bool legHadDisp) =>
+    int k = 0
+    if not na(mssEv)
+        k := KIND_IMPULSIVE
+    else if not na(structEv)
+        bool aligned = structEv.kind == KIND_BOS and structEv.dir == dominantBias and legHadDisp
+        k := aligned ? KIND_IMPULSIVE : KIND_CORRECTIVE
+    k
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Dealing range basado en trailing extremes de LuxAlgo (trailingExtremes :181,

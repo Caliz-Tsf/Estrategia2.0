@@ -680,7 +680,29 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 
 ---
 
-> **DEFINICIONES DE reglas-smc-ict.md COMPLETAS** — Tier 1 Estructura (§1), Tier 2 Zonas (§2), Liquidez (§3), Contexto/ICT/EMAs (§4). Cubren los 42 confluencias canónicas (§4.8 del workplan) y todas las funciones de PINE-PLAN §3.
+### 4.4 Impulsive / Corrective `f_classifyLeg`
+
+**Concepto.** La distinción más básica del lenguaje del mercado: un **tramo impulsivo** (la intención institucional, eficiente y direccional, el que crea desequilibrio y rompe estructura) frente a un **tramo correctivo** (el retroceso/consolidación que devuelve precio a la liquidez, solapado e ineficiente). No es una confluencia aditiva: es un **clasificador de estado** que CALIFICA el contexto — solo sobre un tramo **impulsivo** tiene sentido medir OTE/GP (§2.5), y un retroceso correctivo es lo que lleva el precio al OB/FVG/OTE para la entrada.
+
+**Definición cuantificada.** Sobre un **tramo** = segmento del precio en la dirección del movimiento, evaluado **contra el sesgo dominante vigente** (`structMajor.bias`, §1.4/T07B). La clave: lo que separa impulso de corrección **no es el tamaño ni la eficiencia bruta** (verificado: el ER pivote-a-pivote está confundido por la longitud — piernas correctivas cortas dan ER alto y la gran pierna impulsiva da ER bajo), sino **romper estructura en la dirección de la tendencia con fuerza**:
+- `hasDisplacement` = el tramo contiene ≥1 vela **displacement** (§4.1, rango ≥1.5×ATR + cuerpo ≥70%).
+- `breakAligned` = el tramo produce un **BOS** (§1.3) **alineado con el sesgo dominante** (continuación) **o** un **MSS** (§1.5, CHoCH+displacement que VOLTEA el sesgo con convicción).
+- **IMPULSIVO (`dir` = dirección del tramo)** si `hasDisplacement` **Y** `breakAligned`. Es la expansión institucional que extiende (o voltea con MSS) la estructura.
+- **CORRECTIVO** en caso contrario: el retroceso **contra-sesgo** entre impulsos. Puede tener una vela fuerte aislada e incluso un micro-BOS interno **contra** la tendencia, pero **no** rompe la estructura dominante en su favor → solapado, retrocede una fracción fib (alimenta el OTE/GP, §2.5).
+
+**Parámetros default.** Ninguno propio: hereda de **Displacement** (§4.1: `dispFactor 1.5` / `bodyPct 0.70`) y de **Estructura** (§1.3/§1.4/§1.5: `swingLen`, `majorLen`, MSS). La distinción es cualitativa (ruptura alineada + fuerza), no un umbral nuevo.
+
+**Contraejemplo.** Un retroceso al alza dentro de una tendencia **bajista** dominante que avanza solapado e incluso imprime **una** vela fuerte: es **correctivo** aunque el precio "suba" y haga un higher-high menor — porque no rompe la estructura dominante a la baja en su favor (va en contra). Clasificarlo impulsivo mediría OTE sobre una pierna sin significado institucional (mismo error que §2.5).
+
+**Casos de prueba** *(EURUSD; verificado sobre `scripts/ver05/eurusd_h1.csv`, la pasada TV MCP 2026-06-11; H1)*:
+- ✓ **Impulsivo:** la caída 2026-06-04→06-08 (high 1.16455 → low 1.14997) contiene displacement (06-05 12:00 rango 5.27×ATR cuerpo 97%, +2 más) y encadena **BOS bajistas alineados** (BOS− 06-05 12:00 @1.15866, 06-08 08:00 @1.15084) con el sesgo dominante bajista → impulsivo `dir −1` (la pierna sobre la que §2.5 mide OTE/GP). *(ER medido 0.28 — bajo: confirma que el ER no es el criterio.)*
+- ✓ **Correctivo:** el rally 2026-06-09→06-10 (retroceso al GP 1.15781, §2.5) es **contra el sesgo dominante bajista**; aunque imprime una vela fuerte (06-10 11:00, 1.67×ATR) e incluso micro-BOS+ internos, **no** rompe la estructura dominante bajista en su favor → correctivo. *(ER medido 0.13.)*
+- ✗ Contraejemplo: clasificar ese retroceso 06-09→06-10 como impulsivo por la única vela fuerte → es contra-sesgo y no rompe estructura dominante → correctivo; medir fib sobre él no tiene significado (§2.5).
+> *Nota de extracción:* se descartó un criterio por ER/magnitud (`erThreshold`/`impulseFactor`) tras medir el CSV real: el ER pivote-a-pivote no separa (impulso 0.28 < correcciones cortas 0.6–0.89). El discriminador adoptado (displacement + ruptura alineada con sesgo dominante) sí separa el ejemplo del contraejemplo. Sin umbrales propios → nada que congelar más allá de §4.1/§1.x (ADR-002).
+
+---
+
+> **DEFINICIONES DE reglas-smc-ict.md COMPLETAS** — Tier 1 Estructura (§1), Tier 2 Zonas (§2), Liquidez (§3), Contexto/ICT/EMAs (§4, incl. §4.4 Impulsive/Corrective). Cubren los 42 confluencias canónicas (§4.8 del workplan) — Impulsive/Corrective es **clasificador de estado**, no confluencia aditiva — y todas las funciones de PINE-PLAN §3.
 >
 > **Cierre DOC-01 (gate VER-05):**
 > 1. ✅ **Pasada TradingView MCP (2026-06-11, Sesion-008):** los 24 conceptos poblados con velas reales de EURUSD (fecha-hora GMT + precio). Datos: H1 25-may→11-jun (300 velas) + M5 10–11-jun (300 velas). Detección reproducible en `scripts/ver05/` (`detect.py`, `detect2.py`, `detect_m5.py` sobre `eurusd_h1.csv`/`eurusd_m5.csv`). Notas de escasez documentadas in-situ (MSS swing ×1, Judas ×1, breaker retest) — coherentes con la rareza de esos eventos; se ampliarán con más sesiones M5 en Fase 1.

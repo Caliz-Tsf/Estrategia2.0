@@ -51,6 +51,8 @@ i_emaMid          = input.int(50,     "EMA media",  minval = 1, group = GRP_CTX)
 i_emaSlow         = input.int(200,    "EMA lenta",  minval = 1, group = GRP_CTX)
 i_emaCrossBars    = input.int(20,     "EMA: antiguedad max cruce (velas) §4.3 #40", minval = 1, group = GRP_CTX)
 i_showEmaBounce   = input.bool(true,  "Marcar rebotes en EMA (#41)", group = GRP_CTX)
+i_showLegs        = input.bool(true,  "Marcar tramos Impulsivo/Correctivo (§4.4)", group = GRP_CTX)
+i_maxShowLegs     = input.int(20,     "Max marcadores de tramo (recientes)", minval = 1, group = GRP_CTX)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
@@ -129,6 +131,8 @@ KIND_FLIP         = 30
 KIND_FALSEBREAK   = 31
 KIND_SPRING       = 32
 KIND_RAID         = 33
+KIND_IMPULSIVE    = 34
+KIND_CORRECTIVE   = 35
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -770,6 +774,25 @@ f_classifySweep(array<SMC_Pool> pools, float swLevel, int swDir, int swBarIdx, f
     bool isRaid   = touches >= raidTouches
     bool isSpring = swDir == DIR_BULL and not na(rangeLow) and math.abs(swLevel - rangeLow) <= tol
     isRaid ? KIND_RAID : isSpring ? KIND_SPRING : KIND_SWEEP
+
+// --- Impulsive / Corrective [reglas-smc-ict §4.4] · T25 ---
+// f_classifyLeg: CLASIFICADOR DE ESTADO (no confluencia aditiva, §4.4). El discriminador NO es tamaño ni
+// eficiencia (el ER pivote-a-pivote no separa: verificado contra datos reales), sino ROMPER ESTRUCTURA
+// CON FUERZA ALINEADA AL SESGO DOMINANTE. Se evalua cuando confirma una ruptura: IMPULSIVO si hay
+// displacement en el tramo (legHadDisp) Y la ruptura es un BOS ALINEADO con el sesgo dominante
+// (continuacion) O un MSS (§1.5, voltea con conviccion). CORRECTIVO en caso contrario (retroceso
+// contra-sesgo: puede tener una vela fuerte aislada o micro-BOS interno, pero no rompe la estructura
+// dominante a su favor). PURA: recibe los eventos ya detectados + el sesgo dominante + el flag de
+// displacement del tramo (lo mantiene el consumidor). Devuelve KIND_IMPULSIVE / KIND_CORRECTIVE / 0
+// (sin ruptura este barra). El consumidor toma dir/price del MSS (si hay) o del evento de estructura.
+f_classifyLeg(SMC_Event structEv, SMC_Event mssEv, int dominantBias, bool legHadDisp) =>
+    int k = 0
+    if not na(mssEv)
+        k := KIND_IMPULSIVE
+    else if not na(structEv)
+        bool aligned = structEv.kind == KIND_BOS and structEv.dir == dominantBias and legHadDisp
+        k := aligned ? KIND_IMPULSIVE : KIND_CORRECTIVE
+    k
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1550,6 +1573,27 @@ if barstate.isconfirmed
     if not na(evIDM)
         f_pushEvent(SMC_idm, evIDM, MAX_EVENTS)
 
+// --- Impulsive / Corrective [§4.4] · T25 ---
+// Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
+// hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
+// antes de clasificar); f_classifyLeg decide IMPULSIVO (displacement + BOS alineado al sesgo dominante
+// o MSS) vs CORRECTIVO. Se ancla en la ruptura (dir/price del MSS si lo hay, si no del evento swing).
+// Va a SMC_legs -> queda registrado QUE paso y DONDE (pref. usuario) para analisis/scoring Fase 3.
+var array<SMC_Event> SMC_legs = array.new<SMC_Event>()
+var bool legHadDisp = false
+SMC_Event evLeg = na
+if barstate.isconfirmed
+    if not na(evDisp)
+        legHadDisp := true
+    if not na(evStructSwing) or not na(evMSS)
+        int legKind = f_classifyLeg(evStructSwing, evMSS, structMajor.bias, legHadDisp)
+        if legKind != 0
+            int   legDir = not na(evMSS) ? evMSS.dir : evStructSwing.dir
+            float legPx  = not na(evMSS) ? evMSS.price : evStructSwing.price
+            evLeg := SMC_Event.new(legPx, legDir, bar_index, time, "", legKind)
+            f_pushEvent(SMC_legs, evLeg, MAX_EVENTS)
+        legHadDisp := false
+
 // --- Equal Highs / Equal Lows [T08] ---
 // Pivotes a escala PROPIA eqlLength (3) — no los swing(5)/major(50). Mismo guard anti-
 // repaint (el pivote pertenece a t = bar_index - i_eqlLength). El pivote recien confirmado
@@ -2095,6 +2139,27 @@ if i_showFalseBreak and barstate.islast
             bool bullFB = fbe.dir == DIR_BULL
             string fbtxt = bullFB ? "FB ↑" : "FB ↓"
             array.push(SMC_fbLabels, label.new(fbe.barTime, fbe.price, fbtxt, style = bullFB ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(220,80,200), 70), textcolor = color.rgb(220,80,200), size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de tramo Impulsivo/Correctivo [T25 · §4.4]. Mismo patron repintado-en-islast (acotado a
+// i_maxShowLegs). IMP = expansion (displacement + ruptura alineada/MSS) -> verde/rojo segun dir, fuerte;
+// CORR = retroceso contra-sesgo -> gris tenue. Anclado a la barra de la ruptura. Desplazado ~5 barras a
+// la derecha (legOffMs) + style_label_left -> no tapa la vela. Registra QUE/DONDE paso (pref. usuario).
+var array<label> SMC_legLabels = array.new<label>()
+if i_showLegs and barstate.islast
+    for lb in SMC_legLabels
+        label.delete(lb)
+    array.clear(SMC_legLabels)
+    int nL = array.size(SMC_legs)
+    if nL > 0
+        int firstL = math.max(0, nL - i_maxShowLegs)
+        int legOffMs = 5 * (time - time[1])
+        for i = firstL to nL - 1
+            SMC_Event lg = array.get(SMC_legs, i)
+            bool impulsive = lg.kind == KIND_IMPULSIVE
+            bool bullLeg = lg.dir == DIR_BULL
+            color lcol = impulsive ? (bullLeg ? color.green : color.red) : color.gray
+            string ltxt = (impulsive ? "IMP " : "CORR ") + (bullLeg ? "↑" : "↓")
+            array.push(SMC_legLabels, label.new(lg.barTime + legOffMs, lg.price, ltxt, style = label.style_label_left, color = color.new(lcol, 75), textcolor = lcol, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
