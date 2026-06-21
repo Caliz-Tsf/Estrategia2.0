@@ -136,6 +136,10 @@ i_mtfCapEQ       = input.int(2, "Traspaso EQH/EQL por HTF (0-10, 0=off)", minval
 i_mtfCapBOS      = input.int(1, "Traspaso BOS por HTF (0-10, 0=off)",     minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapCHoCH    = input.int(1, "Traspaso CHoCH por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfSweepMark   = input.bool(true, "Sweep como marca triangulo (off=etiqueta)", group = GRP_MTF)
+i_smtEnable      = input.bool(false, "SMT: activar (par correlacionado) §5.13/ADR-011", group = GRP_MTF)
+i_smtSymbol      = input.symbol("GBPUSD", "SMT: símbolo correlacionado", group = GRP_MTF)
+i_smtInverse     = input.bool(false, "SMT: correlación inversa (DXY/USDCHF)", group = GRP_MTF)
+i_maxShowSMT     = input.int(20,     "Max marcadores de SMT (recientes)", minval = 1, group = GRP_MTF)
 
 // === LIBRARY CORE ===
 // ---------------------------------------------------------------------------
@@ -187,6 +191,7 @@ KIND_CISD = 48
 KIND_VACUUM = 49
 KIND_IPR  = 50
 KIND_INSIDEDAY = 51
+KIND_SMT  = 52
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -787,6 +792,44 @@ f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int barTim
     SMC_Event ev = na
     if not na(h1) and not na(h2) and h1 < h2 and l1 > l2
         ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
+    ev
+
+// --- SMT Divergence [reglas-smc-ict §5.13 · ADR-011] · T38 ---
+// f_smtPivots: devuelve los ULTIMOS DOS swing highs y lows (len-pivotes) del contexto donde se evalua.
+// Se llama via request.security al par correlacionado (ADR-011) -> trae sus pivotes; var por-contexto
+// (R-P3-1). Devuelve [shCur, shPrev, slCur, slPrev]. (No PURA: usa ta.pivot* + var, como f_computeTFState.)
+f_smtPivots(int len) =>
+    float ph = ta.pivothigh(len, len)
+    float pl = ta.pivotlow(len, len)
+    var float shCur  = na
+    var float shPrev = na
+    var float slCur  = na
+    var float slPrev = na
+    if not na(ph)
+        shPrev := shCur
+        shCur  := ph
+    if not na(pl)
+        slPrev := slCur
+        slCur  := pl
+    [shCur, shPrev, slCur, slPrev]
+
+// f_detectSMT: divergencia entre el chart y un simbolo CORRELACIONADO (ADR-011). Al confirmar el chart un
+// nuevo swing high: SMT BAJISTA si el chart hace HIGHER-HIGH pero el correlacionado NO lo confirma
+// (positiva: no hace HH; inversa: no hace LL). Simetrico en swing low -> SMT ALCISTA. inverse invierte el
+// extremo que debe confirmar el correlacionado (positiva GBPUSD = default ADR-011). PURA (recibe los
+// pivotes ya traidos). Devuelve SMC_Event KIND_SMT o na. Confluencia candidata #51 (calidad alta).
+f_detectSMT(bool chartNewSH, float chSHcur, float chSHprev, bool chartNewSL, float chSLcur, float chSLprev, float coSHcur, float coSHprev, float coSLcur, float coSLprev, bool inverse, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if chartNewSH and not na(chSHprev) and not na(coSHprev) and not na(coSLprev)
+        bool chartHH = chSHcur > chSHprev
+        bool corrConfirmsHigh = inverse ? (coSLcur < coSLprev) : (coSHcur > coSHprev)
+        if chartHH and not corrConfirmsHigh
+            ev := SMC_Event.new(chSHcur, DIR_BEAR, barIdx, barTime, "", KIND_SMT)
+    if na(ev) and chartNewSL and not na(chSLprev) and not na(coSHprev) and not na(coSLprev)
+        bool chartLL = chSLcur < chSLprev
+        bool corrConfirmsLow = inverse ? (coSHcur > coSHprev) : (coSLcur < coSLprev)
+        if chartLL and not corrConfirmsLow
+            ev := SMC_Event.new(chSLcur, DIR_BULL, barIdx, barTime, "", KIND_SMT)
     ev
 
 // --- Standard Deviation [reglas-smc-ict §5.11] · T36 ---
@@ -2140,6 +2183,31 @@ bgcolor(i_showMacros and curMacroActive ? color.new(curMacroKind == 3 ? color.gr
 bool curIsRTH = f_sessionType(nyMinNow, i_rthStart, i_rthEnd, i_rthEnable)
 bgcolor(i_rthEnable and not curIsRTH ? color.new(color.gray, 94) : na)
 
+// --- SMT Divergence [§5.13 · ADR-011] · T38 ---
+// 2o request.security al par CORRELACIONADO (default GBPUSD positiva, ADR-011) -> sus ultimos 2 swings via
+// f_smtPivots; si SMT off, security sobre si mismo (coste minimo, deteccion gateada). Pivotes del chart:
+// se rastrean los ultimos 2 swing highs/lows con var (reusa newSwingHigh/swingHigh). f_detectSMT compara
+// la divergencia al confirmar un swing del chart. lookahead_off (anti-repaint). Pobla SMC_smt.
+string smtTicker = i_smtEnable and i_smtSymbol != "" ? i_smtSymbol : syminfo.tickerid
+[smtCoSHcur, smtCoSHprev, smtCoSLcur, smtCoSLprev] = request.security(smtTicker, timeframe.period, f_smtPivots(i_swingLen), lookahead = barmerge.lookahead_off)
+var float smtChSHcur  = na
+var float smtChSHprev = na
+var float smtChSLcur  = na
+var float smtChSLprev = na
+var array<SMC_Event> SMC_smt = array.new<SMC_Event>()
+SMC_Event evSMT = na
+if barstate.isconfirmed
+    if newSwingHigh
+        smtChSHprev := smtChSHcur
+        smtChSHcur  := swingHigh
+    if newSwingLow
+        smtChSLprev := smtChSLcur
+        smtChSLcur  := swingLow
+    if i_smtEnable
+        evSMT := f_detectSMT(newSwingHigh, smtChSHcur, smtChSHprev, newSwingLow, smtChSLcur, smtChSLprev, smtCoSHcur, smtCoSHprev, smtCoSLcur, smtCoSLprev, i_smtInverse, bar_index, time)
+        if not na(evSMT)
+            f_pushEvent(SMC_smt, evSMT, MAX_EVENTS)
+
 // --- Judas Swing [§3.5] · T18 ---
 // Composicion sweep+displacement: sweep (§3.2) en 1a mitad de KZ + displacement (§4.1) en la direccion
 // real <= i_judasBars velas despues (confluencia #13). El detector es PURO; el sweep PENDIENTE vive aqui
@@ -2517,6 +2585,22 @@ if i_showCISD and barstate.islast
             bool bullC = ce.dir == DIR_BULL
             string ctxt = bullC ? "CISD ↑" : "CISD ↓"
             array.push(SMC_cisdLabels, label.new(ce.barTime, ce.price, ctxt, style = bullC ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(60, 190, 190), 65), textcolor = color.rgb(60, 190, 190), size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de SMT Divergence [T38 · §5.13]. Mismo patron repintado-en-islast (acotado a i_maxShowSMT).
+// Divergencia con el par correlacionado (senal de calidad alta). NARANJA fuerte, flecha por dir real.
+var array<label> SMC_smtLabels = array.new<label>()
+if i_smtEnable and barstate.islast
+    for lb in SMC_smtLabels
+        label.delete(lb)
+    array.clear(SMC_smtLabels)
+    int nS = array.size(SMC_smt)
+    if nS > 0
+        int firstS = math.max(0, nS - i_maxShowSMT)
+        for i = firstS to nS - 1
+            SMC_Event se = array.get(SMC_smt, i)
+            bool bullS = se.dir == DIR_BULL
+            string stxt = bullS ? "SMT ↑" : "SMT ↓"
+            array.push(SMC_smtLabels, label.new(se.barTime, se.price, stxt, style = bullS ? label.style_label_up : label.style_label_down, color = color.new(color.orange, 55), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de Judas [T18 · §3.5]. Mismo patron repintado-en-islast (acotado a i_maxShowJudas).
 // Fucsia: lo distingue del naranja (displacement), amarillo (IDM) y verde/rojo (sweep). La trampa de

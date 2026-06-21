@@ -46,6 +46,7 @@ export const int KIND_CISD = 48
 export const int KIND_VACUUM = 49
 export const int KIND_IPR  = 50
 export const int KIND_INSIDEDAY = 51
+export const int KIND_SMT  = 52
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -621,6 +622,41 @@ export f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int
     SMC_Event ev = na
     if not na(h1) and not na(h2) and h1 < h2 and l1 > l2
         ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
+    ev
+
+// --- SMT Divergence [reglas-smc-ict §5.13 · ADR-011] · T38 ---
+// f_smtPivots: ultimos dos swing highs/lows (len-pivotes) del contexto. Se llama via security al par
+// correlacionado (ADR-011); var por-contexto. Devuelve [shCur, shPrev, slCur, slPrev].
+export f_smtPivots(int len) =>
+    float ph = ta.pivothigh(len, len)
+    float pl = ta.pivotlow(len, len)
+    var float shCur  = na
+    var float shPrev = na
+    var float slCur  = na
+    var float slPrev = na
+    if not na(ph)
+        shPrev := shCur
+        shCur  := ph
+    if not na(pl)
+        slPrev := slCur
+        slCur  := pl
+    [shCur, shPrev, slCur, slPrev]
+
+// f_detectSMT: divergencia chart vs simbolo correlacionado (ADR-011). chart HH sin que el correlacionado
+// confirme -> SMT bajista; chart LL sin confirmar -> SMT alcista. inverse invierte el extremo que confirma
+// el correlacionado (positiva GBPUSD = default). PURA. Devuelve SMC_Event KIND_SMT o na. #51.
+export f_detectSMT(bool chartNewSH, float chSHcur, float chSHprev, bool chartNewSL, float chSLcur, float chSLprev, float coSHcur, float coSHprev, float coSLcur, float coSLprev, bool inverse, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if chartNewSH and not na(chSHprev) and not na(coSHprev) and not na(coSLprev)
+        bool chartHH = chSHcur > chSHprev
+        bool corrConfirmsHigh = inverse ? (coSLcur < coSLprev) : (coSHcur > coSHprev)
+        if chartHH and not corrConfirmsHigh
+            ev := SMC_Event.new(chSHcur, DIR_BEAR, barIdx, barTime, "", KIND_SMT)
+    if na(ev) and chartNewSL and not na(chSLprev) and not na(coSHprev) and not na(coSLprev)
+        bool chartLL = chSLcur < chSLprev
+        bool corrConfirmsLow = inverse ? (coSHcur > coSHprev) : (coSLcur < coSLprev)
+        if chartLL and not corrConfirmsLow
+            ev := SMC_Event.new(chSLcur, DIR_BULL, barIdx, barTime, "", KIND_SMT)
     ev
 
 // --- Standard Deviation [reglas-smc-ict §5.11] · T36 ---
