@@ -89,6 +89,7 @@ KIND_SPRING       = 32
 KIND_RAID         = 33
 KIND_IMPULSIVE    = 34
 KIND_CORRECTIVE   = 35
+KIND_EMASTACK     = 36
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -693,6 +694,12 @@ f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, in
     int s41 = bounceDir
     int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
     [s37, s38, s39, s40, s41, s42]
+
+// f_emaCrossDir: cruce de la media 'a' sobre 'b' en la barra actual, comparando valores confirmados vs
+// los de la barra previa (anti-repaint, no usa ta.crossover intrabar). +1 = a cruza ARRIBA de b; -1 =
+// a cruza ABAJO; 0 = sin cruce. PURA (§4.3, eventos de cruce marcados/contados). Reusable por par.
+f_emaCrossDir(float a, float aPrev, float b, float bPrev) =>
+    (not na(aPrev) and not na(bPrev) and aPrev <= bPrev and a > b) ? 1 : (not na(aPrev) and not na(bPrev) and aPrev >= bPrev and a < b) ? -1 : 0
 
 // --- False Breakout / Spring / Raid [reglas-smc-ict §3.7] · T24 ---
 // f_detectFalseBreak: a diferencia del sweep (solo mecha), el FALSE BREAKOUT es un CIERRE mas alla de un
@@ -1714,6 +1721,8 @@ if emaCD
     emaLastCrossBar := bar_index
 int emaRecentCrossDir = (not na(emaLastCrossBar) and (bar_index - emaLastCrossBar) <= i_emaCrossBars) ? emaLastCrossDir : 0
 var array<SMC_Event> SMC_emaBounces = array.new<SMC_Event>()
+var array<SMC_Event> SMC_emaCrosses = array.new<SMC_Event>()
+var array<SMC_Event> SMC_emaStacks  = array.new<SMC_Event>()
 var int emaAggr = 0
 if barstate.isconfirmed
     float emaBody = math.abs(close - open)
@@ -1730,6 +1739,19 @@ if barstate.isconfirmed
     emaAggr := es37 + es38 + es39 + es40 + es41 + es42
     if emaBounceDir != 0
         f_pushEvent(SMC_emaBounces, SMC_Event.new(emaBounceDir > 0 ? low : high, emaBounceDir, bar_index, time, "", KIND_EMABOUNCE), MAX_EVENTS)
+    int xc2050  = f_emaCrossDir(emaFast, emaFast[1], emaMid,  emaMid[1])
+    int xc50200 = f_emaCrossDir(emaMid,  emaMid[1],  emaSlow, emaSlow[1])
+    int xc20200 = f_emaCrossDir(emaFast, emaFast[1], emaSlow, emaSlow[1])
+    if xc2050 != 0
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaMid,  xc2050,  bar_index, time, "20x50",  KIND_EMACROSS), MAX_EVENTS)
+    if xc50200 != 0
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc50200, bar_index, time, "50x200", KIND_EMACROSS), MAX_EVENTS)
+    if xc20200 != 0
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc20200, bar_index, time, "20x200", KIND_EMACROSS), MAX_EVENTS)
+    int stackNow  = (emaFast > emaSlow and emaMid > emaSlow) ? 1 : (emaFast < emaSlow and emaMid < emaSlow) ? -1 : 0
+    int stackPrev = (emaFast[1] > emaSlow[1] and emaMid[1] > emaSlow[1]) ? 1 : (emaFast[1] < emaSlow[1] and emaMid[1] < emaSlow[1]) ? -1 : 0
+    if stackNow != 0 and stackNow != stackPrev
+        f_pushEvent(SMC_emaStacks, SMC_Event.new(emaSlow, stackNow, bar_index, time, "", KIND_EMASTACK), MAX_EVENTS)
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO

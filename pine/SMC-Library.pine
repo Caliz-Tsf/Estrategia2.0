@@ -54,6 +54,7 @@ export const int KIND_SPRING     = 32
 export const int KIND_RAID       = 33
 export const int KIND_IMPULSIVE  = 34
 export const int KIND_CORRECTIVE = 35
+export const int KIND_EMASTACK   = 36
 // Estados del ciclo de vida del Flip [§2.8 · T21]
 export const int LF_PENDING = 0
 export const int LF_FLIPPED = 1
@@ -613,6 +614,11 @@ export f_emaState(float c, float eFast, float eMid, float eSlow, int recentCross
     int s41 = bounceDir
     int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
     [s37, s38, s39, s40, s41, s42]
+
+// f_emaCrossDir: cruce de la media 'a' sobre 'b' (valores confirmados vs barra previa, anti-repaint).
+// +1 cruza arriba / -1 abajo / 0 sin cruce. PURA (§4.3, eventos de cruce marcados/contados).
+export f_emaCrossDir(float a, float aPrev, float b, float bPrev) =>
+    (not na(aPrev) and not na(bPrev) and aPrev <= bPrev and a > b) ? 1 : (not na(aPrev) and not na(bPrev) and aPrev >= bPrev and a < b) ? -1 : 0
 
 // --- False Breakout / Spring / Raid [reglas-smc-ict §3.7] · T24 ---
 // f_detectFalseBreak: CIERRE mas alla de un nivel que REVIERTE (cierra de vuelta) en <= fbBars velas

@@ -659,9 +659,12 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 - **#37 vs EMA200:** `close > EMA200` → +1 / `close < EMA200` → −1. **Una sola** confluencia direccional (no dos sumando al mismo score).
 - **#38 vs EMA50:** ídem con EMA50.
 - **#39 vs EMA20:** ídem con EMA20.
-- **#40 cruce reciente alineado:** un cruce de cualquier par (20×50, 50×200, 20×200) ocurrido en `≤ crossBars` velas (default 20) cuya dirección coincide con el sesgo. +peso al lado del cruce.
+- **#40 cruce reciente alineado:** un cruce de cualquier par (20×50, 50×200, 20×200) ocurrido en `≤ crossBars` velas (default 20) cuya dirección coincide con el sesgo. Es un **EVENTO discreto** (no un estado siempre-activo como #37–#39) → **SÍ cuenta como confluencia/voto** cuando ocurre junto a otros conceptos; no infla el score porque solo se activa puntualmente. +peso al lado del cruce.
 - **#41 rebote en EMA alineado:** el precio toca una EMA y cierra de vuelta con mecha (`mecha ≥ rejWickFactor × cuerpo`, §2.7) en la dirección de la tendencia.
 - **#42 3 EMAs alineadas:** `EMA20 > EMA50 > EMA200` (→ +1 fuerte) o `EMA20 < EMA50 < EMA200` (→ −1). Tendencia limpia.
+
+**Eventos de cruce — marca + registro (todos) y Stack Flip (régimen).** Refinamiento operativo: **cada cruce de par deja una seña en el gráfico y se almacena** (`KIND_EMACROSS`) para poder verlo y contabilizarlo cuando coincide con otros conceptos. Jerarquía de relevancia: `20×50` (frecuente, menor peso) < `50×200` / `20×200` (más raros, mayor peso).
+- **Stack Flip (cruce del grupo rápido sobre la lenta) — evento REFORZADO:** cuando **EMA20 *y* EMA50** quedan **ambas al mismo lado de la EMA200** habiendo estado al otro lado (transición de régimen; el *golden cross / death cross* clásico del grupo rápido contra la media de largo plazo). Es la **entrada** al estado de 3 EMAs alineadas (#42). Marca y registro propios (`KIND_EMASTACK`); `dir` = lado del flip (+1 ambas sobre la 200 / −1 ambas bajo). **Cuenta como confluencia de MAYOR convicción** (refuerza #40/#42); es el evento puntual del cambio de régimen, no un voto siempre-activo.
 
 **Parámetros default.**
 | Param | Default | Nota |
@@ -676,6 +679,9 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 - ✓ **#42** tres EMAs alineadas bajistas: 2026-06-08→06-11 de forma sostenida `EMA20 < EMA50 < EMA200`. Ej. 06-11 09:00 GMT → E20 1.15430 < E50 1.15461 < E200 1.15764 (→ −1 fuerte).
 - ✓ **#37** `close < EMA200` persistente durante toda la caída (06-08→06-11, close 1.153 vs E200 1.157–1.162).
 - ✓ **#40** sin cruce alcista reciente que contradiga el sesgo en ≤20 velas → confirma continuación bajista.
+- ✓ **Stack Flip BAJISTA** 2026-06-08 (medido sobre `eurusd_h1.csv`): EMA20 y EMA50 quedan ambas bajo la EMA200 tras la caída → cambio de régimen bajista; coincide con el inicio del tramo dominante a la baja (death cross), evento de alta convicción. *(También flip alcista 05-29 12:00 y flip bajista 06-02 20:00 en la ventana.)*
+- ✓ **Cruces de par marcados:** 20×50 frecuentes (p.ej. 06-04 15:00 +, 06-05 13:00 −) = menor peso; 50×200/20×200 más raros (06-02 17:00/20:00 −) = mayor peso. Todos dejan seña + registro.
+- ✗ Contraejemplo (stack flip): un cruce 20×50 aislado mientras ambas siguen del mismo lado de la EMA200 NO es stack flip (no cambia el régimen vs la 200) → es solo un cruce de par menor (#40), no el evento reforzado.
 - ✗ Contraejemplo `[FIX P-05]`: contar "close > EMA200" Y "close < EMA200" como dos confluencias separadas que suman al mismo score → una está SIEMPRE activa, +peso garantizado. Por eso #37–#39 son direccionales únicas.
 
 ---

@@ -51,6 +51,9 @@ i_emaMid          = input.int(50,     "EMA media",  minval = 1, group = GRP_CTX)
 i_emaSlow         = input.int(200,    "EMA lenta",  minval = 1, group = GRP_CTX)
 i_emaCrossBars    = input.int(20,     "EMA: antiguedad max cruce (velas) §4.3 #40", minval = 1, group = GRP_CTX)
 i_showEmaBounce   = input.bool(true,  "Marcar rebotes en EMA (#41)", group = GRP_CTX)
+i_showEmaCross    = input.bool(true,  "Marcar cruces de EMA (par, §4.3)", group = GRP_CTX)
+i_showEmaStack    = input.bool(true,  "Marcar Stack Flip 20&50 vs 200 (§4.3)", group = GRP_CTX)
+i_maxShowEmaX     = input.int(20,     "Max marcadores de cruce EMA (recientes)", minval = 1, group = GRP_CTX)
 i_showLegs        = input.bool(true,  "Marcar tramos Impulsivo/Correctivo (§4.4)", group = GRP_CTX)
 i_maxShowLegs     = input.int(20,     "Max marcadores de tramo (recientes)", minval = 1, group = GRP_CTX)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
@@ -133,6 +136,7 @@ KIND_SPRING       = 32
 KIND_RAID         = 33
 KIND_IMPULSIVE    = 34
 KIND_CORRECTIVE   = 35
+KIND_EMASTACK     = 36
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -737,6 +741,12 @@ f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, in
     int s41 = bounceDir
     int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
     [s37, s38, s39, s40, s41, s42]
+
+// f_emaCrossDir: cruce de la media 'a' sobre 'b' en la barra actual, comparando valores confirmados vs
+// los de la barra previa (anti-repaint, no usa ta.crossover intrabar). +1 = a cruza ARRIBA de b; -1 =
+// a cruza ABAJO; 0 = sin cruce. PURA (§4.3, eventos de cruce marcados/contados). Reusable por par.
+f_emaCrossDir(float a, float aPrev, float b, float bPrev) =>
+    (not na(aPrev) and not na(bPrev) and aPrev <= bPrev and a > b) ? 1 : (not na(aPrev) and not na(bPrev) and aPrev >= bPrev and a < b) ? -1 : 0
 
 // --- False Breakout / Spring / Raid [reglas-smc-ict §3.7] · T24 ---
 // f_detectFalseBreak: a diferencia del sweep (solo mecha), el FALSE BREAKOUT es un CIERRE mas alla de un
@@ -1808,6 +1818,8 @@ if emaCD
     emaLastCrossBar := bar_index
 int emaRecentCrossDir = (not na(emaLastCrossBar) and (bar_index - emaLastCrossBar) <= i_emaCrossBars) ? emaLastCrossDir : 0
 var array<SMC_Event> SMC_emaBounces = array.new<SMC_Event>()
+var array<SMC_Event> SMC_emaCrosses = array.new<SMC_Event>()
+var array<SMC_Event> SMC_emaStacks  = array.new<SMC_Event>()
 var int emaAggr = 0
 if barstate.isconfirmed
     float emaBody = math.abs(close - open)
@@ -1824,6 +1836,21 @@ if barstate.isconfirmed
     emaAggr := es37 + es38 + es39 + es40 + es41 + es42
     if emaBounceDir != 0
         f_pushEvent(SMC_emaBounces, SMC_Event.new(emaBounceDir > 0 ? low : high, emaBounceDir, bar_index, time, "", KIND_EMABOUNCE), MAX_EVENTS)
+    // Eventos de cruce por par [§4.3]: marca + registro (el par va en tf para el peso del scoring).
+    int xc2050  = f_emaCrossDir(emaFast, emaFast[1], emaMid,  emaMid[1])
+    int xc50200 = f_emaCrossDir(emaMid,  emaMid[1],  emaSlow, emaSlow[1])
+    int xc20200 = f_emaCrossDir(emaFast, emaFast[1], emaSlow, emaSlow[1])
+    if xc2050 != 0
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaMid,  xc2050,  bar_index, time, "20x50",  KIND_EMACROSS), MAX_EVENTS)
+    if xc50200 != 0
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc50200, bar_index, time, "50x200", KIND_EMACROSS), MAX_EVENTS)
+    if xc20200 != 0
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc20200, bar_index, time, "20x200", KIND_EMACROSS), MAX_EVENTS)
+    // Stack Flip [§4.3]: 20 y 50 al MISMO lado de la 200 con transicion de regimen (golden/death cross).
+    int stackNow  = (emaFast > emaSlow and emaMid > emaSlow) ? 1 : (emaFast < emaSlow and emaMid < emaSlow) ? -1 : 0
+    int stackPrev = (emaFast[1] > emaSlow[1] and emaMid[1] > emaSlow[1]) ? 1 : (emaFast[1] < emaSlow[1] and emaMid[1] < emaSlow[1]) ? -1 : 0
+    if stackNow != 0 and stackNow != stackPrev
+        f_pushEvent(SMC_emaStacks, SMC_Event.new(emaSlow, stackNow, bar_index, time, "", KIND_EMASTACK), MAX_EVENTS)
 
 // Plot de las 3 EMAs (global). i_showEMA conmuta via color na (plot no admite condicional directo).
 plot(i_showEMA ? emaFast : na, "EMA rapida", color = color.new(color.aqua,   0), linewidth = 1)
@@ -2122,6 +2149,39 @@ if i_showEmaBounce and barstate.islast
             bool bullBo = bo.dir == DIR_BULL
             string botxt = bullBo ? "↩ EMA ↑" : "↩ EMA ↓"
             array.push(SMC_emaBounceLabels, label.new(bo.barTime, bo.price, botxt, style = bullBo ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(90,160,255), 70), textcolor = color.rgb(90,160,255), size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de cruce de EMA por par [T23 · §4.3]. Punto pequeno con la etiqueta del par (la dir va en
+// color: ↑ azul claro / ↓ gris-azul). Todos los cruces dejan seña para verlos y contabilizarlos.
+var array<label> SMC_emaCrossLabels = array.new<label>()
+if i_showEmaCross and barstate.islast
+    for lb in SMC_emaCrossLabels
+        label.delete(lb)
+    array.clear(SMC_emaCrossLabels)
+    int nX = array.size(SMC_emaCrosses)
+    if nX > 0
+        int firstX = math.max(0, nX - i_maxShowEmaX)
+        for i = firstX to nX - 1
+            SMC_Event xe = array.get(SMC_emaCrosses, i)
+            bool bx = xe.dir == DIR_BULL
+            color xcol = bx ? color.new(color.rgb(120,180,255), 55) : color.new(color.rgb(130,140,170), 55)
+            array.push(SMC_emaCrossLabels, label.new(xe.barTime, xe.price, "× " + xe.tf, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = xcol, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de Stack Flip [T23 · §4.3]. Evento de cambio de regimen (20 y 50 cruzan la 200): seña
+// reforzada. Verde (alcista) / rojo (bajista), recuadro visible para distinguirlo del cruce de par.
+var array<label> SMC_emaStackLabels = array.new<label>()
+if i_showEmaStack and barstate.islast
+    for lb in SMC_emaStackLabels
+        label.delete(lb)
+    array.clear(SMC_emaStackLabels)
+    int nS = array.size(SMC_emaStacks)
+    if nS > 0
+        int firstS = math.max(0, nS - i_maxShowEmaX)
+        for i = firstS to nS - 1
+            SMC_Event se = array.get(SMC_emaStacks, i)
+            bool bs = se.dir == DIR_BULL
+            color scol2 = bs ? color.green : color.red
+            string stxt2 = bs ? "⊗ Stack ↑" : "⊗ Stack ↓"
+            array.push(SMC_emaStackLabels, label.new(se.barTime, se.price, stxt2, style = bs ? label.style_label_up : label.style_label_down, color = color.new(scol2, 60), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de False Breakout [T24 · §3.7 #14]. Mismo patron repintado-en-islast (acotado a i_maxShowFB).
 // La direccion es la REVERSION (la real): FB alcista (rompio abajo y volvio) marca abajo; bajista marca
