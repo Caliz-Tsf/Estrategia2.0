@@ -589,6 +589,19 @@ export f_expireOTE(SMC_Zone z, bool superseded) =>
         z.state := ZS_INVALID
     z
 
+// --- EMAs — estado / cruces / rebotes / alineacion [reglas-smc-ict §4.3] · T23 ---
+// f_emaState: 6 confluencias direccionales #37-#42 (colapsadas de 15 por [FIX P-05]). #37 close vs lenta,
+// #38 vs media, #39 vs rapida (direccionales UNICAS); #40 cruce reciente (precomputado); #41 rebote en
+// EMA (precomputado); #42 tres EMAs alineadas. PURA (ADR-002). Devuelve [s37..s42] en {-1,0,+1}.
+export f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, int bounceDir) =>
+    int s37 = na(eSlow) ? 0 : c > eSlow ? 1 : c < eSlow ? -1 : 0
+    int s38 = na(eMid)  ? 0 : c > eMid  ? 1 : c < eMid  ? -1 : 0
+    int s39 = na(eFast) ? 0 : c > eFast ? 1 : c < eFast ? -1 : 0
+    int s40 = recentCrossDir
+    int s41 = bounceDir
+    int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
+    [s37, s38, s39, s40, s41, s42]
+
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Dealing range basado en trailing extremes de LuxAlgo (trailingExtremes :181,
 // updateTrailingExtremes :709-713; v5->v6). El rango [bottom, top] se ANCLA al ultimo

@@ -40,6 +40,10 @@ i_rejTouchTol   = input.float(0.1, "Rejection: tolerancia toque nivel (x ATR14)"
 i_oteR1 = input.float(0.50,  "OTE fib inicio GP (50%)", minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_SCORE)
 i_oteR2 = input.float(0.618, "OTE fib GP/OTE (61.8%)",  minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_SCORE)
 i_oteR3 = input.float(0.79,  "OTE fib fin OTE (79%)",   minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_SCORE)
+i_emaFast      = input.int(20,  "EMA rapida", minval = 1, group = GRP_SCORE)
+i_emaMid       = input.int(50,  "EMA media",  minval = 1, group = GRP_SCORE)
+i_emaSlow      = input.int(200, "EMA lenta",  minval = 1, group = GRP_SCORE)
+i_emaCrossBars = input.int(20,  "EMA: antiguedad max cruce (velas) §4.3 #40", minval = 1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -659,6 +663,24 @@ f_expireOTE(SMC_Zone z, bool superseded) =>
     if z.state != ZS_INVALID and superseded
         z.state := ZS_INVALID
     z
+
+// --- EMAs — estado / cruces / rebotes / alineacion [reglas-smc-ict §4.3] · T23 ---
+// f_emaState: confirmacion de TENDENCIA por EMAs rapida/media/lenta (confirman, no lideran -> peso base
+// bajo, Fase 3). 6 confluencias DIRECCIONALES #37-#42, colapsadas de 15 por [FIX P-05] anti-doble-conteo:
+// #37-#39 son direccionales UNICAS (+1/-1/0), nunca suman dos al mismo score. #37 close vs EMA lenta,
+// #38 vs media, #39 vs rapida; #40 cruce reciente alineado (recentCrossDir, lo precomputa el consumidor
+// con crossBars); #41 rebote en EMA (bounceDir, mecha >= rejWickFactor*cuerpo en direccion de tendencia,
+// precomputado); #42 tres EMAs alineadas (rapida>media>lenta -> +1 / rapida<media<lenta -> -1). PURA
+// (las instantaneas salen de close+emas; las dos con historia/geometria llegan precomputadas) ->
+// portable a golden tests (ADR-002). Devuelve [s37, s38, s39, s40, s41, s42] cada uno en {-1, 0, +1}.
+f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, int bounceDir) =>
+    int s37 = na(eSlow) ? 0 : c > eSlow ? 1 : c < eSlow ? -1 : 0
+    int s38 = na(eMid)  ? 0 : c > eMid  ? 1 : c < eMid  ? -1 : 0
+    int s39 = na(eFast) ? 0 : c > eFast ? 1 : c < eFast ? -1 : 0
+    int s40 = recentCrossDir
+    int s41 = bounceDir
+    int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
+    [s37, s38, s39, s40, s41, s42]
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1509,15 +1531,16 @@ if barstate.isconfirmed
 // Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_rejections para el scoring,
 // Sprint 2.1, confluencia #23). Geometria pura f_detectRejection + ancla f_wickNearLevel sobre zonas/
 // pools/EQHL/PD/EMAs. tol = i_rejTouchTol*ATR14. EMAs ta.ema cada barra (fuera del if).
-float rejEma20  = ta.ema(close, 20)
-float rejEma50  = ta.ema(close, 50)
-float rejEma200 = ta.ema(close, 200)
+// EMAs del chart [T23 · §4.3], periodos configurables, compartidas (rejection + estado EMA). RE-safe.
+float emaFast = ta.ema(close, i_emaFast)
+float emaMid  = ta.ema(close, i_emaMid)
+float emaSlow = ta.ema(close, i_emaSlow)
 var array<SMC_Event> SMC_rejections = array.new<SMC_Event>()
 SMC_Event evRej = na
 if barstate.isconfirmed
     float rejTol = i_rejTouchTol * atr14
-    bool rejNearLow  = f_wickNearLevel(low,  SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, rejEma20, rejEma50, rejEma200, rejTol)
-    bool rejNearHigh = f_wickNearLevel(high, SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, rejEma20, rejEma50, rejEma200, rejTol)
+    bool rejNearLow  = f_wickNearLevel(low,  SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, emaFast, emaMid, emaSlow, rejTol)
+    bool rejNearHigh = f_wickNearLevel(high, SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, emaFast, emaMid, emaSlow, rejTol)
     evRej := f_detectRejection(open, high, low, close, i_rejWickFactor, rejNearLow, rejNearHigh, bar_index, time)
     if not na(evRej)
         f_pushEvent(SMC_rejections, evRej, MAX_EVENTS)
@@ -1545,6 +1568,47 @@ if barstate.isconfirmed
         array.push(SMC_flips, SMC_Flip.new(evStructSwing.price, evStructSwing.dir, LF_PENDING, bar_index, time))
     while array.size(SMC_flips) > MAX_FLIPS
         array.remove(SMC_flips, 0)
+
+// --- EMAs estado / cruces / rebotes [§4.3] · T23 ---
+// Mismo wiring que Visual pero SIN dibujo (la Strategy solo computa el estado EMA para el scoring,
+// Sprint 2.1). #40 cruce reciente (ta.crossover/under, fuera del if); #41 rebote (mecha en EMA en
+// direccion de tendencia); f_emaState empaqueta #37-#42; emaAggr = suma direccional para el scoring.
+// ta.crossover/under SIEMPRE a variable propia (cada barra): dentro de un 'or' el cortocircuito puede
+// saltarse llamadas con historia -> calculo inconsistente (warning Pine). Se combinan despues.
+bool emaCu1 = ta.crossover(emaFast, emaMid)
+bool emaCu2 = ta.crossover(emaMid, emaSlow)
+bool emaCu3 = ta.crossover(emaFast, emaSlow)
+bool emaCd1 = ta.crossunder(emaFast, emaMid)
+bool emaCd2 = ta.crossunder(emaMid, emaSlow)
+bool emaCd3 = ta.crossunder(emaFast, emaSlow)
+bool emaCU = emaCu1 or emaCu2 or emaCu3
+bool emaCD = emaCd1 or emaCd2 or emaCd3
+var int emaLastCrossDir = 0
+var int emaLastCrossBar = na
+if emaCU
+    emaLastCrossDir := 1
+    emaLastCrossBar := bar_index
+if emaCD
+    emaLastCrossDir := -1
+    emaLastCrossBar := bar_index
+int emaRecentCrossDir = (not na(emaLastCrossBar) and (bar_index - emaLastCrossBar) <= i_emaCrossBars) ? emaLastCrossDir : 0
+var array<SMC_Event> SMC_emaBounces = array.new<SMC_Event>()
+var int emaAggr = 0
+if barstate.isconfirmed
+    float emaBody = math.abs(close - open)
+    float emaLW   = math.min(open, close) - low
+    float emaUW   = high - math.max(open, close)
+    bool touchLowEma  = (low <= emaFast and close > emaFast) or (low <= emaMid and close > emaMid) or (low <= emaSlow and close > emaSlow)
+    bool touchHighEma = (high >= emaFast and close < emaFast) or (high >= emaMid and close < emaMid) or (high >= emaSlow and close < emaSlow)
+    int emaBounceDir = 0
+    if emaLW >= i_rejWickFactor * emaBody and touchLowEma and close > emaSlow
+        emaBounceDir := 1
+    else if emaUW >= i_rejWickFactor * emaBody and touchHighEma and close < emaSlow
+        emaBounceDir := -1
+    [es37, es38, es39, es40, es41, es42] = f_emaState(close, emaFast, emaMid, emaSlow, emaRecentCrossDir, emaBounceDir)
+    emaAggr := es37 + es38 + es39 + es40 + es41 + es42
+    if emaBounceDir != 0
+        f_pushEvent(SMC_emaBounces, SMC_Event.new(emaBounceDir > 0 ? low : high, emaBounceDir, bar_index, time, "", KIND_EMABOUNCE), MAX_EVENTS)
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO

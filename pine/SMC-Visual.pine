@@ -45,6 +45,12 @@ i_showRej         = input.bool(true,  "Mostrar Rejections (rechazo en nivel)", g
 i_rejWickFactor   = input.float(2.0,  "Rejection: mecha minima (x cuerpo) §2.7", minval = 0.5, step = 0.1, group = GRP_CTX)
 i_rejTouchTol     = input.float(0.1,  "Rejection: tolerancia toque nivel (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_CTX)
 i_maxShowRej      = input.int(20,     "Max marcadores de rejection (recientes)", minval = 1, group = GRP_CTX)
+i_showEMA         = input.bool(true,  "Mostrar EMAs (20/50/200)", group = GRP_CTX)
+i_emaFast         = input.int(20,     "EMA rapida", minval = 1, group = GRP_CTX)
+i_emaMid          = input.int(50,     "EMA media",  minval = 1, group = GRP_CTX)
+i_emaSlow         = input.int(200,    "EMA lenta",  minval = 1, group = GRP_CTX)
+i_emaCrossBars    = input.int(20,     "EMA: antiguedad max cruce (velas) §4.3 #40", minval = 1, group = GRP_CTX)
+i_showEmaBounce   = input.bool(true,  "Marcar rebotes en EMA (#41)", group = GRP_CTX)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
@@ -697,6 +703,24 @@ f_expireOTE(SMC_Zone z, bool superseded) =>
     if z.state != ZS_INVALID and superseded
         z.state := ZS_INVALID
     z
+
+// --- EMAs — estado / cruces / rebotes / alineacion [reglas-smc-ict §4.3] · T23 ---
+// f_emaState: confirmacion de TENDENCIA por EMAs rapida/media/lenta (confirman, no lideran -> peso base
+// bajo, Fase 3). 6 confluencias DIRECCIONALES #37-#42, colapsadas de 15 por [FIX P-05] anti-doble-conteo:
+// #37-#39 son direccionales UNICAS (+1/-1/0), nunca suman dos al mismo score. #37 close vs EMA lenta,
+// #38 vs media, #39 vs rapida; #40 cruce reciente alineado (recentCrossDir, lo precomputa el consumidor
+// con crossBars); #41 rebote en EMA (bounceDir, mecha >= rejWickFactor*cuerpo en direccion de tendencia,
+// precomputado); #42 tres EMAs alineadas (rapida>media>lenta -> +1 / rapida<media<lenta -> -1). PURA
+// (las instantaneas salen de close+emas; las dos con historia/geometria llegan precomputadas) ->
+// portable a golden tests (ADR-002). Devuelve [s37, s38, s39, s40, s41, s42] cada uno en {-1, 0, +1}.
+f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, int bounceDir) =>
+    int s37 = na(eSlow) ? 0 : c > eSlow ? 1 : c < eSlow ? -1 : 0
+    int s38 = na(eMid)  ? 0 : c > eMid  ? 1 : c < eMid  ? -1 : 0
+    int s39 = na(eFast) ? 0 : c > eFast ? 1 : c < eFast ? -1 : 0
+    int s40 = recentCrossDir
+    int s41 = bounceDir
+    int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
+    [s37, s38, s39, s40, s41, s42]
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1590,15 +1614,17 @@ if barstate.isconfirmed
 // (SMC_zones OB/FVG/Breaker), pools vivos (SMC_pools), EQH/EQL (SMC_eqhl), bordes P/D (chartState) y
 // EMAs del chart. tol = i_rejTouchTol*ATR14. EMAs ta.ema CADA barra (fuera del if, RE-safe). Va a su
 // array dedicado SMC_rejections (confluencia #23, scoring Fase 3).
-float rejEma20  = ta.ema(close, 20)
-float rejEma50  = ta.ema(close, 50)
-float rejEma200 = ta.ema(close, 200)
+// EMAs del chart [T23 · §4.3], periodos configurables. ta.ema CADA barra (fuera del if, RE-safe).
+// Compartidas: las consume la Rejection (ancla a nivel), el estado EMA #37-#42 y el panel.
+float emaFast = ta.ema(close, i_emaFast)
+float emaMid  = ta.ema(close, i_emaMid)
+float emaSlow = ta.ema(close, i_emaSlow)
 var array<SMC_Event> SMC_rejections = array.new<SMC_Event>()
 SMC_Event evRej = na
 if barstate.isconfirmed
     float rejTol = i_rejTouchTol * atr14
-    bool rejNearLow  = f_wickNearLevel(low,  SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, rejEma20, rejEma50, rejEma200, rejTol)
-    bool rejNearHigh = f_wickNearLevel(high, SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, rejEma20, rejEma50, rejEma200, rejTol)
+    bool rejNearLow  = f_wickNearLevel(low,  SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, emaFast, emaMid, emaSlow, rejTol)
+    bool rejNearHigh = f_wickNearLevel(high, SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, emaFast, emaMid, emaSlow, rejTol)
     evRej := f_detectRejection(open, high, low, close, i_rejWickFactor, rejNearLow, rejNearHigh, bar_index, time)
     if not na(evRej)
         f_pushEvent(SMC_rejections, evRej, MAX_EVENTS)
@@ -1627,6 +1653,54 @@ if barstate.isconfirmed
         array.push(SMC_flips, SMC_Flip.new(evStructSwing.price, evStructSwing.dir, LF_PENDING, bar_index, time))
     while array.size(SMC_flips) > MAX_FLIPS
         array.remove(SMC_flips, 0)
+
+// --- EMAs estado / cruces / rebotes [§4.3] · T23 ---
+// #40 cruce reciente: ta.crossover/under de cualquier par (cada barra, fuera del if) -> recuerda el
+// ultimo cruce y su direccion; aporta si ocurrio en <= i_emaCrossBars velas. #41 rebote: la mecha toca
+// una EMA y cierra de vuelta (>= rejWickFactor*cuerpo) en la direccion de la tendencia (close vs lenta).
+// f_emaState empaqueta #37-#42; emaAggr (suma direccional) queda para el scoring Fase 3 / panel. Rebote
+// emite KIND_EMABOUNCE a SMC_emaBounces (marcador #41).
+// ta.crossover/under SIEMPRE a variable propia (cada barra): dentro de un 'or' el cortocircuito puede
+// saltarse llamadas con historia -> calculo inconsistente (warning Pine). Se combinan despues.
+bool emaCu1 = ta.crossover(emaFast, emaMid)
+bool emaCu2 = ta.crossover(emaMid, emaSlow)
+bool emaCu3 = ta.crossover(emaFast, emaSlow)
+bool emaCd1 = ta.crossunder(emaFast, emaMid)
+bool emaCd2 = ta.crossunder(emaMid, emaSlow)
+bool emaCd3 = ta.crossunder(emaFast, emaSlow)
+bool emaCU = emaCu1 or emaCu2 or emaCu3
+bool emaCD = emaCd1 or emaCd2 or emaCd3
+var int emaLastCrossDir = 0
+var int emaLastCrossBar = na
+if emaCU
+    emaLastCrossDir := 1
+    emaLastCrossBar := bar_index
+if emaCD
+    emaLastCrossDir := -1
+    emaLastCrossBar := bar_index
+int emaRecentCrossDir = (not na(emaLastCrossBar) and (bar_index - emaLastCrossBar) <= i_emaCrossBars) ? emaLastCrossDir : 0
+var array<SMC_Event> SMC_emaBounces = array.new<SMC_Event>()
+var int emaAggr = 0
+if barstate.isconfirmed
+    float emaBody = math.abs(close - open)
+    float emaLW   = math.min(open, close) - low
+    float emaUW   = high - math.max(open, close)
+    bool touchLowEma  = (low <= emaFast and close > emaFast) or (low <= emaMid and close > emaMid) or (low <= emaSlow and close > emaSlow)
+    bool touchHighEma = (high >= emaFast and close < emaFast) or (high >= emaMid and close < emaMid) or (high >= emaSlow and close < emaSlow)
+    int emaBounceDir = 0
+    if emaLW >= i_rejWickFactor * emaBody and touchLowEma and close > emaSlow
+        emaBounceDir := 1
+    else if emaUW >= i_rejWickFactor * emaBody and touchHighEma and close < emaSlow
+        emaBounceDir := -1
+    [es37, es38, es39, es40, es41, es42] = f_emaState(close, emaFast, emaMid, emaSlow, emaRecentCrossDir, emaBounceDir)
+    emaAggr := es37 + es38 + es39 + es40 + es41 + es42
+    if emaBounceDir != 0
+        f_pushEvent(SMC_emaBounces, SMC_Event.new(emaBounceDir > 0 ? low : high, emaBounceDir, bar_index, time, "", KIND_EMABOUNCE), MAX_EVENTS)
+
+// Plot de las 3 EMAs (global). i_showEMA conmuta via color na (plot no admite condicional directo).
+plot(i_showEMA ? emaFast : na, "EMA rapida", color = color.new(color.aqua,   0), linewidth = 1)
+plot(i_showEMA ? emaMid  : na, "EMA media",  color = color.new(color.orange, 0), linewidth = 1)
+plot(i_showEMA ? emaSlow : na, "EMA lenta",  color = color.new(color.red,    0), linewidth = 2)
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
@@ -1900,6 +1974,23 @@ if i_showFlip and barstate.islast
             array.push(SMC_flipLines, line.new(fp.barTime, fp.price, fp.barTime + flipOffMs, fp.price, xloc = xloc.bar_time, color = fcol, style = line.style_solid, width = 1))
             string ftxt = bullFlip ? "FLIP ↑" : "FLIP ↓"
             array.push(SMC_flipLabels, label.new(fp.barTime + flipOffMs, fp.price, ftxt, style = label.style_label_left, color = color.new(color.silver, 80), textcolor = color.silver, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de rebote en EMA [T23 · §4.3 #41]. Mismo patron repintado-en-islast (acotado a
+// i_maxShowRej por reuso del cap de eventos puntuales). El precio toco una EMA y cerro de vuelta con
+// mecha en la direccion de la tendencia. Color AZUL claro, marca en la punta de la mecha.
+var array<label> SMC_emaBounceLabels = array.new<label>()
+if i_showEmaBounce and barstate.islast
+    for lb in SMC_emaBounceLabels
+        label.delete(lb)
+    array.clear(SMC_emaBounceLabels)
+    int nB = array.size(SMC_emaBounces)
+    if nB > 0
+        int firstB = math.max(0, nB - i_maxShowRej)
+        for i = firstB to nB - 1
+            SMC_Event bo = array.get(SMC_emaBounces, i)
+            bool bullBo = bo.dir == DIR_BULL
+            string botxt = bullBo ? "↩ EMA ↑" : "↩ EMA ↓"
+            array.push(SMC_emaBounceLabels, label.new(bo.barTime, bo.price, botxt, style = bullBo ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(90,160,255), 70), textcolor = color.rgb(90,160,255), size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
@@ -2268,10 +2359,11 @@ f_bufCountEQ(array<int> kinds) =>
                 n += 1
     n
 
-// EMAs del chart para el panel [T14]: ta.ema debe evaluarse CADA barra (no dentro del if islast).
-float m5Ema20  = ta.ema(close, 20)
-float m5Ema50  = ta.ema(close, 50)
-float m5Ema200 = ta.ema(close, 200)
+// EMAs del chart para el panel [T14]: reutiliza las EMAs compartidas computadas en T23 (emaFast/Mid/
+// Slow, periodos configurables) -> una sola ta.ema por periodo en todo el script.
+float m5Ema20  = emaFast
+float m5Ema50  = emaMid
+float m5Ema200 = emaSlow
 
 // === PANEL === [T14 · diseño PINE-PLAN §5 completo]
 // Tabla multi-columna: Concepto | D1 | H1 | M5/chart. D1/H1 salen de d1State/h1State (escalares
