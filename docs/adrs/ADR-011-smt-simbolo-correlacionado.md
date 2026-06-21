@@ -1,7 +1,7 @@
 # ADR-011 — SMT Divergence: símbolo correlacionado como input por perfil (no hardcode)
 
 - **Fecha:** 2026-06-21 (Sesion-047, Sprint 1.6 Fase 0)
-- **Estado:** **PROPUESTO** — pendiente del visto bueno de Freddy sobre el mapa de correlaciones. **Bloquea la codificación de T38** (`f_detectSMT`, §5.13 de reglas-smc-ict.md). El resto de Sprint 1.6 (T26–T37, T39, T40) NO depende de este ADR.
+- **Estado:** **ACEPTADO** (2026-06-21, Freddy) — **default elegido: EURUSD ↔ GBPUSD, correlación POSITIVA.** Preferencia explícita por pares **positivamente correlacionados** (no usar el inverso DXY como vía principal). Desbloquea T38 para su codificación cuando llegue su turno en Sprint 1.6 (tras la Fase 0 de reglas y la validación de Tier 2). El resto de Sprint 1.6 (T26–T37, T39, T40) nunca dependió de este ADR.
 - **Regla asociada:** `reglas-smc-ict.md` §5.13 (SMT Divergence, confluencia candidata #51).
 - **Relacionado:** ADR-001 (símbolo-agnóstico, sin hardcode) · ADR-009 (transporte MTF: buffer plano por `request.security`, sin UDT/array).
 
@@ -38,7 +38,7 @@ i_smtInverse = input.bool(false, "SMT: correlación inversa (DXY/USDCHF)")
 | GBPUSD | EURUSD | false | Espejo del anterior. |
 | USDJPY / USDCHF | DXY | false | Pares USD-base: correlación positiva con el índice dólar. |
 
-> Recomendación: **default EURUSD↔GBPUSD (positiva)** por disponibilidad universal y por ser el par SMT más enseñado; dejar DXY-inverso como opción configurable. **A confirmar por Freddy.**
+> **DECISIÓN (Freddy, 2026-06-21): default EURUSD↔GBPUSD (POSITIVA).** Disponibilidad universal + par SMT más enseñado + lectura intuitiva (ambos suben/bajan juntos). Preferencia general por **pares positivamente correlacionados** para los perfiles por símbolo. `i_smtInverse` permanece en el código como capacidad (coste cero), pero NO es la vía recomendada; DXY-inverso queda como opción secundaria de quien la necesite, no como default de ningún perfil.
 
 ### 2. Transporte: 2º `request.security` + buffer plano de pivotes (reusa el patrón ADR-009)
 
@@ -69,7 +69,8 @@ El EA se suscribe al 2º símbolo (`SymbolSelect` + `CopyRates`) y pasa sus pivo
 
 ## Checklist antes de codear T38
 
-- [ ] Freddy aprueba el mapa de correlaciones (¿default GBPUSD positiva, o DXY inversa?).
-- [ ] Confirmar ticker exacto del correlacionado en el feed del broker (formato `EXCHANGE:SYMBOL`).
+- [x] Freddy aprueba el mapa de correlaciones → **EURUSD↔GBPUSD, POSITIVA** (2026-06-21).
+- [x] Estado de este ADR → **Aceptado**.
+- [ ] Confirmar ticker exacto del correlacionado en el feed del broker (formato `EXCHANGE:SYMBOL`, p.ej. `OANDA:GBPUSD`) — al codear/validar T38.
 - [ ] Definir el N de pivotes a transportar (arranque: reusar `MTF_K`/criterio de ADR-009).
-- [ ] Estado de este ADR → **Aceptado** tras la aprobación.
+- [ ] Verificar SMT con datos de los 2 pares (pasada TV dedicada, no posible con el CSV de un solo símbolo).
