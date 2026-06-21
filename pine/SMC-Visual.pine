@@ -60,6 +60,7 @@ i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group 
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_showBreaker    = input.bool(true,  "Mostrar Breakers (OB invalidado, §2.6)", group = GRP_OB)
+i_showMB         = input.bool(true,  "Mostrar Mitigation Blocks (§2.8 #24)", group = GRP_OB)
 i_showOTE      = input.bool(true,  "Mostrar OTE / Golden Pocket",       group = GRP_OTE)
 i_oteR1        = input.float(0.50,  "Fib inicio GP (50%)",   minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR2        = input.float(0.618, "Fib GP/OTE (61.8%)",    minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
@@ -1485,6 +1486,7 @@ var array<int>   obBufTime = array.new<int>()
 var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
 float atr14      = ta.atr(14)
+var int lastSweepBar = na  // ultima barra con sweep -> gate del Mitigation Block (§2.8: "sin sweep previo")
 if barstate.isconfirmed
     array.push(obBufHigh, high)
     array.push(obBufLow,  low)
@@ -1518,6 +1520,18 @@ if barstate.isconfirmed
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
             f_pushZone(SMC_zones, obZone, MAX_ZONES)
+    // --- Mitigation Block [§2.8 #24] ---
+    // Ultima vela contraria antes de un impulso que rompe estructura INTERNA, SIN sweep previo de un pool
+    // (si hubo sweep -> es contexto de breaker/OB, no mitigation block, §2.8). Zona = high/low de esa vela:
+    // reusa f_detectOB sobre el evento INTERNO (mismo "ultima vela contraria"). Gate: ningun sweep entre el
+    // origen y la ruptura (lastSweepBar < mbOrigin). KIND_MITIGATION; ciclo de vida via la maquina comun.
+    if not na(evStructInt)
+        int mbOrigin = evStructInt.dir == DIR_BULL ? structInternal.highBarIdx : structInternal.lowBarIdx
+        bool mbNoSweep = na(lastSweepBar) or lastSweepBar < mbOrigin
+        if mbNoSweep
+            SMC_Zone mbZone = f_detectOB(evStructInt, mbOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_MITIGATION)
+            if not na(mbZone)
+                f_pushZone(SMC_zones, mbZone, MAX_ZONES)
     // --- Fair Value Gaps [T06] ---
     // FVG de 3 velas sobre el TF propio (sin request.security: el MTF es T13). Se
     // confirma al cierre de la 3.a vela (este barstate.isconfirmed); offsets fijos
@@ -1677,6 +1691,7 @@ if barstate.isconfirmed
         evSweep.kind := f_classifySweep(SMC_pools, evSweep.price, evSweep.dir, evSweep.barIdx, chartState.pdLow, i_raidTouches, i_poolTol * atr14)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
         evSweepAlert := evSweep
+        lastSweepBar := bar_index
     f_prunePools(SMC_pools, MAX_POOLS)
 
 // --- False Breakout [§3.7 #14] · T24 ---
@@ -2282,6 +2297,33 @@ if i_showBreaker and barstate.islast
                 color brkCol = z.dir == DIR_BULL ? color.rgb(150, 135, 240) : color.rgb(225, 130, 225)
                 string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
                 array.push(SMC_brkLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_index))
+
+// f_drawMB: caja del Mitigation Block [T-mb · §2.8] (solo Visual). Relleno de desequilibrio sin barrido.
+// AZUL ACERO, distinto del OB (verde/rojo), breaker (purpura) y OTE (dorado). Origen = vela del bloque;
+// se extiende a la derecha hasta la barra actual. Transparencia por estado; la invalidada no se dibuja.
+f_drawMB(SMC_Zone z) =>
+    col = z.dir == DIR_BULL ? color.rgb(70, 130, 180) : color.rgb(180, 100, 130)
+    int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
+    color bg = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(col, transp)
+    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = bg, border_color = color.new(col, 50), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
+
+// En la ultima barra limpia y repinta las cajas de mitigation block vivas (KIND_MITIGATION, no invalidadas).
+var array<box>   SMC_mbBoxes  = array.new<box>()
+var array<label> SMC_mbLabels = array.new<label>()
+if i_showMB and barstate.islast
+    for b in SMC_mbBoxes
+        box.delete(b)
+    for lb in SMC_mbLabels
+        label.delete(lb)
+    array.clear(SMC_mbBoxes)
+    array.clear(SMC_mbLabels)
+    if array.size(SMC_zones) > 0
+        for i = 0 to array.size(SMC_zones) - 1
+            SMC_Zone z = array.get(SMC_zones, i)
+            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID
+                array.push(SMC_mbBoxes, f_drawMB(z))
+                color mbCol = z.dir == DIR_BULL ? color.rgb(130, 180, 230) : color.rgb(230, 150, 180)
+                array.push(SMC_mbLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
 // vela media (z.barIdx-1, cf. LuxAlgo lastTime=time[1]) para cubrir el desplazamiento

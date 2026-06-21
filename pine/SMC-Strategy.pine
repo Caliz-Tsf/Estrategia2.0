@@ -1430,6 +1430,7 @@ var array<int>   obBufTime = array.new<int>()
 var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
 float atr14      = ta.atr(14)
+var int lastSweepBar = na  // ultima barra con sweep -> gate del Mitigation Block (§2.8: "sin sweep previo")
 if barstate.isconfirmed
     array.push(obBufHigh, high)
     array.push(obBufLow,  low)
@@ -1463,6 +1464,17 @@ if barstate.isconfirmed
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
             f_pushZone(SMC_zones, obZone, MAX_ZONES)
+    // --- Mitigation Block [§2.8 #24] ---
+    // Mismo wiring que Visual pero SIN dibujo. Ultima vela contraria antes de un impulso que rompe
+    // estructura INTERNA, SIN sweep previo (si hubo sweep -> contexto breaker/OB). Reusa f_detectOB sobre
+    // el evento interno. Gate: lastSweepBar < mbOrigin. KIND_MITIGATION; ciclo de vida via maquina comun.
+    if not na(evStructInt)
+        int mbOrigin = evStructInt.dir == DIR_BULL ? structInternal.highBarIdx : structInternal.lowBarIdx
+        bool mbNoSweep = na(lastSweepBar) or lastSweepBar < mbOrigin
+        if mbNoSweep
+            SMC_Zone mbZone = f_detectOB(evStructInt, mbOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_MITIGATION)
+            if not na(mbZone)
+                f_pushZone(SMC_zones, mbZone, MAX_ZONES)
     // --- Fair Value Gaps [T06] ---
     // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_zones
     // para el scoring (Sprint 2.1). FVG de 3 velas sobre el TF propio, confirmado al
@@ -1589,6 +1601,7 @@ if barstate.isconfirmed
         evSweep.kind := f_classifySweep(SMC_pools, evSweep.price, evSweep.dir, evSweep.barIdx, chartState.pdLow, i_raidTouches, i_poolTol * atr14)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
         evSweepAlert := evSweep
+        lastSweepBar := bar_index
     f_prunePools(SMC_pools, MAX_POOLS)
 
 // --- False Breakout [§3.7 #14] · T24 ---
