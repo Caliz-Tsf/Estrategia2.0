@@ -1227,6 +1227,9 @@ if barstate.isconfirmed and not na(eqPivotLow)
 // NO array.clear: el set persiste entre velas y recuerda swept (anti-saturacion). El orden
 // upsert -> mark respeta el esqueleto §3.A.3. tolPrice = i_poolTol*ATR14 (§3.1). El nº bruto de
 // pools (alto con los defaults 0.1/2) es ruido de calibracion Fase 3 (anti-overfitting, ADR-002).
+// evSweepAlert: espejo de scope externo del sweep de esta barra (evSweep es local al if) para
+// que la seccion ALERTAS [T15] pueda engancharlo via alertcondition() sin tocar el detector.
+SMC_Event evSweepAlert = na
 if barstate.isconfirmed
     if newSwingHigh
         f_upsertPool(SMC_pools, true,  swingHigh, 1, time[i_swingLen], bar_index - i_swingLen, i_poolTol * atr14)
@@ -1240,6 +1243,7 @@ if barstate.isconfirmed
     SMC_Event evSweep = f_detectSweep(SMC_pools, close, bar_index, time, i_minTouches)
     if not na(evSweep)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
+        evSweepAlert := evSweep
     f_prunePools(SMC_pools, MAX_POOLS)
 
 // --- Kill Zones / sesiones [§3.4 · ADR-001] · T11 ---
@@ -1862,5 +1866,94 @@ if i_showPanel and barstate.islast
         table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, kzCell, text_color = curKZ == KZ_NONE ? color.gray : color.aqua, text_size = tsz)
 
-// === ALERTAS ===
-// alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).
+// === ALERTAS === [F1-S1.4-T15 · PINE-PLAN §5 línea 213]
+// Cobertura SMC completa via alertcondition(). Cada concepto+dirección es su propia
+// condición porque alertcondition() exige mensaje CONSTANTE (no se puede inyectar la
+// dirección en runtime en una sola condición); por eso el set es paralelo a las 16 del
+// LuxAlgo base. Plantilla §5: "{{ticker}} | <concepto> <dir> @ {{close}} | TF={{interval}} | {{timenow}}"
+// ({{ticker}}/{{close}}/{{interval}}/{{timenow}} los resuelve TradingView al disparar).
+// ANTI-REPAINT [D-PINE-03]: todos los eventos enganchados se producen SOLO en barras
+// confirmadas (evStruct*/evMSS/evSweepAlert/evEq* son na fuera de barstate.isconfirmed);
+// las condiciones por estado (Kill Zone, entrada a zona, Premium/Discount) se cierran con
+// barstate.isconfirmed explícito. Sección 100% Visual — no toca el CORE.
+
+// --- Disparadores de estructura (chart-TF, escala swing) ---
+bool alBosBull   = not na(evStructSwing) and evStructSwing.kind == KIND_BOS   and evStructSwing.dir == DIR_BULL
+bool alBosBear   = not na(evStructSwing) and evStructSwing.kind == KIND_BOS   and evStructSwing.dir == DIR_BEAR
+bool alChochBull = not na(evStructSwing) and evStructSwing.kind == KIND_CHOCH and evStructSwing.dir == DIR_BULL
+bool alChochBear = not na(evStructSwing) and evStructSwing.kind == KIND_CHOCH and evStructSwing.dir == DIR_BEAR
+// Estructura interna (escala menor)
+bool alIntBull   = not na(evStructInt) and evStructInt.dir == DIR_BULL
+bool alIntBear   = not na(evStructInt) and evStructInt.dir == DIR_BEAR
+// Estructura DOMINANTE (50) [T07B]
+bool alMajBull   = not na(evStructMajor) and evStructMajor.dir == DIR_BULL
+bool alMajBear   = not na(evStructMajor) and evStructMajor.dir == DIR_BEAR
+// MSS confirmado [T12]
+bool alMssBull   = not na(evMSS) and evMSS.dir == DIR_BULL
+bool alMssBear   = not na(evMSS) and evMSS.dir == DIR_BEAR
+// Sweep / barrido de liquidez [T10] (dir = lado de la reversión esperada)
+bool alSweepBull = not na(evSweepAlert) and evSweepAlert.dir == DIR_BULL
+bool alSweepBear = not na(evSweepAlert) and evSweepAlert.dir == DIR_BEAR
+// Equal Highs / Equal Lows [T08]
+bool alEqh       = not na(evEqHigh)
+bool alEql       = not na(evEqLow)
+
+// --- Kill Zone recién abierta (transición NONE/otra -> sesión activa) [T11] ---
+bool alKzLondon = barstate.isconfirmed and curKZ == KZ_LONDON and curKZ[1] != KZ_LONDON
+bool alKzNY     = barstate.isconfirmed and curKZ == KZ_NY     and curKZ[1] != KZ_NY
+bool alKzTokyo  = barstate.isconfirmed and curKZ == KZ_TOKYO  and curKZ[1] != KZ_TOKYO
+
+// --- Precio entra a zona activa OB/FVG [T05/T06] ---
+// Detecta cruce de ENTRADA: el cierre cae dentro de [bottom,top] de una zona viva
+// (state < ZS_MITIGATED) habiendo estado fuera la barra previa. Se agrega por kind+dir.
+bool alEnterOBBull  = false
+bool alEnterOBBear  = false
+bool alEnterFVGBull = false
+bool alEnterFVGBear = false
+if barstate.isconfirmed and array.size(SMC_zones) > 0
+    for i = 0 to array.size(SMC_zones) - 1
+        SMC_Zone z = array.get(SMC_zones, i)
+        if z.state < ZS_MITIGATED
+            bool nowIn  = close <= z.top and close >= z.bottom
+            bool prevOut = close[1] > z.top or close[1] < z.bottom
+            if nowIn and prevOut
+                if z.kind == KIND_OB
+                    if z.dir == DIR_BULL
+                        alEnterOBBull := true
+                    else
+                        alEnterOBBear := true
+                else if z.kind == KIND_FVG
+                    if z.dir == DIR_BULL
+                        alEnterFVGBull := true
+                    else
+                        alEnterFVGBear := true
+
+// --- Premium / Discount: transición de zona del precio [T07] ---
+[alPdZone, alPdPct] = f_premiumDiscount(close, chartState.pdHigh, chartState.pdLow, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
+bool alEnterPremium  = barstate.isconfirmed and alPdZone == PD_PREMIUM  and alPdZone[1] != PD_PREMIUM
+bool alEnterDiscount = barstate.isconfirmed and alPdZone == PD_DISCOUNT and alPdZone[1] != PD_DISCOUNT
+
+// --- alertcondition() — set completo SMC ---
+alertcondition(alBosBull,      "BOS alcista",        "{{ticker}} | BOS alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alBosBear,      "BOS bajista",        "{{ticker}} | BOS bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alChochBull,    "CHoCH alcista",      "{{ticker}} | CHoCH alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alChochBear,    "CHoCH bajista",      "{{ticker}} | CHoCH bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alIntBull,      "Estructura interna alcista", "{{ticker}} | Estructura interna alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alIntBear,      "Estructura interna bajista", "{{ticker}} | Estructura interna bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alMajBull,      "Estructura dominante alcista", "{{ticker}} | Estructura dominante alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alMajBear,      "Estructura dominante bajista", "{{ticker}} | Estructura dominante bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alMssBull,      "MSS alcista",        "{{ticker}} | MSS alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alMssBear,      "MSS bajista",        "{{ticker}} | MSS bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alSweepBull,    "Sweep alcista",      "{{ticker}} | Sweep alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alSweepBear,    "Sweep bajista",      "{{ticker}} | Sweep bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEqh,          "Equal Highs (EQH)",  "{{ticker}} | EQH formado @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEql,          "Equal Lows (EQL)",   "{{ticker}} | EQL formado @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alKzLondon,     "Kill Zone London abierta", "{{ticker}} | Kill Zone London abierta @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alKzNY,         "Kill Zone NY abierta",     "{{ticker}} | Kill Zone NY abierta @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alKzTokyo,      "Kill Zone Tokyo abierta",  "{{ticker}} | Kill Zone Tokyo abierta @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEnterOBBull,  "Precio entra OB alcista",  "{{ticker}} | Precio entra OB alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEnterOBBear,  "Precio entra OB bajista",  "{{ticker}} | Precio entra OB bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEnterFVGBull, "Precio entra FVG alcista", "{{ticker}} | Precio entra FVG alcista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEnterFVGBear, "Precio entra FVG bajista", "{{ticker}} | Precio entra FVG bajista @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEnterPremium, "Precio entra Premium",     "{{ticker}} | Precio entra Premium @ {{close}} | TF={{interval}} | {{timenow}}")
+alertcondition(alEnterDiscount,"Precio entra Discount",    "{{ticker}} | Precio entra Discount @ {{close}} | TF={{interval}} | {{timenow}}")
