@@ -44,6 +44,8 @@ i_emaFast      = input.int(20,  "EMA rapida", minval = 1, group = GRP_SCORE)
 i_emaMid       = input.int(50,  "EMA media",  minval = 1, group = GRP_SCORE)
 i_emaSlow      = input.int(200, "EMA lenta",  minval = 1, group = GRP_SCORE)
 i_emaCrossBars = input.int(20,  "EMA: antiguedad max cruce (velas) §4.3 #40", minval = 1, group = GRP_SCORE)
+i_raidTouches  = input.int(3, "Raid: toques minimos del pool (§3.7 #16)", minval = 2, group = GRP_SCORE)
+i_fbBars       = input.int(2, "False Breakout: max velas para revertir (§3.7 #14)", minval = 1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -82,6 +84,9 @@ KIND_IDM          = 27
 KIND_EMACROSS     = 28
 KIND_EMABOUNCE    = 29
 KIND_FLIP         = 30
+KIND_FALSEBREAK   = 31
+KIND_SPRING       = 32
+KIND_RAID         = 33
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -113,6 +118,7 @@ MAX_SWINGS = 100
 MAX_POOLS  = 50
 MAX_BARBUF = 500
 MAX_FLIPS  = 30
+MAX_FBREAKS = 20
 MTF_K    = 12
 MTF_SLOT = 6
 type SMC_Zone
@@ -172,6 +178,10 @@ type SMC_Flip
     int    state    = 0    // LF_PENDING / LF_FLIPPED / LF_INVALID
     int    barIdx
     int    barTime
+type SMC_FBreak
+    float  level
+    int    breakDir       // +1 close rompio ARRIBA del nivel / -1 close rompio ABAJO
+    int    barIdx
 f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
     array.push(a, z)
     if array.size(a) > maxN
@@ -681,6 +691,43 @@ f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, in
     int s41 = bounceDir
     int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
     [s37, s38, s39, s40, s41, s42]
+
+// --- False Breakout / Spring / Raid [reglas-smc-ict §3.7] · T24 ---
+// f_detectFalseBreak: a diferencia del sweep (solo mecha), el FALSE BREAKOUT es un CIERRE mas alla de un
+// nivel que REVIERTE (otra vela CIERRA de vuelta al lado original) en <= fbBars velas (confluencia #14).
+// Si NO revierte en la ventana = breakout REAL (BOS), no falso (§3.7 contraejemplo). Detector por nivel
+// PENDIENTE (el consumidor registra la rotura de un pool por close y mantiene el SMC_FBreak entre barras,
+// como Judas/Flip). PURA: recibe el pendiente + el close de la barra confirmada. breakDir>0 = rompio
+// ARRIBA (FB si cierra de vuelta abajo); <0 = rompio ABAJO (FB si cierra arriba). Devuelve: 1 = FB
+// CONFIRMADO, -1 = EXPIRADO (paso la ventana sin revertir = breakout real), 0 = sigue pendiente. La
+// direccion REAL del FB = opuesta a breakDir (la reversion). Ventana de retorno = edad 1..fbBars.
+f_detectFalseBreak(SMC_FBreak fb, float barClose, int curBarIdx, int fbBars) =>
+    int res = 0
+    int age = curBarIdx - fb.barIdx
+    if fb.breakDir > 0 and barClose < fb.level
+        res := 1
+    else if fb.breakDir < 0 and barClose > fb.level
+        res := 1
+    if res == 0 and age >= fbBars
+        res := -1
+    res
+
+// f_classifySweep: REFINA un sweep ya detectado (§3.2, T10) en su subtipo (§3.7). RAID (confluencia #16)
+// = el pool barrido tiene touches >= raidTouches (alta liquidez, stop raid -> mayor peso); precedencia
+// sobre Spring. SPRING (Wyckoff, confluencia #15) = sweep ALCISTA (SSL atrapado, dir BULL) cuyo nivel
+// coincide con el MINIMO del rango (rangeLow) dentro de tol -> reversion al alza desde el extremo
+// inferior. Si no es ninguno, queda KIND_SWEEP. PURA: busca el pool barrido (match sweptBarIdx + nivel)
+// para leer sus touches. Devuelve el KIND refinado (KIND_RAID / KIND_SPRING / KIND_SWEEP).
+f_classifySweep(array<SMC_Pool> pools, float swLevel, int swDir, int swBarIdx, float rangeLow, int raidTouches, float tol) =>
+    int touches = 0
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if p.sweptBarIdx == swBarIdx and math.abs(p.level - swLevel) <= tol
+                touches := math.max(touches, p.touches)
+    bool isRaid   = touches >= raidTouches
+    bool isSpring = swDir == DIR_BULL and not na(rangeLow) and math.abs(swLevel - rangeLow) <= tol
+    isRaid ? KIND_RAID : isSpring ? KIND_SPRING : KIND_SWEEP
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1491,9 +1538,43 @@ if barstate.isconfirmed
     f_markPoolsSwept(SMC_pools, high, low, time, bar_index)
     SMC_Event evSweep = f_detectSweep(SMC_pools, close, bar_index, time, i_minTouches)
     if not na(evSweep)
+        // Refina el sweep en su subtipo Spring/Raid [T24 · §3.7]. rangeLow = discount del dealing range.
+        evSweep.kind := f_classifySweep(SMC_pools, evSweep.price, evSweep.dir, evSweep.barIdx, chartState.pdLow, i_raidTouches, i_poolTol * atr14)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
         evSweepAlert := evSweep
     f_prunePools(SMC_pools, MAX_POOLS)
+
+// --- False Breakout [§3.7 #14] · T24 ---
+// Mismo wiring que Visual pero SIN dibujo. CIERRE mas alla de un nivel de pool que REVIERTE en <= i_fbBars
+// velas (distinto del sweep, solo mecha). Pendientes en SMC_fbreaks (var): actualizar -> emitir FB (dir =
+// reversion) o expirar (breakout real); registrar roturas FRESCAS por close sin duplicar nivel pendiente.
+var array<SMC_FBreak> SMC_fbreaks      = array.new<SMC_FBreak>()
+var array<SMC_Event>  SMC_fbreakEvents = array.new<SMC_Event>()
+if barstate.isconfirmed
+    if array.size(SMC_fbreaks) > 0
+        for i = array.size(SMC_fbreaks) - 1 to 0
+            SMC_FBreak fb = array.get(SMC_fbreaks, i)
+            int fbRes = f_detectFalseBreak(fb, close, bar_index, i_fbBars)
+            if fbRes == 1
+                f_pushEvent(SMC_fbreakEvents, SMC_Event.new(fb.level, fb.breakDir > 0 ? DIR_BEAR : DIR_BULL, bar_index, time, "", KIND_FALSEBREAK), MAX_EVENTS)
+                array.remove(SMC_fbreaks, i)
+            else if fbRes == -1
+                array.remove(SMC_fbreaks, i)
+    if array.size(SMC_pools) > 0
+        for i = 0 to array.size(SMC_pools) - 1
+            SMC_Pool p = array.get(SMC_pools, i)
+            int bd = (p.dir == DIR_BULL and close > p.level and close[1] <= p.level) ? 1 : (p.dir == DIR_BEAR and close < p.level and close[1] >= p.level) ? -1 : 0
+            if bd != 0
+                bool dup = false
+                if array.size(SMC_fbreaks) > 0
+                    for j = 0 to array.size(SMC_fbreaks) - 1
+                        if math.abs(array.get(SMC_fbreaks, j).level - p.level) <= i_poolTol * atr14
+                            dup := true
+                            break
+                if not dup
+                    array.push(SMC_fbreaks, SMC_FBreak.new(p.level, bd, bar_index))
+    while array.size(SMC_fbreaks) > MAX_FBREAKS
+        array.remove(SMC_fbreaks, 0)
 
 // --- Kill Zones / sesiones [§3.4 · ADR-001] · T11 ---
 // Membresia en hora LOCAL con DST automatico (P-25): time(timeframe.period, session, tz) es na fuera

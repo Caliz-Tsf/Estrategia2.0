@@ -72,8 +72,12 @@ i_showPools    = input.bool(true,  "Mostrar pools de liquidez (BSL/SSL)", group 
 i_poolTol      = input.float(0.1,  "Tolerancia cluster (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_LIQ)
 i_minTouches   = input.int(2,      "Toques minimos para pool", minval = 2, group = GRP_LIQ)
 i_showSwept    = input.bool(true,  "Mostrar pools barridos (historial)", group = GRP_LIQ)
-i_showSweeps   = input.bool(true,  "Mostrar marcadores de sweep (trampa)", group = GRP_LIQ)
+i_showSweeps   = input.bool(true,  "Mostrar marcadores de sweep (trampa/Spring/Raid)", group = GRP_LIQ)
 i_maxShowSweeps= input.int(20,     "Max marcadores de sweep (recientes)", minval = 1, group = GRP_LIQ)
+i_raidTouches  = input.int(3,      "Raid: toques minimos del pool (§3.7 #16)", minval = 2, group = GRP_LIQ)
+i_showFalseBreak = input.bool(true, "Mostrar False Breakouts (§3.7 #14)", group = GRP_LIQ)
+i_fbBars       = input.int(2,      "False Breakout: max velas para revertir", minval = 1, group = GRP_LIQ)
+i_maxShowFB    = input.int(20,     "Max marcadores de false breakout (recientes)", minval = 1, group = GRP_LIQ)
 i_showIDM      = input.bool(true,  "Mostrar IDM (inducement interno)", group = GRP_LIQ)
 i_maxShowIDM   = input.int(20,     "Max marcadores de IDM (recientes)", minval = 1, group = GRP_LIQ)
 i_showJudas    = input.bool(true,  "Mostrar Judas (trampa de sesion)", group = GRP_LIQ)
@@ -122,6 +126,9 @@ KIND_IDM          = 27
 KIND_EMACROSS     = 28
 KIND_EMABOUNCE    = 29
 KIND_FLIP         = 30
+KIND_FALSEBREAK   = 31
+KIND_SPRING       = 32
+KIND_RAID         = 33
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -153,6 +160,7 @@ MAX_SWINGS = 100
 MAX_POOLS  = 50
 MAX_BARBUF = 500
 MAX_FLIPS  = 30
+MAX_FBREAKS = 20
 MTF_K    = 12
 MTF_SLOT = 6
 type SMC_Zone
@@ -212,6 +220,10 @@ type SMC_Flip
     int    state    = 0    // LF_PENDING / LF_FLIPPED / LF_INVALID
     int    barIdx
     int    barTime
+type SMC_FBreak
+    float  level
+    int    breakDir       // +1 close rompio ARRIBA del nivel / -1 close rompio ABAJO
+    int    barIdx
 f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
     array.push(a, z)
     if array.size(a) > maxN
@@ -721,6 +733,43 @@ f_emaState(float c, float eFast, float eMid, float eSlow, int recentCrossDir, in
     int s41 = bounceDir
     int s42 = (na(eFast) or na(eMid) or na(eSlow)) ? 0 : (eFast > eMid and eMid > eSlow ? 1 : eFast < eMid and eMid < eSlow ? -1 : 0)
     [s37, s38, s39, s40, s41, s42]
+
+// --- False Breakout / Spring / Raid [reglas-smc-ict §3.7] · T24 ---
+// f_detectFalseBreak: a diferencia del sweep (solo mecha), el FALSE BREAKOUT es un CIERRE mas alla de un
+// nivel que REVIERTE (otra vela CIERRA de vuelta al lado original) en <= fbBars velas (confluencia #14).
+// Si NO revierte en la ventana = breakout REAL (BOS), no falso (§3.7 contraejemplo). Detector por nivel
+// PENDIENTE (el consumidor registra la rotura de un pool por close y mantiene el SMC_FBreak entre barras,
+// como Judas/Flip). PURA: recibe el pendiente + el close de la barra confirmada. breakDir>0 = rompio
+// ARRIBA (FB si cierra de vuelta abajo); <0 = rompio ABAJO (FB si cierra arriba). Devuelve: 1 = FB
+// CONFIRMADO, -1 = EXPIRADO (paso la ventana sin revertir = breakout real), 0 = sigue pendiente. La
+// direccion REAL del FB = opuesta a breakDir (la reversion). Ventana de retorno = edad 1..fbBars.
+f_detectFalseBreak(SMC_FBreak fb, float barClose, int curBarIdx, int fbBars) =>
+    int res = 0
+    int age = curBarIdx - fb.barIdx
+    if fb.breakDir > 0 and barClose < fb.level
+        res := 1
+    else if fb.breakDir < 0 and barClose > fb.level
+        res := 1
+    if res == 0 and age >= fbBars
+        res := -1
+    res
+
+// f_classifySweep: REFINA un sweep ya detectado (§3.2, T10) en su subtipo (§3.7). RAID (confluencia #16)
+// = el pool barrido tiene touches >= raidTouches (alta liquidez, stop raid -> mayor peso); precedencia
+// sobre Spring. SPRING (Wyckoff, confluencia #15) = sweep ALCISTA (SSL atrapado, dir BULL) cuyo nivel
+// coincide con el MINIMO del rango (rangeLow) dentro de tol -> reversion al alza desde el extremo
+// inferior. Si no es ninguno, queda KIND_SWEEP. PURA: busca el pool barrido (match sweptBarIdx + nivel)
+// para leer sus touches. Devuelve el KIND refinado (KIND_RAID / KIND_SPRING / KIND_SWEEP).
+f_classifySweep(array<SMC_Pool> pools, float swLevel, int swDir, int swBarIdx, float rangeLow, int raidTouches, float tol) =>
+    int touches = 0
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if p.sweptBarIdx == swBarIdx and math.abs(p.level - swLevel) <= tol
+                touches := math.max(touches, p.touches)
+    bool isRaid   = touches >= raidTouches
+    bool isSpring = swDir == DIR_BULL and not na(rangeLow) and math.abs(swLevel - rangeLow) <= tol
+    isRaid ? KIND_RAID : isSpring ? KIND_SPRING : KIND_SWEEP
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1570,9 +1619,44 @@ if barstate.isconfirmed
     f_markPoolsSwept(SMC_pools, high, low, time, bar_index)
     SMC_Event evSweep = f_detectSweep(SMC_pools, close, bar_index, time, i_minTouches)
     if not na(evSweep)
+        // Refina el sweep en su subtipo Spring/Raid [T24 · §3.7]. rangeLow = discount del dealing range.
+        evSweep.kind := f_classifySweep(SMC_pools, evSweep.price, evSweep.dir, evSweep.barIdx, chartState.pdLow, i_raidTouches, i_poolTol * atr14)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
         evSweepAlert := evSweep
     f_prunePools(SMC_pools, MAX_POOLS)
+
+// --- False Breakout [§3.7 #14] · T24 ---
+// CIERRE mas alla de un nivel de pool que REVIERTE en <= i_fbBars velas (distinto del sweep, que es solo
+// mecha). Pendientes en SMC_fbreaks (var): (1) actualizar -> emitir FB confirmado (dir = reversion, la
+// real) o expirar (= breakout real/BOS); (2) registrar roturas FRESCAS por close (la barra previa estaba
+// del otro lado del nivel), evitando duplicar un nivel ya pendiente. Anti-repaint: en barstate.isconfirmed.
+var array<SMC_FBreak> SMC_fbreaks      = array.new<SMC_FBreak>()
+var array<SMC_Event>  SMC_fbreakEvents = array.new<SMC_Event>()
+if barstate.isconfirmed
+    if array.size(SMC_fbreaks) > 0
+        for i = array.size(SMC_fbreaks) - 1 to 0
+            SMC_FBreak fb = array.get(SMC_fbreaks, i)
+            int fbRes = f_detectFalseBreak(fb, close, bar_index, i_fbBars)
+            if fbRes == 1
+                f_pushEvent(SMC_fbreakEvents, SMC_Event.new(fb.level, fb.breakDir > 0 ? DIR_BEAR : DIR_BULL, bar_index, time, "", KIND_FALSEBREAK), MAX_EVENTS)
+                array.remove(SMC_fbreaks, i)
+            else if fbRes == -1
+                array.remove(SMC_fbreaks, i)
+    if array.size(SMC_pools) > 0
+        for i = 0 to array.size(SMC_pools) - 1
+            SMC_Pool p = array.get(SMC_pools, i)
+            int bd = (p.dir == DIR_BULL and close > p.level and close[1] <= p.level) ? 1 : (p.dir == DIR_BEAR and close < p.level and close[1] >= p.level) ? -1 : 0
+            if bd != 0
+                bool dup = false
+                if array.size(SMC_fbreaks) > 0
+                    for j = 0 to array.size(SMC_fbreaks) - 1
+                        if math.abs(array.get(SMC_fbreaks, j).level - p.level) <= i_poolTol * atr14
+                            dup := true
+                            break
+                if not dup
+                    array.push(SMC_fbreaks, SMC_FBreak.new(p.level, bd, bar_index))
+    while array.size(SMC_fbreaks) > MAX_FBREAKS
+        array.remove(SMC_fbreaks, 0)
 
 // --- Kill Zones / sesiones [§3.4 · ADR-001] · T11 ---
 // Membresia en hora LOCAL con DST automatico (P-25): time(timeframe.period, session, tz) es na fuera
@@ -1869,7 +1953,10 @@ if i_showSweeps and barstate.islast
             SMC_Event sw = array.get(SMC_sweeps, i)
             bool bearTrap = sw.dir == DIR_BEAR
             color scol = bearTrap ? color.red : color.green
-            string stxt = bearTrap ? "✗ Sweep ↓" : "✗ Sweep ↑"
+            // Subtipo refinado [T24 · §3.7]: Raid (pool alta liquidez) / Spring (sweep alcista en minimo
+            // de rango) / sweep simple. El texto distingue los tres; el color sigue el sesgo del sweep.
+            string sbase = sw.kind == KIND_RAID ? "⚡ Raid" : sw.kind == KIND_SPRING ? "⇧ Spring" : "✗ Sweep"
+            string stxt = sbase + (bearTrap ? " ↓" : " ↑")
             array.push(SMC_sweepLabels, label.new(sw.barTime, sw.price, stxt, style = bearTrap ? label.style_label_down : label.style_label_up, color = color.new(scol, 70), textcolor = scol, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de Displacement [T16 · §4.1]. Mismo patron repintado-en-islast que los sweeps
@@ -1991,6 +2078,23 @@ if i_showEmaBounce and barstate.islast
             bool bullBo = bo.dir == DIR_BULL
             string botxt = bullBo ? "↩ EMA ↑" : "↩ EMA ↓"
             array.push(SMC_emaBounceLabels, label.new(bo.barTime, bo.price, botxt, style = bullBo ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(90,160,255), 70), textcolor = color.rgb(90,160,255), size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de False Breakout [T24 · §3.7 #14]. Mismo patron repintado-en-islast (acotado a i_maxShowFB).
+// La direccion es la REVERSION (la real): FB alcista (rompio abajo y volvio) marca abajo; bajista marca
+// arriba. Color MAGENTA, anclado al nivel roto en la barra de confirmacion del retorno.
+var array<label> SMC_fbLabels = array.new<label>()
+if i_showFalseBreak and barstate.islast
+    for lb in SMC_fbLabels
+        label.delete(lb)
+    array.clear(SMC_fbLabels)
+    int nFB = array.size(SMC_fbreakEvents)
+    if nFB > 0
+        int firstFB = math.max(0, nFB - i_maxShowFB)
+        for i = firstFB to nFB - 1
+            SMC_Event fbe = array.get(SMC_fbreakEvents, i)
+            bool bullFB = fbe.dir == DIR_BULL
+            string fbtxt = bullFB ? "FB ↑" : "FB ↓"
+            array.push(SMC_fbLabels, label.new(fbe.barTime, fbe.price, fbtxt, style = bullFB ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(220,80,200), 70), textcolor = color.rgb(220,80,200), size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
