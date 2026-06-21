@@ -17,7 +17,7 @@ GRP_KZ     = "Kill Zones / Sesiones"
 GRP_MTF    = "Mapa MTF"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
-i_panelCompact = input.bool(false, "Panel compacto (Bias / dom. / P-D / Kill Zone)", group = GRP_PANEL)
+i_panelCompact = input.bool(false, "Panel minimizado (solo Bias por TF)", group = GRP_PANEL)
 // Estructura DOMINANTE (swing grande = LuxAlgo getCurrentStructure(50), ref :782).
 // NUESTRO swingLen=5 ~= interno de LuxAlgo; esta capa es la que faltaba [T07B].
 i_majorLen    = input.int(50, "Swing dominante (estructura grande)", minval = 10, group = GRP_STRUCT)
@@ -1676,92 +1676,191 @@ f_pNearPool(array<SMC_Pool> a, float price) =>
                     best  := p
     best
 
-// === PANEL ===
-// Una fila por concepto implementado (Sprint 1.1-1.3), diseño PINE-PLAN §5 adaptado a UN
-// solo TF (las columnas MTF D1/H1 dependen de request.security = T13/T14, diferidas). El
-// toggle i_panelCompact reduce a Bias / Bias dom. / Premium-Discount / Kill Zone. El on/off
-// POR concepto se hace desde Ajustes (los i_show*): las tablas Pine no reciben clicks.
+// --- Helpers multi-TF del panel [T14] (Visual-only) ---
+// Formatean una celda por TF a partir del SMC_TFState (D1/H1) o del estado propio (M5). Los
+// conceptos con snapshot escalar (bias/BOS/CHoCH/MSS/P-D/EMA) salen de los 3 TFs; los que solo
+// viajan en el buffer geometrico MTF (OB/FVG/pool/sweep/EQ) se derivan con f_bufNear sobre los
+// arrays d1*/h1* (T13b/c). El M5 usa los arrays nativos (SMC_zones/SMC_pools/SMC_sweeps/SMC_eqhl).
+// Etiqueta corta del TF del chart para la cabecera de la columna propia (M5/M15/H1/H4/D1...).
+f_tfLabel() =>
+    string p = timeframe.period
+    float  m = str.tonumber(p)
+    p == "D" ? "D1" : p == "W" ? "W1" : p == "M" ? "MN" : na(m) ? p : m >= 60 ? "H" + str.tostring(int(m / 60)) : "M" + p
+f_biasTxt(int b) => b == DIR_BULL ? "▲ Alcista" : b == DIR_BEAR ? "▼ Bajista" : "—"
+f_dirCol(int d)  => d == DIR_BULL ? color.teal : d == DIR_BEAR ? color.red : color.gray
+// Celda de evento estructural (BOS/CHoCH/MSS): "precio · dd-MM HH:mm".
+f_evCell(float p, int t) => na(p) ? "—" : str.tostring(p, format.mintick) + " · " + str.format_time(t, "dd-MM HH:mm", "GMT")
+// Celda Premium/Discount sobre un rango cualquiera (close = precio del chart contra el rango HTF).
+f_pdCell(float hi, float lo) =>
+    [z, pct] = f_premiumDiscount(close, hi, lo, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
+    string txt  = na(z) ? "—" : z == PD_PREMIUM ? "Premium" : z == PD_DISCOUNT ? "Discount" : "Equil."
+    string cell = na(z) ? "—" : txt + (na(pct) ? "" : " " + str.tostring(math.round(pct * 100)) + "%")
+    color  col  = z == PD_PREMIUM ? color.red : z == PD_DISCOUNT ? color.green : color.gray
+    [cell, col]
+// Celda de alineacion EMA: ⬆⬆⬆ stack alcista / ⬇⬇⬇ bajista / mixto.
+f_emaCell(float e20, float e50, float e200) =>
+    bool ok   = not na(e20) and not na(e50) and not na(e200)
+    bool up   = ok and e20 > e50 and e50 > e200
+    bool dn   = ok and e20 < e50 and e50 < e200
+    string c  = not ok ? "—" : up ? "⬆⬆⬆" : dn ? "⬇⬇⬇" : "mixto"
+    color  cl = up ? color.teal : dn ? color.red : color.gray
+    [c, cl]
+// Indice del elemento del buffer MTF (kind == want) cuyo centro esta mas cerca de price; -1 si no hay.
+f_bufNear(array<int> kinds, array<float> tops, array<float> bots, int want, float price) =>
+    int   best  = -1
+    float bestD = na
+    if array.size(kinds) > 0
+        for i = 0 to array.size(kinds) - 1
+            if array.get(kinds, i) == want
+                float tp = array.get(tops, i)
+                float bt = array.get(bots, i)
+                if not na(tp) and not na(bt)
+                    float d = math.abs((tp + bt) / 2.0 - price)
+                    if na(bestD) or d < bestD
+                        bestD := d
+                        best  := i
+    best
+// Celda de zona [bot, top] desde el buffer MTF por kind (OB/FVG).
+f_bufZoneCell(array<int> kinds, array<float> tops, array<float> bots, int want) =>
+    int idx = f_bufNear(kinds, tops, bots, want, close)
+    idx < 0 ? "—" : "[" + str.tostring(array.get(bots, idx), format.mintick) + ", " + str.tostring(array.get(tops, idx), format.mintick) + "]"
+// Conteo de EQH+EQL presentes en el buffer MTF.
+f_bufCountEQ(array<int> kinds) =>
+    int n = 0
+    if array.size(kinds) > 0
+        for i = 0 to array.size(kinds) - 1
+            int k = array.get(kinds, i)
+            if k == KIND_EQH or k == KIND_EQL
+                n += 1
+    n
+
+// EMAs del chart para el panel [T14]: ta.ema debe evaluarse CADA barra (no dentro del if islast).
+float m5Ema20  = ta.ema(close, 20)
+float m5Ema50  = ta.ema(close, 50)
+float m5Ema200 = ta.ema(close, 200)
+
+// === PANEL === [T14 · diseño PINE-PLAN §5 completo]
+// Tabla multi-columna: Concepto | D1 | H1 | M5/chart. D1/H1 salen de d1State/h1State (escalares
+// via request.security) + buffer geometrico (OB/FVG/pool/sweep); M5 de los arrays nativos. Conceptos
+// solo-chart (Bias dom. 50, Kill Zone) muestran "—" en D1/H1. Controles en Ajustes (Pine no recibe
+// clicks en chart): "Mostrar panel" lo apaga entero; "Panel compacto" lo MINIMIZA a header + Bias
+// por TF (2 filas). Texto size.small para footprint reducido.
 if i_showPanel and barstate.islast
-    int nrows = i_panelCompact ? 5 : 13
-    table panel = table.new(position.top_right, 2, nrows, border_width = 1)
-    // --- valores ---
-    string biasTxt = chartState.bias == DIR_BULL ? "Alcista" : chartState.bias == DIR_BEAR ? "Bajista" : "—"
-    color  biasCol = chartState.bias == DIR_BULL ? color.teal : chartState.bias == DIR_BEAR ? color.red : color.gray
-    // Bias dominante (50) [T07B]: lo fija structMajor.bias (no chartState, que es swing).
-    string majTxt = structMajor.bias == DIR_BULL ? "Alcista" : structMajor.bias == DIR_BEAR ? "Bajista" : "—"
-    color  majCol = structMajor.bias == DIR_BULL ? color.teal : structMajor.bias == DIR_BEAR ? color.red : color.gray
-    [pdZone, pdPct] = f_premiumDiscount(close, trailing.top, trailing.bottom, 0.5 - i_pdEqBand / 100.0, 0.5 + i_pdEqBand / 100.0)
-    string pdTxt = na(pdZone) ? "—" : pdZone == PD_PREMIUM ? "Premium" : pdZone == PD_DISCOUNT ? "Discount" : "Equilibrium"
-    color  pdCol = pdZone == PD_PREMIUM ? color.red : pdZone == PD_DISCOUNT ? color.green : color.gray
-    string pdCell = pdTxt + (na(pdPct) ? "" : " " + str.tostring(math.round(pdPct * 100)) + "%")
+    int nrows = i_panelCompact ? 2 : 14
+    table panel = table.new(position.top_right, 4, nrows, border_width = 1)
+    color  hdrBg = color.new(color.blue, 0)
+    string tsz   = size.small
+    // --- M5 / chart (estado propio) ---
+    [m5Pd, m5PdCol]   = f_pdCell(trailing.top, trailing.bottom)
+    [m5Ema, m5EmaCol] = f_emaCell(m5Ema20, m5Ema50, m5Ema200)
+    string majTxt = f_biasTxt(structMajor.bias)
+    SMC_Event mssE  = f_pLastEvent(SMC_eventsMSS)
+    SMC_Zone  obZ   = f_pNearZone(SMC_zones, KIND_OB,  close)
+    SMC_Zone  fvgZ  = f_pNearZone(SMC_zones, KIND_FVG, close)
+    SMC_Pool  poolP = f_pNearPool(SMC_pools, close)
+    SMC_Event swE   = f_pLastEvent(SMC_sweeps)
+    string m5Ob   = na(obZ)  ? "—" : "[" + str.tostring(obZ.bottom, format.mintick)  + ", " + str.tostring(obZ.top, format.mintick)  + "]"
+    string m5Fvg  = na(fvgZ) ? "—" : "[" + str.tostring(fvgZ.bottom, format.mintick) + ", " + str.tostring(fvgZ.top, format.mintick) + "]"
+    string m5Pool = na(poolP) ? "—" : str.tostring(poolP.level, format.mintick) + " " + (poolP.dir == DIR_BULL ? "BSL" : "SSL") + " ·" + str.tostring(poolP.touches)
+    string m5Sw   = na(swE) ? "—" : str.tostring(swE.price, format.mintick) + (swE.dir == DIR_BULL ? " ↑" : " ↓")
     string kzTxt  = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY AM" : curKZ == KZ_TOKYO ? "Tokyo" : "—"
     string kzCell = curKZ == KZ_NONE ? "—" : kzTxt + (curKZFirst ? " (1ª½)" : "")
-    color  kzCol  = curKZ == KZ_NONE ? color.gray : color.aqua
-    // Ultimo BOS / CHoCH (escala swing, desde chartState [T04])
-    string bosCell = na(chartState.lastBOSPrice) ? "—" : str.tostring(chartState.lastBOSPrice, format.mintick) + " · " + str.format_time(chartState.lastBOSTime, "dd-MM HH:mm", "GMT")
-    color  bosCol  = chartState.lastBOSDir == DIR_BULL ? color.teal : chartState.lastBOSDir == DIR_BEAR ? color.red : color.gray
-    string chCell  = na(chartState.lastCHoCHPrice) ? "—" : str.tostring(chartState.lastCHoCHPrice, format.mintick) + " · " + str.format_time(chartState.lastCHoCHTime, "dd-MM HH:mm", "GMT")
-    color  chCol   = chartState.lastCHoCHDir == DIR_BULL ? color.teal : chartState.lastCHoCHDir == DIR_BEAR ? color.red : color.gray
-    // Ultimo MSS [T12]
-    SMC_Event mssE = f_pLastEvent(SMC_eventsMSS)
-    string mssCell = na(mssE) ? "—" : str.tostring(mssE.price, format.mintick) + " · " + str.format_time(mssE.barTime, "dd-MM HH:mm", "GMT")
-    color  mssCol  = na(mssE) ? color.gray : mssE.dir == DIR_BULL ? color.teal : color.red
-    // OB / FVG activos mas cercanos al precio
-    SMC_Zone obZ = f_pNearZone(SMC_zones, KIND_OB, close)
-    string obCell = na(obZ) ? "—" : "[" + str.tostring(obZ.bottom, format.mintick) + ", " + str.tostring(obZ.top, format.mintick) + "]"
-    color  obCol  = na(obZ) ? color.gray : obZ.dir == DIR_BULL ? color.teal : color.red
-    SMC_Zone fvgZ = f_pNearZone(SMC_zones, KIND_FVG, close)
-    string fvgCell = na(fvgZ) ? "—" : "[" + str.tostring(fvgZ.bottom, format.mintick) + ", " + str.tostring(fvgZ.top, format.mintick) + "]"
-    color  fvgCol  = na(fvgZ) ? color.gray : fvgZ.dir == DIR_BULL ? color.lime : color.orange
-    // Pool mas cercano no barrido
-    SMC_Pool poolP = f_pNearPool(SMC_pools, close)
-    string poolCell = na(poolP) ? "—" : str.tostring(poolP.level, format.mintick) + " " + (poolP.dir == DIR_BULL ? "BSL" : "SSL") + " ·" + str.tostring(poolP.touches)
-    color  poolCol  = na(poolP) ? color.gray : poolP.dir == DIR_BULL ? color.orange : color.aqua
-    // Ultimo Sweep [T10]
-    SMC_Event swE = f_pLastEvent(SMC_sweeps)
-    string swCell = na(swE) ? "—" : str.tostring(swE.price, format.mintick) + (swE.dir == DIR_BULL ? " ↑BULL" : " ↓BEAR") + " · " + str.format_time(swE.barTime, "dd-MM HH:mm", "GMT")
-    color  swCol  = na(swE) ? color.gray : swE.dir == DIR_BULL ? color.teal : color.red
-    string eqCell = str.tostring(array.size(SMC_eqhl))
-    // --- pintado (contador de fila r; las filas extra solo en modo completo) ---
-    table.cell(panel, 0, 0, "SMC Engine — Visual", text_color = color.white, bgcolor = color.new(color.blue, 0))
-    table.cell(panel, 1, 0, "T13a", text_color = color.white, bgcolor = color.new(color.blue, 0))
+    // --- D1 / H1 (snapshots MTF) ---
+    [d1Pd, d1PdCol]   = f_pdCell(d1State.pdHigh, d1State.pdLow)
+    [h1Pd, h1PdCol]   = f_pdCell(h1State.pdHigh, h1State.pdLow)
+    [d1Ema, d1EmaCol] = f_emaCell(d1State.ema20, d1State.ema50, d1State.ema200)
+    [h1Ema, h1EmaCol] = f_emaCell(h1State.ema20, h1State.ema50, h1State.ema200)
+    string d1Pool = (f_bufNear(d1Kind, d1Top, d1Bot, KIND_POOL, close) < 0) ? "—" : str.tostring(array.get(d1Top, f_bufNear(d1Kind, d1Top, d1Bot, KIND_POOL, close)), format.mintick) + (array.get(d1Dir, f_bufNear(d1Kind, d1Top, d1Bot, KIND_POOL, close)) == DIR_BULL ? " BSL" : " SSL")
+    string h1Pool = (f_bufNear(h1Kind, h1Top, h1Bot, KIND_POOL, close) < 0) ? "—" : str.tostring(array.get(h1Top, f_bufNear(h1Kind, h1Top, h1Bot, KIND_POOL, close)), format.mintick) + (array.get(h1Dir, f_bufNear(h1Kind, h1Top, h1Bot, KIND_POOL, close)) == DIR_BULL ? " BSL" : " SSL")
+    int    d1SwI  = f_bufNear(d1Kind, d1Top, d1Bot, KIND_SWEEP, close)
+    int    h1SwI  = f_bufNear(h1Kind, h1Top, h1Bot, KIND_SWEEP, close)
+    string d1Sw   = d1SwI < 0 ? "—" : str.tostring(array.get(d1Top, d1SwI), format.mintick) + (array.get(d1Dir, d1SwI) == DIR_BULL ? " ↑" : " ↓")
+    string h1Sw   = h1SwI < 0 ? "—" : str.tostring(array.get(h1Top, h1SwI), format.mintick) + (array.get(h1Dir, h1SwI) == DIR_BULL ? " ↑" : " ↓")
+    // --- pintado: fila 0 = cabecera con TF; columna 0 = concepto. Minimizado (i_panelCompact) =
+    //     solo header + Bias por TF. text_size = tsz (size.small) en todas las celdas. ---
+    table.cell(panel, 0, 0, "SMC · T14", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
+    table.cell(panel, 1, 0, "D1", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
+    table.cell(panel, 2, 0, "H1", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
+    table.cell(panel, 3, 0, f_tfLabel(), text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     int r = 1
-    table.cell(panel, 0, r, "Bias", text_color = color.gray)
-    table.cell(panel, 1, r, biasTxt, text_color = biasCol)
-    r := r + 1
-    table.cell(panel, 0, r, "Bias dom. (50)", text_color = color.gray)
-    table.cell(panel, 1, r, majTxt, text_color = majCol)
-    r := r + 1
-    table.cell(panel, 0, r, "Premium/Discount", text_color = color.gray)
-    table.cell(panel, 1, r, pdCell, text_color = pdCol)
+    // Bias (los 3 TFs) — siempre visible (es la fila del modo minimizado)
+    table.cell(panel, 0, r, "Bias", text_color = color.gray, text_size = tsz)
+    table.cell(panel, 1, r, f_biasTxt(d1State.bias), text_color = f_dirCol(d1State.bias), text_size = tsz)
+    table.cell(panel, 2, r, f_biasTxt(h1State.bias), text_color = f_dirCol(h1State.bias), text_size = tsz)
+    table.cell(panel, 3, r, f_biasTxt(chartState.bias), text_color = f_dirCol(chartState.bias), text_size = tsz)
     r := r + 1
     if not i_panelCompact
-        table.cell(panel, 0, r, "Último BOS", text_color = color.gray)
-        table.cell(panel, 1, r, bosCell, text_color = bosCol)
+        // Bias dominante (50) [T07B]: solo escala chart (no se transporta MTF) -> "—" en D1/H1.
+        table.cell(panel, 0, r, "Bias dom. (50)", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, majTxt, text_color = f_dirCol(structMajor.bias), text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "Último CHoCH", text_color = color.gray)
-        table.cell(panel, 1, r, chCell, text_color = chCol)
+        // Premium/Discount (los 3 TFs)
+        table.cell(panel, 0, r, "Premium/Discount", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, d1Pd, text_color = d1PdCol, text_size = tsz)
+        table.cell(panel, 2, r, h1Pd, text_color = h1PdCol, text_size = tsz)
+        table.cell(panel, 3, r, m5Pd, text_color = m5PdCol, text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "Último MSS", text_color = color.gray)
-        table.cell(panel, 1, r, mssCell, text_color = mssCol)
+        // Ultimo BOS
+        table.cell(panel, 0, r, "Último BOS", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, f_evCell(d1State.lastBOSPrice, d1State.lastBOSTime), text_color = f_dirCol(d1State.lastBOSDir), text_size = tsz)
+        table.cell(panel, 2, r, f_evCell(h1State.lastBOSPrice, h1State.lastBOSTime), text_color = f_dirCol(h1State.lastBOSDir), text_size = tsz)
+        table.cell(panel, 3, r, f_evCell(chartState.lastBOSPrice, chartState.lastBOSTime), text_color = f_dirCol(chartState.lastBOSDir), text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "OB cercano", text_color = color.gray)
-        table.cell(panel, 1, r, obCell, text_color = obCol)
+        // Ultimo CHoCH
+        table.cell(panel, 0, r, "Último CHoCH", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, f_evCell(d1State.lastCHoCHPrice, d1State.lastCHoCHTime), text_color = f_dirCol(d1State.lastCHoCHDir), text_size = tsz)
+        table.cell(panel, 2, r, f_evCell(h1State.lastCHoCHPrice, h1State.lastCHoCHTime), text_color = f_dirCol(h1State.lastCHoCHDir), text_size = tsz)
+        table.cell(panel, 3, r, f_evCell(chartState.lastCHoCHPrice, chartState.lastCHoCHTime), text_color = f_dirCol(chartState.lastCHoCHDir), text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "FVG cercano", text_color = color.gray)
-        table.cell(panel, 1, r, fvgCell, text_color = fvgCol)
+        // Ultimo MSS (D1/H1 desde el state; M5 desde SMC_eventsMSS)
+        table.cell(panel, 0, r, "Último MSS", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, f_evCell(d1State.lastMSSPrice, d1State.lastMSSTime), text_color = f_dirCol(d1State.lastMSSDir), text_size = tsz)
+        table.cell(panel, 2, r, f_evCell(h1State.lastMSSPrice, h1State.lastMSSTime), text_color = f_dirCol(h1State.lastMSSDir), text_size = tsz)
+        table.cell(panel, 3, r, na(mssE) ? "—" : f_evCell(mssE.price, mssE.barTime), text_color = na(mssE) ? color.gray : f_dirCol(mssE.dir), text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "Pool cercano", text_color = color.gray)
-        table.cell(panel, 1, r, poolCell, text_color = poolCol)
+        // OB cercano
+        table.cell(panel, 0, r, "OB cercano", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, m5Ob, text_color = na(obZ) ? color.gray : f_dirCol(obZ.dir), text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "Último Sweep", text_color = color.gray)
-        table.cell(panel, 1, r, swCell, text_color = swCol)
+        // FVG cercano
+        table.cell(panel, 0, r, "FVG cercano", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, m5Fvg, text_color = na(fvgZ) ? color.gray : f_dirCol(fvgZ.dir), text_size = tsz)
         r := r + 1
-        table.cell(panel, 0, r, "EQ H/L", text_color = color.gray)
-        table.cell(panel, 1, r, eqCell, text_color = color.gray)
+        // Pool cercano
+        table.cell(panel, 0, r, "Pool cercano", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, d1Pool, text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, h1Pool, text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, m5Pool, text_color = na(poolP) ? color.gray : f_dirCol(poolP.dir), text_size = tsz)
         r := r + 1
-    table.cell(panel, 0, r, "Kill Zone", text_color = color.gray)
-    table.cell(panel, 1, r, kzCell, text_color = kzCol)
+        // Ultimo Sweep
+        table.cell(panel, 0, r, "Último Sweep", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, d1Sw, text_color = d1SwI < 0 ? color.gray : f_dirCol(array.get(d1Dir, d1SwI)), text_size = tsz)
+        table.cell(panel, 2, r, h1Sw, text_color = h1SwI < 0 ? color.gray : f_dirCol(array.get(h1Dir, h1SwI)), text_size = tsz)
+        table.cell(panel, 3, r, m5Sw, text_color = na(swE) ? color.gray : f_dirCol(swE.dir), text_size = tsz)
+        r := r + 1
+        // EMA 20/50/200 (alineacion por TF)
+        table.cell(panel, 0, r, "EMA 20/50/200", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, d1Ema, text_color = d1EmaCol, text_size = tsz)
+        table.cell(panel, 2, r, h1Ema, text_color = h1EmaCol, text_size = tsz)
+        table.cell(panel, 3, r, m5Ema, text_color = m5EmaCol, text_size = tsz)
+        r := r + 1
+        // EQ H/L (conteo): D1/H1 del buffer, M5 del array nativo
+        table.cell(panel, 0, r, "EQ H/L", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, str.tostring(f_bufCountEQ(d1Kind)), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, str.tostring(f_bufCountEQ(h1Kind)), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, str.tostring(array.size(SMC_eqhl)), text_color = color.gray, text_size = tsz)
+        r := r + 1
+        // Kill Zone (basada en tiempo: misma para todos los TFs -> solo columna chart)
+        table.cell(panel, 0, r, "Kill Zone", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, kzCell, text_color = curKZ == KZ_NONE ? color.gray : color.aqua, text_size = tsz)
 
 // === ALERTAS ===
 // alertcondition(): 16 base LuxAlgo + nuevas. Pendiente Sprint 1.4 (T15).
