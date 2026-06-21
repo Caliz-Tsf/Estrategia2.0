@@ -43,6 +43,7 @@ export const int KIND_EQL = 45
 export const int KIND_VI  = 46
 export const int KIND_BAG = 47
 export const int KIND_CISD = 48
+export const int KIND_VACUUM = 49
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -567,6 +568,19 @@ export f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapM
     int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
     bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
     [measurable, dir]
+
+// --- Vacuum Block [reglas-smc-ict §5.7] · T33 ---
+// f_detectVacuumBlock: gap GRANDE de apertura (|open_nuevo - close_previo| >= vacuumFactor*ATR) =
+// vacio iman de retorno. Zona [min,max](close_previo, open_nuevo); dir por lado de relleno. Distinto del
+// VI (micro) y FVG (3 velas). Ciclo via f_updateZoneMitigation. PURA. Devuelve KIND_VACUUM o na. #48.
+export f_detectVacuumBlock(float openNew, float closePrev, float atr14, float vacuumFactor, int barIdx, int barTime) =>
+    SMC_Zone z = na
+    if not na(atr14)
+        float g = openNew - closePrev
+        if math.abs(g) >= vacuumFactor * atr14
+            int dir = g > 0 ? DIR_BULL : DIR_BEAR
+            z := SMC_Zone.new(math.max(openNew, closePrev), math.min(openNew, closePrev), dir, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VACUUM)
+    z
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: cierre que cruza el ORIGEN (open de la 1a vela) del ultimo run de delivery (>= cisdMinRun

@@ -54,6 +54,7 @@ i_viThreshold  = input.float(0.05, "VI: gap minimo de cuerpo (x ATR14, §5.5)", 
 i_gapMin       = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14, §5.10)", minval = 0.0, step = 0.1, group = GRP_SCORE)
 i_cisdMinRun   = input.int(2, "CISD: velas minimas del run de delivery (§5.6)", minval = 1, group = GRP_SCORE)
 i_propOverlap  = input.float(0.5, "Propulsion: solape minimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_SCORE)
+i_vacuumFactor = input.float(0.5, "Vacuum: gap minimo de apertura (x ATR14, §5.7)", minval = 0.1, step = 0.1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -110,6 +111,7 @@ KIND_EQL = 45
 KIND_VI  = 46
 KIND_BAG = 47
 KIND_CISD = 48
+KIND_VACUUM = 49
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -651,6 +653,22 @@ f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
     int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
     bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
     [measurable, dir]
+
+// --- Vacuum Block [reglas-smc-ict §5.7] · T33 ---
+// f_detectVacuumBlock: un VACIO de precio por apertura -> gap GRANDE (|open_nuevo - close_previo| >=
+// vacuumFactor*ATR) donde no hubo negociacion -> iman de RETORNO (el precio tiende a volver a rellenarlo).
+// Zona = [min, max] del par (close_previo, open_nuevo). dir por lado de relleno: gap ARRIBA (DIR_BULL ->
+// el precio vuelve desde arriba y rellena hasta close_previo = mitigado); gap ABAJO simetrico. Distinto
+// del Volume Imbalance (§5.5, micro, mechas solapan) y del FVG (§2.2, 3 velas): es UN gap grande de
+// apertura. Ciclo de vida via f_updateZoneMitigation. PURA. Devuelve SMC_Zone KIND_VACUUM o na. #48.
+f_detectVacuumBlock(float openNew, float closePrev, float atr14, float vacuumFactor, int barIdx, int barTime) =>
+    SMC_Zone z = na
+    if not na(atr14)
+        float g = openNew - closePrev
+        if math.abs(g) >= vacuumFactor * atr14
+            int dir = g > 0 ? DIR_BULL : DIR_BEAR
+            z := SMC_Zone.new(math.max(openNew, closePrev), math.min(openNew, closePrev), dir, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VACUUM)
+    z
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
@@ -1617,6 +1635,11 @@ if barstate.isconfirmed
             SMC_Zone mbZone = f_detectOB(evStructInt, mbOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_MITIGATION)
             if not na(mbZone)
                 f_pushZone(SMC_zones, mbZone, MAX_ZONES)
+    // --- Vacuum Block [T33 · §5.7] ---
+    // Gap grande de apertura -> zona-vacio iman de retorno (mismo wiring que Visual, sin dibujo).
+    SMC_Zone vacZone = f_detectVacuumBlock(open, close[1], atr14, i_vacuumFactor, bar_index, time)
+    if not na(vacZone)
+        f_pushZone(SMC_zones, vacZone, MAX_ZONES)
     // --- Fair Value Gaps [T06] ---
     // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_zones
     // para el scoring (Sprint 2.1). FVG de 3 velas sobre el TF propio, confirmado al

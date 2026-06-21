@@ -65,6 +65,8 @@ i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group 
 i_showBreaker    = input.bool(true,  "Mostrar Breakers (OB invalidado, §2.6)", group = GRP_OB)
 i_showMB         = input.bool(true,  "Mostrar Mitigation Blocks (§2.8 #24)", group = GRP_OB)
 i_propOverlap    = input.float(0.5,  "Propulsion: solape mínimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_OB)
+i_showVacuum     = input.bool(true,  "Mostrar Vacuum Blocks (§5.7)", group = GRP_OB)
+i_vacuumFactor   = input.float(0.5,  "Vacuum: gap mínimo de apertura (x ATR14)", minval = 0.1, step = 0.1, group = GRP_OB)
 i_showOTE      = input.bool(true,  "Mostrar OTE / Golden Pocket",       group = GRP_OTE)
 i_oteR1        = input.float(0.50,  "Fib inicio GP (50%)",   minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR2        = input.float(0.618, "Fib GP/OTE (61.8%)",    minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
@@ -168,6 +170,7 @@ KIND_EQL = 45
 KIND_VI  = 46
 KIND_BAG = 47
 KIND_CISD = 48
+KIND_VACUUM = 49
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -709,6 +712,22 @@ f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
     int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
     bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
     [measurable, dir]
+
+// --- Vacuum Block [reglas-smc-ict §5.7] · T33 ---
+// f_detectVacuumBlock: un VACIO de precio por apertura -> gap GRANDE (|open_nuevo - close_previo| >=
+// vacuumFactor*ATR) donde no hubo negociacion -> iman de RETORNO (el precio tiende a volver a rellenarlo).
+// Zona = [min, max] del par (close_previo, open_nuevo). dir por lado de relleno: gap ARRIBA (DIR_BULL ->
+// el precio vuelve desde arriba y rellena hasta close_previo = mitigado); gap ABAJO simetrico. Distinto
+// del Volume Imbalance (§5.5, micro, mechas solapan) y del FVG (§2.2, 3 velas): es UN gap grande de
+// apertura. Ciclo de vida via f_updateZoneMitigation. PURA. Devuelve SMC_Zone KIND_VACUUM o na. #48.
+f_detectVacuumBlock(float openNew, float closePrev, float atr14, float vacuumFactor, int barIdx, int barTime) =>
+    SMC_Zone z = na
+    if not na(atr14)
+        float g = openNew - closePrev
+        if math.abs(g) >= vacuumFactor * atr14
+            int dir = g > 0 ? DIR_BULL : DIR_BEAR
+            z := SMC_Zone.new(math.max(openNew, closePrev), math.min(openNew, closePrev), dir, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VACUUM)
+    z
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
@@ -1684,6 +1703,12 @@ if barstate.isconfirmed
             SMC_Zone mbZone = f_detectOB(evStructInt, mbOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_MITIGATION)
             if not na(mbZone)
                 f_pushZone(SMC_zones, mbZone, MAX_ZONES)
+    // --- Vacuum Block [T33 · §5.7] ---
+    // Gap grande de apertura (open vs close previo) -> zona-vacio iman de retorno. Se empuja DESPUES de la
+    // mitigacion comun (como OB/FVG) -> no se mitiga en su barra; en FX solo aparece en frontera (fin de semana).
+    SMC_Zone vacZone = f_detectVacuumBlock(open, close[1], atr14, i_vacuumFactor, bar_index, time)
+    if not na(vacZone)
+        f_pushZone(SMC_zones, vacZone, MAX_ZONES)
     // --- Fair Value Gaps [T06] ---
     // FVG de 3 velas sobre el TF propio (sin request.security: el MTF es T13). Se
     // confirma al cierre de la 3.a vela (este barstate.isconfirmed); offsets fijos
@@ -2695,6 +2720,25 @@ if i_showMB and barstate.islast
                 array.push(SMC_mbBoxes, f_drawMB(z))
                 color mbCol = z.dir == DIR_BULL ? color.rgb(130, 180, 230) : color.rgb(230, 150, 180)
                 array.push(SMC_mbLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_index))
+
+// Cajas de Vacuum Block [T33 · §5.7] (solo Visual). Vacio de apertura (gap grande) = iman de retorno.
+// GRIS CLARO (vacio), borde punteado. No invalidada. Origen = barra del gap; se extiende a la actual.
+var array<box>   SMC_vacBoxes  = array.new<box>()
+var array<label> SMC_vacLabels = array.new<label>()
+if i_showVacuum and barstate.islast
+    for b in SMC_vacBoxes
+        box.delete(b)
+    for lb in SMC_vacLabels
+        label.delete(lb)
+    array.clear(SMC_vacBoxes)
+    array.clear(SMC_vacLabels)
+    if array.size(SMC_zones) > 0
+        for i = 0 to array.size(SMC_zones) - 1
+            SMC_Zone z = array.get(SMC_zones, i)
+            if z.kind == KIND_VACUUM and z.state != ZS_INVALID
+                color vacc = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(color.rgb(190, 195, 205), 84)
+                array.push(SMC_vacBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = vacc, border_color = color.new(color.rgb(170, 175, 190), 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index))
+                array.push(SMC_vacLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = color.rgb(200, 205, 215), size = size.small, xloc = xloc.bar_index))
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
 // vela media (z.barIdx-1, cf. LuxAlgo lastTime=time[1]) para cubrir el desplazamiento
