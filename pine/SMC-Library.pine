@@ -95,6 +95,7 @@ export type SMC_Zone
     float  mitigatedPct = 0.0
     string tf           = ""
     int    kind         = 0
+    bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
 
 // Evento puntual (BOS, CHoCH, MSS, Sweep, Judas, Displacement, IDM, EMA cross/bounce...)
 export type SMC_Event

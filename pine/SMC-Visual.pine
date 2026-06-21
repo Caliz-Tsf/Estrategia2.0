@@ -182,6 +182,7 @@ type SMC_Zone
     float  mitigatedPct = 0.0
     string tf           = ""
     int    kind         = 0
+    bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
 type SMC_Event
     float  price
     int    dir
@@ -1541,6 +1542,12 @@ if barstate.isconfirmed
     // como al OB (misma maquina f_updateZoneMitigation, §2.2).
     SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time, i_fvgThreshold * atr14, KIND_FVG)
     if not na(fvgZone)
+        // True FVG [T26 · §5.1]: la VELA MEDIA del trio (bar[1], la que crea el gap) es displacement
+        // (§4.1) -> FVG de alta calidad institucional. Reusa f_detectDisplacement (requireContraction
+        // false: §5.1 no exige contraccion). Es un FLAG sobre el FVG (refina #18/#20), no zona nueva ->
+        // sigue en la familia FVG (mitigacion/dibujo); eleva su peso en el scoring (Fase 3).
+        SMC_Event fvgMidDisp = f_detectDisplacement(open[1], high[1], low[1], close[1], atr14, i_dispFactor, i_dispBodyPct, false, false, bar_index - 1, time[1])
+        fvgZone.trueFvg := not na(fvgMidDisp)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
     // --- OTE / Golden Pocket [T22 · §2.5] ---
     // Sobre un BOS confirmado: expira las zonas GP/OTE de la pierna anterior (la regla redibuja con cada
@@ -2360,7 +2367,9 @@ if i_showFVG and barstate.islast
                 // Nombre del FVG (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
                 color fvgCol = z.dir == DIR_BULL ? color.lime : color.orange
-                array.push(SMC_fvgLabels, label.new(math.round((z.barIdx - 1 + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "FVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
+                // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
+                string fvgTxt = z.trueFvg ? "T.FVG" : "FVG"
+                array.push(SMC_fvgLabels, label.new(math.round((z.barIdx - 1 + bar_index) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
                 if i_showCE and z.state != ZS_MITIGATED
                     float ce = (z.top + z.bottom) / 2.0
                     color ceCol = z.dir == DIR_BULL ? color.lime : color.orange
