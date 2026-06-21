@@ -860,4 +860,105 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 
 **Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1, iprWindow 10 / iprMinGaps 3)*: **5 ventanas IPR** (≥3 FVG del mismo lado en 10 velas) — concentradas en los tramos de impulso direccional (donde el precio deja huecos apilados al avanzar). Confluencia **candidata #49** (probable input de bias más que voto puntual).
 
-> **Lote 2 (familia estructura/OB T32–T35) — definido y verificado contra `eurusd_h1.csv`** (Propulsion = refinamiento de OB, conteo al cablear). Pendientes §5: T30 (gaps apertura), T36 (Std Dev), T37 (Inside Day), T38 (SMT — requiere ADR), T39 (macros), T40 (RTH/ETH).
+### 5.10 Serie de gaps de apertura — NWOG/NDOG/NYMO/ORG + Breakaway `f_detectOpeningGaps` · T30
+
+**Concepto.** Niveles ancla de **apertura** que actúan como soporte/resistencia: **NWOG** (New Week Opening Gap, fin de semana), **NDOG** (New Day Opening Gap), **NYMO** (NY Midnight Open), **ORG** (Opening Range Gap); + **Breakaway Gap** (gap de *ruptura* direccional). Extiende `f_sessionOpens` (§4.2): §4.2 da el *nivel* de apertura; T30 da el *gap* (cierre previo ↔ apertura) como **serie de niveles**.
+
+**Definición cuantificada.** En cada frontera temporal (semana / día del broker / medianoche NY), capturar el par `(close_previo, open_nuevo)`:
+- **Nivel ancla** (siempre): el `open_nuevo` (NWOG/NDOG/NYMO según frontera) y el punto medio del gap → líneas S/R. Refina #36 como **serie**. *(En FX 24h el gap diario suele ser ≈0 → el valor es el NIVEL; el gap real aparece en fin de semana = NWOG, o en instrumentos con cierre nocturno — símbolo-agnóstico ADR-001.)*
+- **Gap medible** (cuando `|open − close_previo| ≥ gapMin×ATR14`): zona-gap (similar a Vacuum §5.7 pero anclada a la frontera).
+- **Breakaway Gap** (`KIND_BAG`): un gap de apertura que **además rompe estructura** (close del nuevo periodo confirma BOS §1.3 en la dirección del gap) → gap de ruptura **direccional** (confluencia propia), distinto del NWOG/NDOG (frontera neutra).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| fronteras | semana / día broker / 00:00 NY | hora local + DST, como §3.4. |
+| `gapMin` | **0.5** | × ATR14, para clasificar gap medible (vs nivel puro). |
+| `orgMinutes` | **15** | ventana del Opening Range (ORG). |
+
+**Contraejemplo.** Un `open` de día que coincide casi exacto con el `close` previo (gap < 0.5×ATR, típico en FX intradía): NO es gap medible — solo aporta el **nivel** ancla (#36 serie), no una zona-gap ni Breakaway.
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; agregado a día/semana)*: los gaps diarios intradía son ≈0 (mercado continuo); los **NWOG de fin de semana** sí gapean: domingo 06-07 (−0.00111, ~0.85×ATR) y domingo 05-31 (−0.00078, ~0.72×ATR) → niveles ancla NWOG verificados (coinciden con los Vacuum §5.7 de frontera). Confluencia: refina #36 (serie); Breakaway = **candidata #45**.
+
+### 5.11 Standard Deviation `f_projStdDev` · T36 — herramienta (NO confluencia)
+
+**Concepto.** **Proyección** por desviaciones estándar de un swing/rango para fijar **objetivos** (TP) y zonas de agotamiento. No es una zona detectada ni una confluencia: es una **medición** (insumo de SL/TP), por la regla §0.9 (una herramienta de proyección no suma al score).
+
+**Definición cuantificada.** Dado un rango ancla `[A, B]` (p.ej. la pierna de manipulación / el dealing range §2.3, con `A`=origen, `B`=extremo), proyectar más allá de `B` los múltiplos estándar: `nivel(k) = B + k·(B − A)` para `k ∈ {−1, −2, −2.5, −4}` (signo según dirección). Devuelve niveles de objetivo. **Alimenta `f_computeSLTP` (TP del motor EA), NO el scoring.**
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `stdMultiples` | **−1 / −2 / −2.5 / −4** | múltiplos de proyección (objetivos ICT estándar). |
+| ancla | pierna manipulación / dealing range | reusa §2.3 / §4.4. |
+
+**Contraejemplo.** Usarla como "confluencia" que suma al score sería un error de categoría: es proyección de objetivos, no una señal detectada en el gráfico. No entra a §4.8.
+
+**Casos de prueba.** Determinista (fórmula de proyección): sobre el rango impulsivo 06-04→06-08 (A=1.16455, B=1.14997, B−A=−0.01458), los objetivos serían `−1`→1.13539, `−2`→1.12081, etc. No requiere conteo de instancias (es cálculo, no detección). Integración verificada al cablear `f_computeSLTP` (Fase 2/3).
+
+### 5.12 Inside Day `f_detectInsideDay` · T37 — patrón diario
+
+**Concepto.** Un día cuyo rango está **contenido** en el del día previo (`high` menor y `low` mayor) → **compresión** de volatilidad que suele preceder una **expansión**. Contexto, peso bajo.
+
+**Definición cuantificada.** Sobre el snapshot **D1** (MTF, `request.security`, `PINE-PLAN §4`): `high[D] < high[D−1]` **y** `low[D] > low[D−1]` → `KIND_INSIDEDAY`, evento en la barra D1 confirmada (anti-repaint: D1 cerrado). `dir` = neutro (es compresión; la dirección la da la ruptura posterior del rango del día previo). Símbolo-agnóstico.
+
+**Parámetros default.** Ninguno (definición geométrica pura sobre D1).
+
+**Contraejemplo.** Un día que hace un `high` mayor **o** un `low` menor que el día previo (outside/trending day) NO es inside day — rompe la contención. La contención de AMBOS extremos es lo que define la compresión.
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv` agregado a día UTC)*: **3 Inside Days** en la ventana (2026-05-31, 06-02, 06-11). Confluencia **candidata #50** (contexto/volatilidad, peso bajo).
+
+### 5.13 SMT Divergence `f_detectSMT` · T38 — ⚠️ requiere ADR de arquitectura
+
+**Concepto.** **Smart Money Technique divergence**: dos símbolos **correlacionados** dejan de moverse en sincronía — uno hace un higher-high (o lower-low) y el otro **no** lo confirma → señal de **manipulación** institucional (uno barrió liquidez, el otro no). Señal de calidad alta.
+
+**Definición cuantificada.** Sobre los **swings** (§1.1) de dos series sincronizadas (el chart + un símbolo correlacionado `smtSymbol`, traído por un 2º `request.security`):
+- **SMT bajista:** el chart hace un **higher-high** (HH respecto a su swing previo) pero el correlacionado hace un **lower-high** (no confirma) en el swing equiparable → divergencia bajista (`dir −1`).
+- **SMT alcista:** el chart hace un **lower-low** y el correlacionado un **higher-low** (no confirma) → `dir +1`.
+- Equiparación por ventana temporal (`smtTol` velas entre los swings comparados). `KIND_SMT`. Función **pura**: recibe las dos secuencias de swings (la del chart + la del correlacionado, obtenida en el consumidor); anti-repaint (swings confirmados).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `smtSymbol` | (input, por perfil) | par correlacionado — lo fija el ADR (p.ej. EURUSD↔GBPUSD / DXY inverso). |
+| `smtTol` | **3** | velas máx. entre los dos swings comparados. |
+
+**Contraejemplo.** Dos símbolos que hacen **ambos** higher-high (se confirman) NO es SMT — la divergencia exige que **uno falle** en confirmar el extremo del otro.
+
+**⚠️ BLOQUEO DE ARQUITECTURA (precede a la implementación):** SMT necesita un **2º `request.security` a otro ticker**. Choca con la doctrina símbolo-agnóstico (ADR-001): ¿qué par correlaciona con cuál? ¿se hardcodea o es input por perfil? ¿coste de performance del 2º security? → **requiere ADR-SMT propio ANTES de codear** (decisión del usuario sobre el mapa de correlaciones y el modelo de input). Regla escrita; **código BLOQUEADO hasta el ADR**. Confluencia **candidata #51** (fuerte). *(No verificable con `eurusd_h1.csv` — un solo símbolo; la verificación de casos se hará con el par correlacionado en la pasada TV, tras el ADR.)*
+
+### 5.14 Macros intradía `f_detectMacro` · T39 — extiende `f_killZone` (§3.4)
+
+**Concepto.** Sub-ventanas de **minutos** dentro de las Kill Zones donde el algoritmo institucional (IPDA) entrega con más probabilidad: los **macros** ICT. Refina #34 (Kill Zone) con sub-ventana; no es confluencia nueva.
+
+**Definición cuantificada.** `f_killZone` (§3.4) se extiende para devolver también **macro activa** si la hora local (NY, con DST automático como §3.4) cae en una ventana macro canónica ICT:
+- **London:** 02:33–03:00, 04:03–04:30 (NY time).
+- **NY AM:** 08:50–09:10, 09:50–10:10, 10:50–11:10, 11:50–12:10.
+- **NY Lunch:** 12:00–13:00 (baja actividad — filtro, no entrada).
+- **NY PM:** 13:10–13:40, 15:15–15:45.
+Devuelve `macroActiva` (bool) + identificador. Anti-repaint: por reloj (no repinta). Confluencia: **refina #34** (sub-ventana de mayor peso), no suma nueva.
+
+**Parámetros default.** Ventanas canónicas ICT (arriba), en hora NY local+DST. Símbolo-agnóstico (el reloj informa, no veta — ADR-001).
+
+**Contraejemplo.** Una señal **dentro** de la Kill Zone pero **fuera** de toda ventana macro: sigue siendo válida (la KZ ya aporta #34); el macro solo **añade peso** si coincide. No bloquea (ADR-001).
+
+**Casos de prueba** *(EURUSD)*: las ventanas son **horarios canónicos ICT** (no inventados), del mismo tipo que las Kill Zones §3.4 ya validadas. Verificación de coincidencia hora→ventana es determinista (reloj); la calidad de cada macro se calibra en Fase 3. *(M5 disponible 06-10/06-11 permite spot-check de membresía; el peso es Fase 3.)*
+
+### 5.15 RTH vs ETH `f_sessionType` · T40 — extiende `f_killZone` (§3.4)
+
+**Concepto.** **Regular Trading Hours** vs **Extended Trading Hours**: distingue la sesión regular (mayor liquidez/validez) de la extendida (ruido). Relevante a **futuros/índices** (que tienen cierre); símbolo-agnóstico vía perfil (ADR-001). Modula #34 / filtro de calidad.
+
+**Definición cuantificada.** Por **perfil de sesión** (input, como `sessionProfile` §3.4): si la hora local cae en la ventana RTH del instrumento → `RTH`, si no → `ETH`. Ej. índices US: RTH 09:30–16:00 NY. Modula el peso de #34 (señales en RTH = mayor calidad). Anti-repaint: por reloj.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `rthProfile` | (input por símbolo) | ventana RTH del instrumento. **FX = 24h → no aplica** (RTH≡ETH; el perfil FX lo neutraliza). |
+
+**Contraejemplo.** Aplicar RTH/ETH a **EURUSD** (FX 24h): no hay distinción real → el perfil FX desactiva la modulación (toda hora es "regular"). RTH/ETH solo modula en instrumentos con sesión regular acotada (índices/futuros).
+
+**Casos de prueba.** **No aplica a EURUSD** (24h) — por eso no hay instancias en `eurusd_h1.csv`. Es símbolo-agnóstico para cuando se valide un índice/futuro (Fase 5, par nuevo). Regla definida; verificación con instrumento de sesión acotada.
+
+> **Lote 4 (T38 SMT · T39 macros · T40 RTH/ETH) — definido.** SMT con **BLOQUEO ADR** (código pendiente del ADR-SMT). Macros/RTH-ETH son ventanas de reloj canónicas (no aplican a EURUSD 24h salvo macros).
+>
+> **✅ §5 GAP ICT (T26–T40) COMPLETO en Fase 0 (reglas).** Las 15 primitivas tienen regla cuantificada + umbrales ATR-relativos verificados contra `eurusd_h1.csv` (donde el dato existe) o marcados como pendientes de pasada TV dedicada (SMT multi-símbolo, RTH/ETH índices). **Ningún código Pine aún** (gate). Falta antes de codear: (1) **ADR-SMT** para T38; (2) confirmar números de confluencia #43–#51 al cablear scoring (Fase 2). **Ruta B** (DOL, IRL/ERL, HRLR/LRLR, IPDA/PDArray) NO está aquí: son moduladores de bias/scoring → Sprint 2.1.
