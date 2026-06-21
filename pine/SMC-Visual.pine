@@ -38,6 +38,10 @@ i_dispFactor      = input.float(1.5,  "Displacement: rango (x ATR14)", minval = 
 i_dispBodyPct     = input.float(0.70, "Displacement: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_CTX)
 i_dispContraction = input.bool(true,  "Displacement: exigir contraccion previa (>=3 velas)", group = GRP_CTX)
 i_maxShowDisp     = input.int(20,     "Max marcadores de displacement (recientes)", minval = 1, group = GRP_CTX)
+i_showRej         = input.bool(true,  "Mostrar Rejections (rechazo en nivel)", group = GRP_CTX)
+i_rejWickFactor   = input.float(2.0,  "Rejection: mecha minima (x cuerpo) §2.7", minval = 0.5, step = 0.1, group = GRP_CTX)
+i_rejTouchTol     = input.float(0.1,  "Rejection: tolerancia toque nivel (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_CTX)
+i_maxShowRej      = input.int(20,     "Max marcadores de rejection (recientes)", minval = 1, group = GRP_CTX)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
@@ -557,6 +561,63 @@ f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTime, flo
     else if h0 < l2 and (l2 - h0) >= threshold
         z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
     z
+
+// --- Rejection [reglas-smc-ict §2.7] · T20 ---
+// f_wickNearLevel: ¿la punta de la mecha (wick = low en rejection alcista / high en bajista) TOCA un
+// nivel clave dentro de tol? Niveles: zonas activas OB/FVG/Breaker (dentro de [bottom-tol, top+tol]),
+// pools vivos (no barridos), EQH/EQL, bordes Premium/Discount (pdH/pdL/pdM) y EMAs (20/50/200). Es el
+// ANCLA que distingue una rejection operable de una mecha "en medio de la nada" (ruido, §2.7
+// contraejemplo). PURA: recibe arrays + escalares, no lee series -> portable a golden tests (ADR-002).
+// Devuelve bool. Cortocircuita (break) en cuanto encuentra un nivel.
+f_wickNearLevel(float wick, array<SMC_Zone> zones, array<SMC_Pool> pools, array<SMC_Event> eqhl, float pdH, float pdL, float pdM, float e20, float e50, float e200, float tol) =>
+    bool near = false
+    if not na(wick)
+        if array.size(zones) > 0
+            for i = 0 to array.size(zones) - 1
+                SMC_Zone z = array.get(zones, i)
+                if z.state < ZS_MITIGATED and wick >= z.bottom - tol and wick <= z.top + tol
+                    near := true
+                    break
+        if not near and array.size(pools) > 0
+            for i = 0 to array.size(pools) - 1
+                SMC_Pool p = array.get(pools, i)
+                if not p.swept and math.abs(wick - p.level) <= tol
+                    near := true
+                    break
+        if not near and array.size(eqhl) > 0
+            for i = 0 to array.size(eqhl) - 1
+                if math.abs(wick - array.get(eqhl, i).price) <= tol
+                    near := true
+                    break
+        if not near and ((not na(pdH) and math.abs(wick - pdH) <= tol) or (not na(pdL) and math.abs(wick - pdL) <= tol) or (not na(pdM) and math.abs(wick - pdM) <= tol))
+            near := true
+        if not near and ((not na(e20) and math.abs(wick - e20) <= tol) or (not na(e50) and math.abs(wick - e50) <= tol) or (not na(e200) and math.abs(wick - e200) <= tol))
+            near := true
+    near
+
+// f_detectRejection: vela de RECHAZO en un nivel clave (el precio intento penetrar y fue devuelto con
+// fuerza, §2.7, confluencia #23). Alcista: mecha INFERIOR >= rejWickFactor*cuerpo (default 2x), cierra
+// en la mitad SUPERIOR del rango y el low TOCA un nivel clave (nearLow). Bajista: simetrico con mecha
+// SUPERIOR, cierre en mitad inferior y high tocando nivel (nearHigh). cuerpo = |c-o|; mecha inferior =
+// min(o,c)-l; mecha superior = h-max(o,c). El ancla al nivel la precomputa el consumidor (f_wickNearLevel)
+// y la pasa como bool -> esta funcion es geometria PURA (OHLC + flags), trivial en golden tests MQL5
+// (ADR-002). Precedencia alcista en el raro doble (c == mid con ambas mechas). Devuelve SMC_Event
+// KIND_REJECTION en la punta de la mecha (l alcista / h bajista), o na. rng 0 -> na.
+f_detectRejection(float o, float h, float l, float c, float rejWickFactor, bool nearLow, bool nearHigh, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    float rng = h - l
+    if rng > 0
+        float body      = math.abs(c - o)
+        float lowerWick = math.min(o, c) - l
+        float upperWick = h - math.max(o, c)
+        float mid       = (h + l) / 2.0
+        bool bull = lowerWick >= rejWickFactor * body and c >= mid and nearLow
+        bool bear = upperWick >= rejWickFactor * body and c <= mid and nearHigh
+        if bull
+            ev := SMC_Event.new(l, DIR_BULL, barIdx, barTime, "", KIND_REJECTION)
+        else if bear
+            ev := SMC_Event.new(h, DIR_BEAR, barIdx, barTime, "", KIND_REJECTION)
+    ev
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1427,6 +1488,25 @@ if barstate.isconfirmed
     if not na(evJudas)
         f_pushEvent(SMC_judas, evJudas, MAX_EVENTS)
 
+// --- Rejection [§2.7] · T20 ---
+// Vela de rechazo (mecha larga) anclada a un nivel clave. La geometria la decide f_detectRejection
+// (pura); el ANCLA (nearLow/nearHigh) la computa aqui f_wickNearLevel sobre el estado vigente: zonas
+// (SMC_zones OB/FVG/Breaker), pools vivos (SMC_pools), EQH/EQL (SMC_eqhl), bordes P/D (chartState) y
+// EMAs del chart. tol = i_rejTouchTol*ATR14. EMAs ta.ema CADA barra (fuera del if, RE-safe). Va a su
+// array dedicado SMC_rejections (confluencia #23, scoring Fase 3).
+float rejEma20  = ta.ema(close, 20)
+float rejEma50  = ta.ema(close, 50)
+float rejEma200 = ta.ema(close, 200)
+var array<SMC_Event> SMC_rejections = array.new<SMC_Event>()
+SMC_Event evRej = na
+if barstate.isconfirmed
+    float rejTol = i_rejTouchTol * atr14
+    bool rejNearLow  = f_wickNearLevel(low,  SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, rejEma20, rejEma50, rejEma200, rejTol)
+    bool rejNearHigh = f_wickNearLevel(high, SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, rejEma20, rejEma50, rejEma200, rejTol)
+    evRej := f_detectRejection(open, high, low, close, i_rejWickFactor, rejNearLow, rejNearHigh, bar_index, time)
+    if not na(evRej)
+        f_pushEvent(SMC_rejections, evRej, MAX_EVENTS)
+
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
 // transporta UDT/array). f_computeTFState se evalua en el contexto del HTF con estado var
@@ -1656,6 +1736,24 @@ if i_showJudas and barstate.islast
             bool bullJudas = jd.dir == DIR_BULL
             string jtxt = bullJudas ? "Judas ↑" : "Judas ↓"
             array.push(SMC_judasLabels, label.new(jd.barTime + judasOffMs, jd.price, jtxt, style = label.style_label_left, color = color.new(color.fuchsia, 70), textcolor = color.fuchsia, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de Rejection [T20 · §2.7]. Mismo patron repintado-en-islast (acotado a i_maxShowRej).
+// AQUA: lo distingue del naranja (disp), amarillo (IDM), fucsia (Judas) y verde/rojo (sweep). Anclado
+// a la PUNTA de la mecha rechazada (low alcista / high bajista), apuntando hacia la vela (label_up
+// alcista debajo del low / label_down bajista sobre el high). La flecha del texto marca la direccion.
+var array<label> SMC_rejLabels = array.new<label>()
+if i_showRej and barstate.islast
+    for lb in SMC_rejLabels
+        label.delete(lb)
+    array.clear(SMC_rejLabels)
+    int nR = array.size(SMC_rejections)
+    if nR > 0
+        int firstR = math.max(0, nR - i_maxShowRej)
+        for i = firstR to nR - 1
+            SMC_Event rj = array.get(SMC_rejections, i)
+            bool bullRej = rj.dir == DIR_BULL
+            string rtxt = bullRej ? "Rej ↑" : "Rej ↓"
+            array.push(SMC_rejLabels, label.new(rj.barTime, rj.price, rtxt, style = bullRej ? label.style_label_up : label.style_label_down, color = color.new(color.aqua, 70), textcolor = color.aqua, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el

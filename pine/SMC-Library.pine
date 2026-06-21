@@ -474,6 +474,57 @@ export f_detectFVG(float h0, float l0, float h2, float l2, int barIdx, int barTi
         z := SMC_Zone.new(l2, h0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", kind)
     z
 
+// --- Rejection [reglas-smc-ict §2.7] · T20 ---
+// f_wickNearLevel: ¿la punta de la mecha (low en rejection alcista / high en bajista) TOCA un nivel
+// clave dentro de tol? Niveles: zonas activas OB/FVG/Breaker, pools vivos, EQH/EQL, Premium/Discount y
+// EMAs. Es el ANCLA que distingue una rejection operable de una mecha "en medio de la nada" (§2.7).
+// PURA: arrays + escalares, no lee series (ADR-002). Devuelve bool.
+export f_wickNearLevel(float wick, array<SMC_Zone> zones, array<SMC_Pool> pools, array<SMC_Event> eqhl, float pdH, float pdL, float pdM, float e20, float e50, float e200, float tol) =>
+    bool near = false
+    if not na(wick)
+        if array.size(zones) > 0
+            for i = 0 to array.size(zones) - 1
+                SMC_Zone z = array.get(zones, i)
+                if z.state < ZS_MITIGATED and wick >= z.bottom - tol and wick <= z.top + tol
+                    near := true
+                    break
+        if not near and array.size(pools) > 0
+            for i = 0 to array.size(pools) - 1
+                SMC_Pool p = array.get(pools, i)
+                if not p.swept and math.abs(wick - p.level) <= tol
+                    near := true
+                    break
+        if not near and array.size(eqhl) > 0
+            for i = 0 to array.size(eqhl) - 1
+                if math.abs(wick - array.get(eqhl, i).price) <= tol
+                    near := true
+                    break
+        if not near and ((not na(pdH) and math.abs(wick - pdH) <= tol) or (not na(pdL) and math.abs(wick - pdL) <= tol) or (not na(pdM) and math.abs(wick - pdM) <= tol))
+            near := true
+        if not near and ((not na(e20) and math.abs(wick - e20) <= tol) or (not na(e50) and math.abs(wick - e50) <= tol) or (not na(e200) and math.abs(wick - e200) <= tol))
+            near := true
+    near
+
+// f_detectRejection: vela de RECHAZO en un nivel clave (§2.7, confluencia #23). Alcista: mecha INFERIOR
+// >= rejWickFactor*cuerpo (default 2x), cierra en mitad SUPERIOR y low toca nivel (nearLow); bajista
+// simetrico (mecha superior, mitad inferior, high toca nivel). cuerpo=|c-o|; el ancla la precomputa el
+// consumidor (f_wickNearLevel) -> geometria PURA (ADR-002). Devuelve SMC_Event KIND_REJECTION o na.
+export f_detectRejection(float o, float h, float l, float c, float rejWickFactor, bool nearLow, bool nearHigh, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    float rng = h - l
+    if rng > 0
+        float body      = math.abs(c - o)
+        float lowerWick = math.min(o, c) - l
+        float upperWick = h - math.max(o, c)
+        float mid       = (h + l) / 2.0
+        bool bull = lowerWick >= rejWickFactor * body and c >= mid and nearLow
+        bool bear = upperWick >= rejWickFactor * body and c <= mid and nearHigh
+        if bull
+            ev := SMC_Event.new(l, DIR_BULL, barIdx, barTime, "", KIND_REJECTION)
+        else if bear
+            ev := SMC_Event.new(h, DIR_BEAR, barIdx, barTime, "", KIND_REJECTION)
+    ev
+
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Dealing range basado en trailing extremes de LuxAlgo (trailingExtremes :181,
 // updateTrailingExtremes :709-713; v5->v6). El rango [bottom, top] se ANCLA al ultimo
