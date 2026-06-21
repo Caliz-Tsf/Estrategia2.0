@@ -73,6 +73,11 @@ i_showOTE      = input.bool(true,  "Mostrar OTE / Golden Pocket",       group = 
 i_oteR1        = input.float(0.50,  "Fib inicio GP (50%)",   minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR2        = input.float(0.618, "Fib GP/OTE (61.8%)",    minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR3        = input.float(0.79,  "Fib fin OTE (79%)",     minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
+i_showStdDev   = input.bool(false, "Proyectar Standard Deviation (objetivos, §5.11)", group = GRP_OTE)
+i_stdMult1     = input.float(1.0,  "StdDev #1", step = 0.5, group = GRP_OTE)
+i_stdMult2     = input.float(2.0,  "StdDev #2", step = 0.5, group = GRP_OTE)
+i_stdMult3     = input.float(2.5,  "StdDev #3", step = 0.5, group = GRP_OTE)
+i_stdMult4     = input.float(4.0,  "StdDev #4", step = 0.5, group = GRP_OTE)
 i_showFVG      = input.bool(true,  "Mostrar Fair Value Gaps",          group = GRP_FVG)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_showCE       = input.bool(true,  "Mostrar nivel CE (50%)",           group = GRP_FVG)
@@ -779,6 +784,15 @@ f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int barTim
     if not na(h1) and not na(h2) and h1 < h2 and l1 > l2
         ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
     ev
+
+// --- Standard Deviation [reglas-smc-ict §5.11] · T36 ---
+// f_projStdDev: HERRAMIENTA de proyeccion (NO confluencia, §0.9): dado un rango ancla [a=origen,
+// b=extremo] de una pierna, proyecta el objetivo a n desviaciones en la DIRECCION de la pierna:
+// nivel = b + n*(b - a). Continuacion mas alla de b (n=1,2,2.5,4 = los multiplos estandar ICT, rotulados
+// nominalmente -1/-2/-2.5/-4). Insumo de f_computeSLTP (TP del motor EA, Fase 2/3); NO entra al scoring.
+// PURA. Devuelve el nivel proyectado (float).
+f_projStdDev(float a, float b, float n) =>
+    b + n * (b - a)
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
@@ -2618,6 +2632,28 @@ if i_showInsideDay and barstate.islast
         for i = firstID to nID - 1
             SMC_Event idv = array.get(SMC_insideDays, i)
             array.push(SMC_idLabels, label.new(idv.barTime, idv.price, "ID", style = label.style_label_down, color = color.new(color.gray, 65), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
+
+// Proyeccion Standard Deviation [T36 · §5.11] (solo Visual): objetivos de CONTINUACION de la pierna
+// dominante (rango operativo trailing). A=origen / B=extremo segun el sesgo dominante (bajista: top->bottom;
+// alcista: bottom->top). Lineas punteadas grises extendidas a la derecha + etiqueta del multiplo. Es una
+// HERRAMIENTA (no confluencia): proyecta TPs. Off por defecto.
+var array<line>  SMC_stdLines  = array.new<line>()
+var array<label> SMC_stdLabels = array.new<label>()
+if i_showStdDev and barstate.islast
+    for l in SMC_stdLines
+        line.delete(l)
+    for lb in SMC_stdLabels
+        label.delete(lb)
+    array.clear(SMC_stdLines)
+    array.clear(SMC_stdLabels)
+    if structMajor.bias != 0 and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
+        float aAnchor = structMajor.bias == DIR_BEAR ? trailing.top : trailing.bottom
+        float bAnchor = structMajor.bias == DIR_BEAR ? trailing.bottom : trailing.top
+        array<float> stdMults = array.from(i_stdMult1, i_stdMult2, i_stdMult3, i_stdMult4)
+        for m in stdMults
+            float lvl = f_projStdDev(aAnchor, bAnchor, m)
+            array.push(SMC_stdLines, line.new(bar_index - 1, lvl, bar_index, lvl, xloc = xloc.bar_index, color = color.new(color.gray, 40), style = line.style_dotted, width = 1, extend = extend.right))
+            array.push(SMC_stdLabels, label.new(bar_index, lvl, "σ" + str.tostring(m), style = label.style_label_left, color = color.new(color.gray, 88), textcolor = color.gray, size = size.tiny, xloc = xloc.bar_index))
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
 // origen no repinta). Alcista VERDE OSCURO / bajista ROJO OSCURO (pref. usuario, para no

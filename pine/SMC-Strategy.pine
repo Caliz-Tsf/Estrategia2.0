@@ -718,6 +718,15 @@ f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int barTim
         ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
     ev
 
+// --- Standard Deviation [reglas-smc-ict §5.11] · T36 ---
+// f_projStdDev: HERRAMIENTA de proyeccion (NO confluencia, §0.9): dado un rango ancla [a=origen,
+// b=extremo] de una pierna, proyecta el objetivo a n desviaciones en la DIRECCION de la pierna:
+// nivel = b + n*(b - a). Continuacion mas alla de b (n=1,2,2.5,4 = los multiplos estandar ICT, rotulados
+// nominalmente -1/-2/-2.5/-4). Insumo de f_computeSLTP (TP del motor EA, Fase 2/3); NO entra al scoring.
+// PURA. Devuelve el nivel proyectado (float).
+f_projStdDev(float a, float b, float n) =>
+    b + n * (b - a)
+
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
 // color = la pierna de delivery) y CIERRA de vuelta cruzando el ORIGEN de ese run (el open de su primera

@@ -623,6 +623,13 @@ export f_detectInsideDay(float h1, float l1, float h2, float l2, int barIdx, int
         ev := SMC_Event.new((h1 + l1) / 2.0, 0, barIdx, barTime, "", KIND_INSIDEDAY)
     ev
 
+// --- Standard Deviation [reglas-smc-ict §5.11] · T36 ---
+// f_projStdDev: HERRAMIENTA de proyeccion (NO confluencia). Rango ancla [a=origen, b=extremo]; proyecta
+// nivel = b + n*(b - a) (continuacion, n=1/2/2.5/4 = multiplos estandar ICT). Insumo de f_computeSLTP,
+// no scoring. PURA. Devuelve el nivel proyectado.
+export f_projStdDev(float a, float b, float n) =>
+    b + n * (b - a)
+
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: cierre que cruza el ORIGEN (open de la 1a vela) del ultimo run de delivery (>= cisdMinRun
 // velas del mismo color). Giro mas temprano que el CHoCH (no rompe pivote). El consumidor mantiene el run
