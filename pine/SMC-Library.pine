@@ -48,6 +48,10 @@ export const int ZS_ACTIVE    = 0
 export const int ZS_PARTIAL   = 1
 export const int ZS_MITIGATED = 2
 export const int ZS_INVALID   = 3
+// Estados del ciclo de vida del Flip [§2.8 · T21]
+export const int LF_PENDING = 0
+export const int LF_FLIPPED = 1
+export const int LF_INVALID = 2
 // Zonas de valor Premium/Discount [§2.3 · T07]
 export const int PD_DISCOUNT    = -1
 export const int PD_EQUILIBRIUM = 0
@@ -67,6 +71,7 @@ export const int MAX_EVENTS = 100
 export const int MAX_SWINGS = 100
 export const int MAX_POOLS  = 50
 export const int MAX_BARBUF = 500
+export const int MAX_FLIPS  = 30
 export const int MTF_K    = 12
 export const int MTF_SLOT = 6
 
@@ -131,6 +136,13 @@ export type SMC_TFState
     float  ema50          = na
     float  ema200         = na
     float  atr14          = na
+// Nivel con cambio de rol (Flip) [§2.8 · T21]
+export type SMC_Flip
+    float  level
+    int    breakDir
+    int    state    = 0
+    int    barIdx
+    int    barTime
 
 // --- Helpers de arrays acotados [reglas-dev §1.6] ---
 // Tras cada push, si se supera el limite se descarta el mas antiguo (FIFO).
@@ -524,6 +536,27 @@ export f_detectRejection(float o, float h, float l, float c, float rejWickFactor
         else if bear
             ev := SMC_Event.new(h, DIR_BEAR, barIdx, barTime, "", KIND_REJECTION)
     ev
+
+// --- Flip [reglas-smc-ict §2.8] · T21 ---
+// f_updateFlip: ciclo de vida de un NIVEL que cambia de rol (soporte<->resistencia, confluencia #25).
+// Un nivel roto por CIERRE LIMPIO (no mecha) queda LF_PENDING; ese nivel lo provee la estructura
+// (BOS/CHoCH: nivel roto = ev.price, breakDir = ev.dir). Avanza por OHLC de la barra confirmada (PURA):
+// roto al ALZA (breakDir>0, pendiente SOPORTE) -> LF_FLIPPED si retesta desde arriba y respeta (low <=
+// level y close > level); LF_INVALID si cierra de vuelta abajo. Roto a la BAJA simetrico. El cierre
+// limpio lo distingue del sweep (§2.8). No se evalua en su barra de ruptura. Muta y devuelve el flip.
+export f_updateFlip(SMC_Flip f, float barHigh, float barLow, float barClose) =>
+    if f.state == LF_PENDING
+        if f.breakDir > 0
+            if barClose < f.level
+                f.state := LF_INVALID
+            else if barLow <= f.level and barClose > f.level
+                f.state := LF_FLIPPED
+        else
+            if barClose > f.level
+                f.state := LF_INVALID
+            else if barHigh >= f.level and barClose < f.level
+                f.state := LF_FLIPPED
+    f
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Dealing range basado en trailing extremes de LuxAlgo (trailingExtremes :181,

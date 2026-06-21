@@ -87,6 +87,9 @@ ZS_ACTIVE    = 0
 ZS_PARTIAL   = 1
 ZS_MITIGATED = 2
 ZS_INVALID   = 3
+LF_PENDING = 0
+LF_FLIPPED = 1
+LF_INVALID = 2
 PD_DISCOUNT    = -1
 PD_EQUILIBRIUM = 0
 PD_PREMIUM     = 1
@@ -102,6 +105,7 @@ MAX_EVENTS = 100
 MAX_SWINGS = 100
 MAX_POOLS  = 50
 MAX_BARBUF = 500
+MAX_FLIPS  = 30
 MTF_K    = 12
 MTF_SLOT = 6
 type SMC_Zone
@@ -155,6 +159,12 @@ type SMC_TFState
     float  ema50          = na
     float  ema200         = na
     float  atr14          = na
+type SMC_Flip
+    float  level
+    int    breakDir       // +1 roto al alza (pendiente soporte) / -1 roto a la baja (pendiente resistencia)
+    int    state    = 0    // LF_PENDING / LF_FLIPPED / LF_INVALID
+    int    barIdx
+    int    barTime
 f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
     array.push(a, z)
     if array.size(a) > maxN
@@ -584,6 +594,30 @@ f_detectRejection(float o, float h, float l, float c, float rejWickFactor, bool 
         else if bear
             ev := SMC_Event.new(h, DIR_BEAR, barIdx, barTime, "", KIND_REJECTION)
     ev
+
+// --- Flip [reglas-smc-ict §2.8] · T21 ---
+// f_updateFlip: ciclo de vida de un NIVEL que cambia de rol (soporte<->resistencia, confluencia #25).
+// Un nivel roto por CIERRE LIMPIO (no mecha) queda LF_PENDING; ese nivel lo provee la estructura
+// (BOS/CHoCH = ruptura por cierre: nivel roto = ev.price, breakDir = ev.dir). Avanza por el OHLC de la
+// barra confirmada (PURA, recibe high/low/close): roto al ALZA (breakDir>0, pendiente SOPORTE) ->
+// LF_FLIPPED si una vela retestea desde arriba y respeta (low <= level y close > level); LF_INVALID si
+// una vela CIERRA de vuelta abajo (close < level, el soporte fallo). Roto a la BAJA simetrico (pendiente
+// RESISTENCIA; flip si high >= level y close < level; invalid si close > level). El "cierre limpio" lo
+// distingue del sweep (mecha), §2.8 contraejemplo. NO se evalua en su barra de ruptura (el consumidor
+// registra DESPUES de actualizar). Muta y devuelve el flip.
+f_updateFlip(SMC_Flip f, float barHigh, float barLow, float barClose) =>
+    if f.state == LF_PENDING
+        if f.breakDir > 0
+            if barClose < f.level
+                f.state := LF_INVALID
+            else if barLow <= f.level and barClose > f.level
+                f.state := LF_FLIPPED
+        else
+            if barClose > f.level
+                f.state := LF_INVALID
+            else if barHigh >= f.level and barClose < f.level
+                f.state := LF_FLIPPED
+    f
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1430,6 +1464,30 @@ if barstate.isconfirmed
     evRej := f_detectRejection(open, high, low, close, i_rejWickFactor, rejNearLow, rejNearHigh, bar_index, time)
     if not na(evRej)
         f_pushEvent(SMC_rejections, evRej, MAX_EVENTS)
+
+// --- Flip [§2.8] · T21 ---
+// Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_flipEvents para el scoring,
+// confluencia #25). Nivel roto por cierre limpio (estructura swing) que cambia de rol al retestearse.
+// SMC_flips = pendientes (var); actualizar/limpiar terminales -> registrar el nuevo (no en su barra de
+// ruptura). Nivel + direccion = evStructSwing.price/.dir.
+var array<SMC_Flip>  SMC_flips      = array.new<SMC_Flip>()
+var array<SMC_Event> SMC_flipEvents = array.new<SMC_Event>()
+SMC_Event evFlip = na
+if barstate.isconfirmed
+    if array.size(SMC_flips) > 0
+        for i = array.size(SMC_flips) - 1 to 0
+            SMC_Flip f = array.get(SMC_flips, i)
+            f_updateFlip(f, high, low, close)
+            if f.state == LF_FLIPPED
+                evFlip := SMC_Event.new(f.level, f.breakDir > 0 ? DIR_BULL : DIR_BEAR, bar_index, time, "", KIND_FLIP)
+                f_pushEvent(SMC_flipEvents, evFlip, MAX_EVENTS)
+                array.remove(SMC_flips, i)
+            else if f.state == LF_INVALID
+                array.remove(SMC_flips, i)
+    if not na(evStructSwing)
+        array.push(SMC_flips, SMC_Flip.new(evStructSwing.price, evStructSwing.dir, LF_PENDING, bar_index, time))
+    while array.size(SMC_flips) > MAX_FLIPS
+        array.remove(SMC_flips, 0)
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO

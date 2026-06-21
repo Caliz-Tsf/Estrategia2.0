@@ -29,6 +29,8 @@ i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STR
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
 i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
+i_showFlip     = input.bool(true,  "Mostrar Flips (cambio de rol, §2.8)", group = GRP_STRUCT)
+i_maxShowFlip  = input.int(20,     "Max marcadores de flip (recientes)", minval = 1, group = GRP_STRUCT)
 i_mssDispFactor= input.float(1.5,  "MSS: rango vela ruptura (x ATR14)", minval = 0.5, step = 0.1, group = GRP_STRUCT)
 i_mssBodyPct   = input.float(0.70, "MSS: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_STRUCT)
 // Displacement [§4.1 · T16]: vela impulsiva (calificador de fuerza). Knobs propios
@@ -121,6 +123,9 @@ ZS_ACTIVE    = 0
 ZS_PARTIAL   = 1
 ZS_MITIGATED = 2
 ZS_INVALID   = 3
+LF_PENDING = 0
+LF_FLIPPED = 1
+LF_INVALID = 2
 PD_DISCOUNT    = -1
 PD_EQUILIBRIUM = 0
 PD_PREMIUM     = 1
@@ -136,6 +141,7 @@ MAX_EVENTS = 100
 MAX_SWINGS = 100
 MAX_POOLS  = 50
 MAX_BARBUF = 500
+MAX_FLIPS  = 30
 MTF_K    = 12
 MTF_SLOT = 6
 type SMC_Zone
@@ -189,6 +195,12 @@ type SMC_TFState
     float  ema50          = na
     float  ema200         = na
     float  atr14          = na
+type SMC_Flip
+    float  level
+    int    breakDir       // +1 roto al alza (pendiente soporte) / -1 roto a la baja (pendiente resistencia)
+    int    state    = 0    // LF_PENDING / LF_FLIPPED / LF_INVALID
+    int    barIdx
+    int    barTime
 f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
     array.push(a, z)
     if array.size(a) > maxN
@@ -618,6 +630,30 @@ f_detectRejection(float o, float h, float l, float c, float rejWickFactor, bool 
         else if bear
             ev := SMC_Event.new(h, DIR_BEAR, barIdx, barTime, "", KIND_REJECTION)
     ev
+
+// --- Flip [reglas-smc-ict §2.8] · T21 ---
+// f_updateFlip: ciclo de vida de un NIVEL que cambia de rol (soporte<->resistencia, confluencia #25).
+// Un nivel roto por CIERRE LIMPIO (no mecha) queda LF_PENDING; ese nivel lo provee la estructura
+// (BOS/CHoCH = ruptura por cierre: nivel roto = ev.price, breakDir = ev.dir). Avanza por el OHLC de la
+// barra confirmada (PURA, recibe high/low/close): roto al ALZA (breakDir>0, pendiente SOPORTE) ->
+// LF_FLIPPED si una vela retestea desde arriba y respeta (low <= level y close > level); LF_INVALID si
+// una vela CIERRA de vuelta abajo (close < level, el soporte fallo). Roto a la BAJA simetrico (pendiente
+// RESISTENCIA; flip si high >= level y close < level; invalid si close > level). El "cierre limpio" lo
+// distingue del sweep (mecha), §2.8 contraejemplo. NO se evalua en su barra de ruptura (el consumidor
+// registra DESPUES de actualizar). Muta y devuelve el flip.
+f_updateFlip(SMC_Flip f, float barHigh, float barLow, float barClose) =>
+    if f.state == LF_PENDING
+        if f.breakDir > 0
+            if barClose < f.level
+                f.state := LF_INVALID
+            else if barLow <= f.level and barClose > f.level
+                f.state := LF_FLIPPED
+        else
+            if barClose > f.level
+                f.state := LF_INVALID
+            else if barHigh >= f.level and barClose < f.level
+                f.state := LF_FLIPPED
+    f
 
 // --- Premium / Discount / Equilibrium [reglas-smc-ict §2.3] · T07 ---
 // Porta el "dealing range" de LuxAlgo basado en trailing extremes (type
@@ -1507,6 +1543,31 @@ if barstate.isconfirmed
     if not na(evRej)
         f_pushEvent(SMC_rejections, evRej, MAX_EVENTS)
 
+// --- Flip [§2.8] · T21 ---
+// Nivel roto por cierre limpio (lo provee la estructura swing: BOS/CHoCH) que cambia de rol al ser
+// retesteado. SMC_flips = niveles PENDIENTES (var); cada barra confirmada se actualizan por OHLC, y al
+// confirmarse (LF_FLIPPED) se emite KIND_FLIP a SMC_flipEvents (confluencia #25). Orden: actualizar/
+// limpiar terminales -> registrar el nuevo (no se evalua en su barra de ruptura). Nivel roto + direccion
+// = evStructSwing.price/.dir. Recorre hacia atras para poder remover terminales en el mismo loop.
+var array<SMC_Flip>  SMC_flips      = array.new<SMC_Flip>()
+var array<SMC_Event> SMC_flipEvents = array.new<SMC_Event>()
+SMC_Event evFlip = na
+if barstate.isconfirmed
+    if array.size(SMC_flips) > 0
+        for i = array.size(SMC_flips) - 1 to 0
+            SMC_Flip f = array.get(SMC_flips, i)
+            f_updateFlip(f, high, low, close)
+            if f.state == LF_FLIPPED
+                evFlip := SMC_Event.new(f.level, f.breakDir > 0 ? DIR_BULL : DIR_BEAR, bar_index, time, "", KIND_FLIP)
+                f_pushEvent(SMC_flipEvents, evFlip, MAX_EVENTS)
+                array.remove(SMC_flips, i)
+            else if f.state == LF_INVALID
+                array.remove(SMC_flips, i)
+    if not na(evStructSwing)
+        array.push(SMC_flips, SMC_Flip.new(evStructSwing.price, evStructSwing.dir, LF_PENDING, bar_index, time))
+    while array.size(SMC_flips) > MAX_FLIPS
+        array.remove(SMC_flips, 0)
+
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
 // transporta UDT/array). f_computeTFState se evalua en el contexto del HTF con estado var
@@ -1754,6 +1815,31 @@ if i_showRej and barstate.islast
             bool bullRej = rj.dir == DIR_BULL
             string rtxt = bullRej ? "Rej ↑" : "Rej ↓"
             array.push(SMC_rejLabels, label.new(rj.barTime, rj.price, rtxt, style = bullRej ? label.style_label_up : label.style_label_down, color = color.new(color.aqua, 70), textcolor = color.aqua, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de Flip [T21 · §2.8]. Mismo patron repintado-en-islast (acotado a i_maxShowFlip). Nivel
+// confirmado de cambio de rol (soporte<->resistencia). Linea horizontal corta al nivel + etiqueta
+// 'FLIP ↑/↓' (alcista = nivel paso a SOPORTE; bajista = a RESISTENCIA). Color PLATA, lo distingue del
+// resto. Anclado por bar_time desde la barra de confirmacion, extendido a la derecha.
+var array<line>  SMC_flipLines  = array.new<line>()
+var array<label> SMC_flipLabels = array.new<label>()
+if i_showFlip and barstate.islast
+    for l in SMC_flipLines
+        line.delete(l)
+    for lb in SMC_flipLabels
+        label.delete(lb)
+    array.clear(SMC_flipLines)
+    array.clear(SMC_flipLabels)
+    int nF = array.size(SMC_flipEvents)
+    if nF > 0
+        int firstF = math.max(0, nF - i_maxShowFlip)
+        int flipOffMs = 8 * (time - time[1])
+        for i = firstF to nF - 1
+            SMC_Event fp = array.get(SMC_flipEvents, i)
+            bool bullFlip = fp.dir == DIR_BULL
+            color fcol = color.new(color.silver, 35)
+            array.push(SMC_flipLines, line.new(fp.barTime, fp.price, fp.barTime + flipOffMs, fp.price, xloc = xloc.bar_time, color = fcol, style = line.style_solid, width = 1))
+            string ftxt = bullFlip ? "FLIP ↑" : "FLIP ↓"
+            array.push(SMC_flipLabels, label.new(fp.barTime + flipOffMs, fp.price, ftxt, style = label.style_label_left, color = color.new(color.silver, 80), textcolor = color.silver, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
