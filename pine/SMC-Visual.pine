@@ -15,6 +15,7 @@ GRP_EQHL   = "Equal Highs/Lows"
 GRP_LIQ    = "Liquidez"
 GRP_KZ     = "Kill Zones / Sesiones"
 GRP_MTF    = "Mapa MTF"
+GRP_CTX    = "Contexto / ICT"
 GRP_PANEL  = "Panel"
 i_showPanel   = input.bool(true, "Mostrar panel de estado", group = GRP_PANEL)
 i_panelCompact = input.bool(false, "Panel minimizado (solo Bias por TF)", group = GRP_PANEL)
@@ -30,6 +31,13 @@ i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STR
 i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
 i_mssDispFactor= input.float(1.5,  "MSS: rango vela ruptura (x ATR14)", minval = 0.5, step = 0.1, group = GRP_STRUCT)
 i_mssBodyPct   = input.float(0.70, "MSS: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_STRUCT)
+// Displacement [§4.1 · T16]: vela impulsiva (calificador de fuerza). Knobs propios
+// (independientes del MSS) para calibracion Fase 3; defaults canonicos 1.5 / 0.70.
+i_showDisp        = input.bool(true,  "Mostrar Displacement",                          group = GRP_CTX)
+i_dispFactor      = input.float(1.5,  "Displacement: rango (x ATR14)", minval = 0.5, step = 0.1, group = GRP_CTX)
+i_dispBodyPct     = input.float(0.70, "Displacement: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_CTX)
+i_dispContraction = input.bool(true,  "Displacement: exigir contraccion previa (>=3 velas)", group = GRP_CTX)
+i_maxShowDisp     = input.int(20,     "Max marcadores de displacement (recientes)", minval = 1, group = GRP_CTX)
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
@@ -313,24 +321,44 @@ f_updateTFState(SMC_TFState state, SMC_Event ev) =>
             state.lastCHoCHTime  := ev.barTime
     state
 
+// --- Displacement [reglas-smc-ict §4.1] · T16 ---
+// f_detectDisplacement: la vela impulsiva institucional (expansion brusca tras calma). Es el
+// calificador de FUERZA que crea FVGs/OBs y valida MSS (§1.5) y Judas (§3.5). Una vela es
+// displacement si: rango >= factor*ATR14 (default 1.5) Y cuerpo >= bodyPct*rango (default
+// 0.70). Opcional (requireContraction): exige que las >=3 velas previas tuvieran rango <
+// ATR14 (expansion-tras-compresion); como el core es PURO, esa condicion la precomputa el
+// consumidor y la pasa en priorContraction. dir = signo del cuerpo (cierre vs apertura).
+// OHLC por parametro -> funcion PURA, portable a golden tests MQL5 (ADR-002). Devuelve un
+// SMC_Event KIND_DISPLACEMENT anclado en la barra de la vela (price = cierre), o na. Con
+// atr14 na -> na. DRY: f_detectMSS comparte esta misma logica de tamaño (la llama con
+// requireContraction = false, pues §1.5 no exige contraccion) -> MSS queda byte-identico.
+f_detectDisplacement(float o, float h, float l, float c, float atr14, float factor, float bodyPct, bool requireContraction, bool priorContraction, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if not na(atr14)
+        float rng  = h - l
+        float body = math.abs(c - o)
+        bool  sizeOk = rng > 0 and rng >= (factor * atr14) and body >= (bodyPct * rng)
+        bool  contractionOk = not requireContraction or priorContraction
+        if sizeOk and contractionOk
+            int dir = c >= o ? DIR_BULL : DIR_BEAR
+            ev := SMC_Event.new(c, dir, barIdx, barTime, "", KIND_DISPLACEMENT)
+    ev
+
 // --- MSS — Market Structure Shift [reglas-smc-ict §1.5] · T12 ---
 // f_detectMSS: un MSS es un CHoCH de escala SWING (§1.4) cuya vela de ruptura es un
 // displacement institucional (giro CON conviccion). NO recalcula la ruptura: recibe el
 // evento swing ya producido por f_detectStructure y lo CALIFICA. Solo si chochEv es un
-// CHoCH (no BOS, no na) y la vela que cerro la ruptura cumple displacement (§4.1):
-// rango >= dispFactor*ATR14 Y cuerpo >= bodyPct*rango (defaults 1.5 / 0.70). Devuelve un
-// SMC_Event KIND_MSS (capa ADITIVA: el CHoCH se conserva en su array; el MSS es la
-// confluencia #5 de mayor peso esperado, §1.5) o na. Solo escala swing -> el consumidor
-// no lo invoca con el evento interno (un MSS nunca es interno, §1.5). La vela de ruptura
-// es la barra confirmada que produjo el cierre; su OHLC entra por parametro -> funcion
-// PURA, portable a golden tests MQL5 (ADR-002). Con rango 0 (defensivo) isDisp = false.
+// CHoCH (no BOS, no na) y la vela que cerro la ruptura es displacement (§4.1, via
+// f_detectDisplacement con requireContraction = false). Devuelve un SMC_Event KIND_MSS (capa
+// ADITIVA: el CHoCH se conserva en su array; el MSS es la confluencia #5 de mayor peso
+// esperado, §1.5) o na. Solo escala swing -> el consumidor no lo invoca con el evento
+// interno (un MSS nunca es interno, §1.5). La vela de ruptura es la barra confirmada que
+// produjo el cierre; su OHLC entra por parametro -> funcion PURA (ADR-002). atr14 na -> na.
 f_detectMSS(SMC_Event chochEv, float oBreak, float hBreak, float lBreak, float cBreak, float atr14, float dispFactor, float bodyPct) =>
     SMC_Event ev = na
     if not na(chochEv) and chochEv.kind == KIND_CHOCH and not na(atr14)
-        float rng  = hBreak - lBreak
-        float body = math.abs(cBreak - oBreak)
-        bool  isDisp = rng > 0 and rng >= (dispFactor * atr14) and body >= (bodyPct * rng)
-        if isDisp
+        SMC_Event disp = f_detectDisplacement(oBreak, hBreak, lBreak, cBreak, atr14, dispFactor, bodyPct, false, false, chochEv.barIdx, chochEv.barTime)
+        if not na(disp)
             ev := SMC_Event.new(chochEv.price, chochEv.dir, chochEv.barIdx, chochEv.barTime, "", KIND_MSS)
     ev
 
@@ -1173,6 +1201,19 @@ if barstate.isconfirmed and not na(evStructSwing)
     if not na(evMSS)
         f_pushEvent(SMC_eventsMSS, evMSS, MAX_EVENTS)
 
+// --- Displacement [§4.1] · T16 ---
+// La vela impulsiva (capa de CONTEXTO/ICT, confluencia "displacement previo"). Detecta sobre
+// la barra confirmada actual (OHLC = vela recien cerrada). priorContraction = las 3 velas
+// previas con rango < ATR14 (expansion-tras-compresion §4.1); se precomputa aqui porque el
+// core es puro. atr14 ya disponible arriba. Va a su array dedicado SMC_displacements.
+var array<SMC_Event> SMC_displacements = array.new<SMC_Event>()
+SMC_Event evDisp = na
+if barstate.isconfirmed
+    bool priorContraction = (high[1] - low[1]) < atr14 and (high[2] - low[2]) < atr14 and (high[3] - low[3]) < atr14
+    evDisp := f_detectDisplacement(open, high, low, close, atr14, i_dispFactor, i_dispBodyPct, i_dispContraction, priorContraction, bar_index, time)
+    if not na(evDisp)
+        f_pushEvent(SMC_displacements, evDisp, MAX_EVENTS)
+
 // --- Equal Highs / Equal Lows [T08] ---
 // Pivotes a escala PROPIA eqlLength (3) — no los swing(5)/major(50). Mismo guard anti-
 // repaint (el pivote pertenece a t = bar_index - i_eqlLength). El pivote recien confirmado
@@ -1429,6 +1470,24 @@ if i_showSweeps and barstate.islast
             color scol = bearTrap ? color.red : color.green
             string stxt = bearTrap ? "✗ Sweep ↓" : "✗ Sweep ↑"
             array.push(SMC_sweepLabels, label.new(sw.barTime, sw.price, stxt, style = bearTrap ? label.style_label_down : label.style_label_up, color = color.new(scol, 70), textcolor = scol, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de Displacement [T16 · §4.1]. Mismo patron repintado-en-islast que los sweeps
+// (objetos acotados a i_maxShowDisp). Displacement alcista (cuerpo +) -> marca DEBAJO apuntando
+// arriba; bajista -> ENCIMA apuntando abajo. Naranja: lo distingue del teal/rojo de estructura
+// y del verde/rojo de sweep. Anclado por bar_time (robusto en spans largos).
+var array<label> SMC_dispLabels = array.new<label>()
+if i_showDisp and barstate.islast
+    for lb in SMC_dispLabels
+        label.delete(lb)
+    array.clear(SMC_dispLabels)
+    int nD = array.size(SMC_displacements)
+    if nD > 0
+        int firstD = math.max(0, nD - i_maxShowDisp)
+        for i = firstD to nD - 1
+            SMC_Event dp = array.get(SMC_displacements, i)
+            bool bull = dp.dir == DIR_BULL
+            string dtxt = bull ? "⚡ Disp ↑" : "⚡ Disp ↓"
+            array.push(SMC_dispLabels, label.new(dp.barTime, dp.price, dtxt, style = bull ? label.style_label_up : label.style_label_down, color = color.new(color.orange, 75), textcolor = color.orange, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
