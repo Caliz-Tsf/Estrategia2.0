@@ -1505,9 +1505,10 @@ if i_showSweeps and barstate.islast
             array.push(SMC_sweepLabels, label.new(sw.barTime, sw.price, stxt, style = bearTrap ? label.style_label_down : label.style_label_up, color = color.new(scol, 70), textcolor = scol, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de Displacement [T16 · §4.1]. Mismo patron repintado-en-islast que los sweeps
-// (objetos acotados a i_maxShowDisp). Displacement alcista (cuerpo +) -> marca DEBAJO apuntando
-// arriba; bajista -> ENCIMA apuntando abajo. Naranja: lo distingue del teal/rojo de estructura
-// y del verde/rojo de sweep. Anclado por bar_time (robusto en spans largos).
+// (objetos acotados a i_maxShowDisp). Naranja: lo distingue del teal/rojo de estructura y del
+// verde/rojo de sweep. La direccion va en la flecha del texto (↑/↓). style_label_left = la
+// PUNTA marca la vela y el CUERPO del texto sale a la DERECHA -> no lo tapa la vela (pref.
+// usuario, igual que las etiquetas de pool). Anclado por bar_time (robusto en spans largos).
 var array<label> SMC_dispLabels = array.new<label>()
 if i_showDisp and barstate.islast
     for lb in SMC_dispLabels
@@ -1520,11 +1521,11 @@ if i_showDisp and barstate.islast
             SMC_Event dp = array.get(SMC_displacements, i)
             bool bull = dp.dir == DIR_BULL
             string dtxt = bull ? "⚡ Disp ↑" : "⚡ Disp ↓"
-            array.push(SMC_dispLabels, label.new(dp.barTime, dp.price, dtxt, style = bull ? label.style_label_up : label.style_label_down, color = color.new(color.orange, 75), textcolor = color.orange, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_dispLabels, label.new(dp.barTime, dp.price, dtxt, style = label.style_label_left, color = color.new(color.orange, 75), textcolor = color.orange, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de IDM [T17 · §3.6]. Mismo patron repintado-en-islast (acotado a i_maxShowIDM).
-// IDM alcista (grab del internal low) -> marca DEBAJO apuntando arriba; bajista -> ENCIMA
-// apuntando abajo. Amarillo: lo distingue del naranja (displacement) y verde/rojo (sweep).
+// Amarillo: lo distingue del naranja (displacement) y verde/rojo (sweep). Direccion en la
+// flecha (↑/↓). style_label_left = punta en la vela, cuerpo a la DERECHA -> no lo tapa la vela.
 var array<label> SMC_idmLabels = array.new<label>()
 if i_showIDM and barstate.islast
     for lb in SMC_idmLabels
@@ -1537,7 +1538,7 @@ if i_showIDM and barstate.islast
             SMC_Event im = array.get(SMC_idm, i)
             bool bullIdm = im.dir == DIR_BULL
             string itxt = bullIdm ? "IDM ↑" : "IDM ↓"
-            array.push(SMC_idmLabels, label.new(im.barTime, im.price, itxt, style = bullIdm ? label.style_label_up : label.style_label_down, color = color.new(color.yellow, 75), textcolor = color.yellow, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_idmLabels, label.new(im.barTime, im.price, itxt, style = label.style_label_left, color = color.new(color.yellow, 75), textcolor = color.yellow, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
