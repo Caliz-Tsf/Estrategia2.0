@@ -68,6 +68,7 @@ i_oteR3        = input.float(0.79,  "Fib fin OTE (79%)",     minval = 0.0, maxva
 i_showFVG      = input.bool(true,  "Mostrar Fair Value Gaps",          group = GRP_FVG)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_showCE       = input.bool(true,  "Mostrar nivel CE (50%)",           group = GRP_FVG)
+i_showIFVG     = input.bool(true,  "Mostrar IFVG (FVG invertido, §5.2)", group = GRP_FVG)
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
 i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
@@ -138,6 +139,7 @@ KIND_RAID         = 33
 KIND_IMPULSIVE    = 34
 KIND_CORRECTIVE   = 35
 KIND_EMASTACK     = 36
+KIND_IFVG         = 37
 KIND_HH = 40
 KIND_HL = 41
 KIND_LH = 42
@@ -580,6 +582,20 @@ f_detectBreaker(SMC_Zone z, int prevState) =>
         int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
         bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
     bz
+
+// --- IFVG — Inversion FVG [reglas-smc-ict §5.2] · T27 ---
+// f_detectIFVG: el ANALOGO del Breaker (§2.6) pero sobre FVG. Un FVG que FALLO (paso a ZS_INVALID: una
+// vela cerro atravesando su borde protector, §2.2) INVIERTE su rol -> se re-crea como SMC_Zone KIND_IFVG
+// en las mismas coordenadas con dir INVERTIDO y ZS_ACTIVE; el retest lo gestiona la MISMA
+// f_updateZoneMitigation. Guard kind == KIND_FVG (un IFVG no engendra otro) + transicion prevState !=
+// ZS_INVALID (solo en el cruce). Un FVG solo MITIGADO (rellenado y respetado) NO es IFVG (§5.2). PURA.
+// Confluencia candidata #43. Devuelve SMC_Zone KIND_IFVG o na.
+f_detectIFVG(SMC_Zone z, int prevState) =>
+    SMC_Zone iz = na
+    if z.kind == KIND_FVG and z.state == ZS_INVALID and prevState != ZS_INVALID
+        int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
+        iz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_IFVG)
+    iz
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1500,10 +1516,10 @@ if barstate.isconfirmed
         array.shift(obBufIdx)
         array.shift(obBufTime)
         array.shift(obBufVol)
-    // Mitigacion comun + Breaker [T19]: tras mutar cada zona, si un OB ACABA de invalidarse
-    // (cierre a traves del borde protector) se engendra un KIND_BREAKER de polaridad invertida (§2.6).
-    // Se recolecta aparte y se empuja DESPUES del loop (no mutar SMC_zones mientras se itera). El
-    // breaker entra a SMC_zones y desde la barra siguiente lo gestiona la misma maquina (retest).
+    // Mitigacion comun + Breaker [T19] + IFVG [T27]: tras mutar cada zona, si un OB ACABA de invalidarse
+    // se engendra un KIND_BREAKER (§2.6) y si un FVG ACABA de invalidarse un KIND_IFVG (§5.2), ambos de
+    // polaridad invertida. Se recolectan aparte y se empujan DESPUES del loop (no mutar SMC_zones mientras
+    // se itera). Entran a SMC_zones y desde la barra siguiente los gestiona la misma maquina (retest).
     array<SMC_Zone> SMC_newBreakers = array.new<SMC_Zone>()
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
@@ -1513,6 +1529,9 @@ if barstate.isconfirmed
             SMC_Zone bz = f_detectBreaker(zMit, prevState)
             if not na(bz)
                 array.push(SMC_newBreakers, bz)
+            SMC_Zone iz = f_detectIFVG(zMit, prevState)
+            if not na(iz)
+                array.push(SMC_newBreakers, iz)
     if array.size(SMC_newBreakers) > 0
         for i = 0 to array.size(SMC_newBreakers) - 1
             f_pushZone(SMC_zones, array.get(SMC_newBreakers, i), MAX_ZONES)
@@ -2304,6 +2323,33 @@ if i_showBreaker and barstate.islast
                 color brkCol = z.dir == DIR_BULL ? color.rgb(150, 135, 240) : color.rgb(225, 130, 225)
                 string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
                 array.push(SMC_brkLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_index))
+
+// f_drawIFVG: caja del Inversion FVG [T27 · §5.2] (solo Visual). Un FVG invalidado renacido con
+// polaridad invertida (el FVG es lima/naranja; el IFVG va AMARILLO-OLIVA con borde punteado para
+// distinguirlo). dir = la NUEVA direccion. Origen = vela del FVG padre; se extiende a la barra actual.
+f_drawIFVG(SMC_Zone z) =>
+    col = z.dir == DIR_BULL ? color.rgb(180, 180, 40) : color.rgb(150, 90, 30)
+    int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
+    color bg = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(col, transp)
+    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = bg, border_color = color.new(col, 50), border_width = 1, border_style = line.style_dashed, xloc = xloc.bar_index)
+
+// En la ultima barra limpia y repinta las cajas IFVG vivas (KIND_IFVG, no invalidadas).
+var array<box>   SMC_ifvgBoxes  = array.new<box>()
+var array<label> SMC_ifvgLabels = array.new<label>()
+if i_showIFVG and barstate.islast
+    for b in SMC_ifvgBoxes
+        box.delete(b)
+    for lb in SMC_ifvgLabels
+        label.delete(lb)
+    array.clear(SMC_ifvgBoxes)
+    array.clear(SMC_ifvgLabels)
+    if array.size(SMC_zones) > 0
+        for i = 0 to array.size(SMC_zones) - 1
+            SMC_Zone z = array.get(SMC_zones, i)
+            if z.kind == KIND_IFVG and z.state != ZS_INVALID
+                array.push(SMC_ifvgBoxes, f_drawIFVG(z))
+                color ifvgCol = z.dir == DIR_BULL ? color.rgb(220, 220, 90) : color.rgb(210, 150, 80)
+                array.push(SMC_ifvgLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = ifvgCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawMB: caja del Mitigation Block [T-mb · §2.8] (solo Visual). Relleno de desequilibrio sin barrido.
 // AZUL ACERO, distinto del OB (verde/rojo), breaker (purpura) y OTE (dorado). Origen = vela del bloque;

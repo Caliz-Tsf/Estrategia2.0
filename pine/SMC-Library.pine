@@ -55,6 +55,7 @@ export const int KIND_RAID       = 33
 export const int KIND_IMPULSIVE  = 34
 export const int KIND_CORRECTIVE = 35
 export const int KIND_EMASTACK   = 36
+export const int KIND_IFVG       = 37
 // Estados del ciclo de vida del Flip [§2.8 · T21]
 export const int LF_PENDING = 0
 export const int LF_FLIPPED = 1
@@ -473,6 +474,17 @@ export f_detectBreaker(SMC_Zone z, int prevState) =>
         int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
         bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
     bz
+
+// --- IFVG — Inversion FVG [reglas-smc-ict §5.2] · T27 ---
+// f_detectIFVG: analogo del Breaker pero sobre FVG. Un FVG que paso a ZS_INVALID (cierre a traves)
+// invierte su rol -> SMC_Zone KIND_IFVG en mismas coords, dir invertido, ZS_ACTIVE; retest via
+// f_updateZoneMitigation. Guard kind==FVG + transicion. PURA. Confluencia #43. Devuelve KIND_IFVG o na.
+export f_detectIFVG(SMC_Zone z, int prevState) =>
+    SMC_Zone iz = na
+    if z.kind == KIND_FVG and z.state == ZS_INVALID and prevState != ZS_INVALID
+        int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
+        iz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_IFVG)
+    iz
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
