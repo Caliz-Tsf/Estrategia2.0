@@ -41,6 +41,7 @@ export const int KIND_LL = 43
 export const int KIND_EQH = 44
 export const int KIND_EQL = 45
 export const int KIND_VI  = 46
+export const int KIND_BAG = 47
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -538,6 +539,16 @@ export f_detectVolumeImbalance(float o0, float h0, float l0, float cPrev, float 
         else if o0 < cPrev and (cPrev - o0) >= thr and h0 >= lPrev
             z := SMC_Zone.new(cPrev, o0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
     z
+
+// --- Gaps de apertura — NWOG/NDOG/NYMO + Breakaway [reglas-smc-ict §5.10] · T30 ---
+// f_classifyOpenGap: clasifica el salto cierre_previo -> open_nuevo en la frontera. [measurable, dir]:
+// measurable = |gap| >= gapMin*ATR. Frontera/niveles en el consumidor; Breakaway = gap measurable con
+// continuacion -> KIND_BAG (#45). PURA.
+export f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
+    float g = openNew - closePrev
+    int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
+    bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
+    [measurable, dir]
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la

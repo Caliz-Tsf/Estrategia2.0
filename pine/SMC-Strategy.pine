@@ -51,6 +51,7 @@ i_bprMinOverlap= input.float(0.05, "BPR: solape minimo (x ATR14)", minval = 0.0,
 i_irFactor     = input.float(1.0, "IR: rango vela impulso (x ATR14, §5.4)", minval = 0.3, step = 0.1, group = GRP_SCORE)
 i_irBodyPct    = input.float(0.60, "IR: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_SCORE)
 i_viThreshold  = input.float(0.05, "VI: gap minimo de cuerpo (x ATR14, §5.5)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_SCORE)
+i_gapMin       = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14, §5.10)", minval = 0.0, step = 0.1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -105,6 +106,7 @@ KIND_LL = 43
 KIND_EQH = 44
 KIND_EQL = 45
 KIND_VI  = 46
+KIND_BAG = 47
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -614,6 +616,19 @@ f_detectVolumeImbalance(float o0, float h0, float l0, float cPrev, float hPrev, 
         else if o0 < cPrev and (cPrev - o0) >= thr and h0 >= lPrev
             z := SMC_Zone.new(cPrev, o0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
     z
+
+// --- Gaps de apertura — NWOG/NDOG/NYMO + Breakaway [reglas-smc-ict §5.10] · T30 ---
+// f_classifyOpenGap: clasifica el salto cierre_previo -> open_nuevo en la frontera de sesion/dia/semana.
+// Devuelve [measurable, dir]: measurable = |gap| >= gapMin*ATR (en FX 24h el diario suele ser ~0 -> el
+// valor esta en el NIVEL ancla, no en el gap; el gap real aparece en fin de semana / instrumentos con
+// cierre). dir = signo del gap. La deteccion de frontera (newDay/newWeek/NYmidnight) y los niveles
+// persistentes (NWOG/NDOG/NYMO) viven en el consumidor (series de tiempo); Breakaway = gap measurable
+// con continuacion (close mas alla del open en la dir del gap) -> KIND_BAG (#45). PURA.
+f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
+    float g = openNew - closePrev
+    int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
+    bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
+    [measurable, dir]
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1649,6 +1664,32 @@ if barstate.isconfirmed
     SMC_Zone viZone = f_detectVolumeImbalance(open, high, low, close[1], high[1], low[1], atr14, i_viThreshold, bar_index, time)
     if not na(viZone)
         f_pushZone(SMC_vi, viZone, MAX_ZONES)
+
+// --- Gaps de apertura NWOG/NDOG/NYMO + Breakaway [§5.10] · T30 ---
+// Mismo wiring que Visual (sin dibujo). Niveles persistentes + Breakaway (KIND_BAG) para el scoring.
+bool ogNewWeek = ta.change(time("W")) != 0
+bool ogNewDay  = ta.change(time("D")) != 0
+bool ogNYMid   = ta.change(dayofmonth(time, "America/New_York")) != 0
+var float ndogLvl = na
+var int   ndogT   = na
+var float nwogLvl = na
+var int   nwogT   = na
+var float nymoLvl = na
+var int   nymoT   = na
+var array<SMC_Event> SMC_bag = array.new<SMC_Event>()
+if barstate.isconfirmed
+    if ogNewWeek
+        nwogLvl := open
+        nwogT   := time
+    if ogNewDay
+        ndogLvl := open
+        ndogT   := time
+        [ogMeas, ogDir] = f_classifyOpenGap(open, close[1], atr14, i_gapMin)
+        if ogMeas and ((ogDir == DIR_BULL and close > open) or (ogDir == DIR_BEAR and close < open))
+            f_pushEvent(SMC_bag, SMC_Event.new(open, ogDir, bar_index, time, "", KIND_BAG), MAX_EVENTS)
+    if ogNYMid
+        nymoLvl := open
+        nymoT   := time
 
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Mismo wiring que Visual pero SIN dibujo: la Strategy solo pobla SMC_legs para el scoring (clasificador

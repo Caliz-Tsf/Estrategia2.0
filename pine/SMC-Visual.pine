@@ -102,6 +102,9 @@ i_judasBars    = input.int(6,      "Judas: max velas sweep->displacement (§3.5)
 i_maxShowJudas = input.int(20,     "Max marcadores de Judas (recientes)", minval = 1, group = GRP_LIQ)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_showKZ         = input.bool(true, "Sombrear Kill Zone activa", group = GRP_KZ)
+i_showOpenGaps   = input.bool(true, "Mostrar gaps de apertura NWOG/NDOG/NYMO (§5.10)", group = GRP_KZ)
+i_gapMin         = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14)", minval = 0.0, step = 0.1, group = GRP_KZ)
+i_maxShowBag     = input.int(10,    "Max marcadores de Breakaway Gap (recientes)", minval = 1, group = GRP_KZ)
 // Mapa MTF [T13a]: hereda los escalares de HTF hacia TF menores (cascada D1->{H1,M5}, H1->{M5}).
 i_showD1         = input.bool(true, "Heredar D1 (bias + P/D)", group = GRP_MTF)
 i_showH1         = input.bool(true, "Heredar H1 (bias + P/D)", group = GRP_MTF)
@@ -159,6 +162,7 @@ KIND_LL = 43
 KIND_EQH = 44
 KIND_EQL = 45
 KIND_VI  = 46
+KIND_BAG = 47
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -668,6 +672,19 @@ f_detectVolumeImbalance(float o0, float h0, float l0, float cPrev, float hPrev, 
         else if o0 < cPrev and (cPrev - o0) >= thr and h0 >= lPrev
             z := SMC_Zone.new(cPrev, o0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
     z
+
+// --- Gaps de apertura — NWOG/NDOG/NYMO + Breakaway [reglas-smc-ict §5.10] · T30 ---
+// f_classifyOpenGap: clasifica el salto cierre_previo -> open_nuevo en la frontera de sesion/dia/semana.
+// Devuelve [measurable, dir]: measurable = |gap| >= gapMin*ATR (en FX 24h el diario suele ser ~0 -> el
+// valor esta en el NIVEL ancla, no en el gap; el gap real aparece en fin de semana / instrumentos con
+// cierre). dir = signo del gap. La deteccion de frontera (newDay/newWeek/NYmidnight) y los niveles
+// persistentes (NWOG/NDOG/NYMO) viven en el consumidor (series de tiempo); Breakaway = gap measurable
+// con continuacion (close mas alla del open en la dir del gap) -> KIND_BAG (#45). PURA.
+f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
+    float g = openNew - closePrev
+    int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
+    bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
+    [measurable, dir]
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1723,6 +1740,33 @@ if barstate.isconfirmed
     if not na(viZone)
         f_pushZone(SMC_vi, viZone, MAX_ZONES)
 
+// --- Gaps de apertura NWOG/NDOG/NYMO + Breakaway [§5.10] · T30 ---
+// Fronteras con ta.change CADA barra (fuera del if): semana / dia broker / medianoche NY. Niveles ancla
+// PERSISTENTES (S/R, refina #36 como serie). Breakaway (KIND_BAG, #45) = gap measurable con continuacion.
+bool ogNewWeek = ta.change(time("W")) != 0
+bool ogNewDay  = ta.change(time("D")) != 0
+bool ogNYMid   = ta.change(dayofmonth(time, "America/New_York")) != 0
+var float ndogLvl = na
+var int   ndogT   = na
+var float nwogLvl = na
+var int   nwogT   = na
+var float nymoLvl = na
+var int   nymoT   = na
+var array<SMC_Event> SMC_bag = array.new<SMC_Event>()
+if barstate.isconfirmed
+    if ogNewWeek
+        nwogLvl := open
+        nwogT   := time
+    if ogNewDay
+        ndogLvl := open
+        ndogT   := time
+        [ogMeas, ogDir] = f_classifyOpenGap(open, close[1], atr14, i_gapMin)
+        if ogMeas and ((ogDir == DIR_BULL and close > open) or (ogDir == DIR_BEAR and close < open))
+            f_pushEvent(SMC_bag, SMC_Event.new(open, ogDir, bar_index, time, "", KIND_BAG), MAX_EVENTS)
+    if ogNYMid
+        nymoLvl := open
+        nymoT   := time
+
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
 // hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
@@ -2512,6 +2556,36 @@ if i_showVI and barstate.islast
                 color vcol = z.dir == DIR_BULL ? color.rgb(150, 120, 210) : color.rgb(180, 120, 170)
                 int vtransp = z.state == ZS_MITIGATED ? 92 : 82
                 array.push(SMC_viBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = color.new(vcol, vtransp), border_color = color.new(vcol, 60), border_width = 1, xloc = xloc.bar_index))
+
+// Niveles de gap de apertura [T30 · §5.10] (solo Visual): NWOG (semana, azul), NDOG (dia, teal), NYMO
+// (medianoche NY, fucsia) como lineas S/R desde su ancla hasta ahora + etiqueta. Marcadores Breakaway
+// (BAG ↑/↓) acotados a i_maxShowBag. Repintado-en-islast.
+var array<line>  SMC_ogLines  = array.new<line>()
+var array<label> SMC_ogLabels = array.new<label>()
+if i_showOpenGaps and barstate.islast
+    for l in SMC_ogLines
+        line.delete(l)
+    for lb in SMC_ogLabels
+        label.delete(lb)
+    array.clear(SMC_ogLines)
+    array.clear(SMC_ogLabels)
+    if not na(nwogLvl)
+        array.push(SMC_ogLines, line.new(nwogT, nwogLvl, time, nwogLvl, xloc = xloc.bar_time, color = color.new(color.blue, 30), style = line.style_dashed, width = 1))
+        array.push(SMC_ogLabels, label.new(time, nwogLvl, "NWOG", style = label.style_label_left, color = color.new(color.blue, 85), textcolor = color.blue, size = size.tiny, xloc = xloc.bar_time))
+    if not na(ndogLvl)
+        array.push(SMC_ogLines, line.new(ndogT, ndogLvl, time, ndogLvl, xloc = xloc.bar_time, color = color.new(color.teal, 30), style = line.style_dashed, width = 1))
+        array.push(SMC_ogLabels, label.new(time, ndogLvl, "NDOG", style = label.style_label_left, color = color.new(color.teal, 85), textcolor = color.teal, size = size.tiny, xloc = xloc.bar_time))
+    if not na(nymoLvl)
+        array.push(SMC_ogLines, line.new(nymoT, nymoLvl, time, nymoLvl, xloc = xloc.bar_time, color = color.new(color.fuchsia, 30), style = line.style_dashed, width = 1))
+        array.push(SMC_ogLabels, label.new(time, nymoLvl, "NYMO", style = label.style_label_left, color = color.new(color.fuchsia, 85), textcolor = color.fuchsia, size = size.tiny, xloc = xloc.bar_time))
+    int nBag = array.size(SMC_bag)
+    if nBag > 0
+        int firstBag = math.max(0, nBag - i_maxShowBag)
+        for i = firstBag to nBag - 1
+            SMC_Event bg = array.get(SMC_bag, i)
+            bool bullBag = bg.dir == DIR_BULL
+            string bagtxt = bullBag ? "BAG ↑" : "BAG ↓"
+            array.push(SMC_ogLabels, label.new(bg.barTime, bg.price, bagtxt, style = bullBag ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(0, 150, 200), 65), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawMB: caja del Mitigation Block [T-mb · §2.8] (solo Visual). Relleno de desequilibrio sin barrido.
 // AZUL ACERO, distinto del OB (verde/rojo), breaker (purpura) y OTE (dorado). Origen = vela del bloque;
