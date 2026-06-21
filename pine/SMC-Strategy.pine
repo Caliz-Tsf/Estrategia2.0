@@ -53,6 +53,7 @@ i_irBodyPct    = input.float(0.60, "IR: cuerpo minimo (frac. rango)", minval = 0
 i_viThreshold  = input.float(0.05, "VI: gap minimo de cuerpo (x ATR14, §5.5)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_SCORE)
 i_gapMin       = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14, §5.10)", minval = 0.0, step = 0.1, group = GRP_SCORE)
 i_cisdMinRun   = input.int(2, "CISD: velas minimas del run de delivery (§5.6)", minval = 1, group = GRP_SCORE)
+i_propOverlap  = input.float(0.5, "Propulsion: solape minimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -148,6 +149,7 @@ type SMC_Zone
     string tf           = ""
     int    kind         = 0
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
+    bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
 type SMC_Event
     float  price
     int    dir
@@ -545,6 +547,24 @@ f_detectBreaker(SMC_Zone z, int prevState) =>
         int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
         bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
     bz
+
+// --- Propulsion Block [reglas-smc-ict §5.8] · T34 ---
+// f_isPropulsion: ¿el OB recien formado (newOB) esta ANIDADO dentro de un OB vivo PREVIO del MISMO dir?
+// -> OB de CONTINUACION (propulsion, §5.8). Solapa con un OB vivo (state < ZS_MITIGATED) mismo-sentido en
+// >= propOverlap de la altura del newOB. Es un FLAG (refina #17/#19, eleva el peso del OB), NO zona nueva.
+// PURA. Devuelve bool. El consumidor lo aplica al obZone antes de empujarlo.
+f_isPropulsion(SMC_Zone newOB, array<SMC_Zone> zones, float propOverlap) =>
+    bool prop = false
+    if not na(newOB) and newOB.kind == KIND_OB and array.size(zones) > 0
+        float h = newOB.top - newOB.bottom
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone z = array.get(zones, i)
+            if z.kind == KIND_OB and z.dir == newOB.dir and z.state < ZS_MITIGATED and z.barIdx != newOB.barIdx
+                float ov = math.min(z.top, newOB.top) - math.max(z.bottom, newOB.bottom)
+                if h > 0 and ov >= propOverlap * h
+                    prop := true
+                    break
+    prop
 
 // --- IFVG — Inversion FVG [reglas-smc-ict §5.2] · T27 ---
 // f_detectIFVG: el ANALOGO del Breaker (§2.6) pero sobre FVG. Un FVG que FALLO (paso a ZS_INVALID: una
@@ -1583,6 +1603,8 @@ if barstate.isconfirmed
         int obOrigin = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
+            // Propulsion [T34 · §5.8]: ¿anidado en un OB vivo previo mismo-sentido? -> OB de continuacion.
+            obZone.propulsion := f_isPropulsion(obZone, SMC_zones, i_propOverlap)
             f_pushZone(SMC_zones, obZone, MAX_ZONES)
     // --- Mitigation Block [§2.8 #24] ---
     // Mismo wiring que Visual pero SIN dibujo. Ultima vela contraria antes de un impulso que rompe

@@ -64,6 +64,7 @@ i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_showBreaker    = input.bool(true,  "Mostrar Breakers (OB invalidado, §2.6)", group = GRP_OB)
 i_showMB         = input.bool(true,  "Mostrar Mitigation Blocks (§2.8 #24)", group = GRP_OB)
+i_propOverlap    = input.float(0.5,  "Propulsion: solape mínimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_OB)
 i_showOTE      = input.bool(true,  "Mostrar OTE / Golden Pocket",       group = GRP_OTE)
 i_oteR1        = input.float(0.50,  "Fib inicio GP (50%)",   minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR2        = input.float(0.618, "Fib GP/OTE (61.8%)",    minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
@@ -206,6 +207,7 @@ type SMC_Zone
     string tf           = ""
     int    kind         = 0
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
+    bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
 type SMC_Event
     float  price
     int    dir
@@ -603,6 +605,24 @@ f_detectBreaker(SMC_Zone z, int prevState) =>
         int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
         bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
     bz
+
+// --- Propulsion Block [reglas-smc-ict §5.8] · T34 ---
+// f_isPropulsion: ¿el OB recien formado (newOB) esta ANIDADO dentro de un OB vivo PREVIO del MISMO dir?
+// -> OB de CONTINUACION (propulsion, §5.8). Solapa con un OB vivo (state < ZS_MITIGATED) mismo-sentido en
+// >= propOverlap de la altura del newOB. Es un FLAG (refina #17/#19, eleva el peso del OB), NO zona nueva.
+// PURA. Devuelve bool. El consumidor lo aplica al obZone antes de empujarlo.
+f_isPropulsion(SMC_Zone newOB, array<SMC_Zone> zones, float propOverlap) =>
+    bool prop = false
+    if not na(newOB) and newOB.kind == KIND_OB and array.size(zones) > 0
+        float h = newOB.top - newOB.bottom
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone z = array.get(zones, i)
+            if z.kind == KIND_OB and z.dir == newOB.dir and z.state < ZS_MITIGATED and z.barIdx != newOB.barIdx
+                float ov = math.min(z.top, newOB.top) - math.max(z.bottom, newOB.bottom)
+                if h > 0 and ov >= propOverlap * h
+                    prop := true
+                    break
+    prop
 
 // --- IFVG — Inversion FVG [reglas-smc-ict §5.2] · T27 ---
 // f_detectIFVG: el ANALOGO del Breaker (§2.6) pero sobre FVG. Un FVG que FALLO (paso a ZS_INVALID: una
@@ -1649,6 +1669,8 @@ if barstate.isconfirmed
         int obOrigin = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
+            // Propulsion [T34 · §5.8]: ¿anidado en un OB vivo previo mismo-sentido? -> OB de continuacion.
+            obZone.propulsion := f_isPropulsion(obZone, SMC_zones, i_propOverlap)
             f_pushZone(SMC_zones, obZone, MAX_ZONES)
     // --- Mitigation Block [§2.8 #24] ---
     // Ultima vela contraria antes de un impulso que rompe estructura INTERNA, SIN sweep previo de un pool
@@ -2513,7 +2535,9 @@ if i_showOB and barstate.islast
                 // Nombre del OB (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
                 color obCol = z.dir == DIR_BULL ? color.rgb(120, 220, 120) : color.rgb(235, 120, 120)
-                array.push(SMC_obLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "OB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
+                // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
+                string obTxt = z.propulsion ? "OB⇈" : "OB"
+                array.push(SMC_obLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, obTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawBreaker: caja del Breaker [T19 · §2.6] (solo Visual). Un OB invalidado renacido con polaridad
 // invertida. PURPURA/VIOLETA para distinguirlo del verde/rojo del OB y lima/naranja del FVG; borde

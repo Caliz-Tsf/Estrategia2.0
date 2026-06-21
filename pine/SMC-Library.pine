@@ -102,6 +102,7 @@ export type SMC_Zone
     string tf           = ""
     int    kind         = 0
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
+    bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
 
 // Evento puntual (BOS, CHoCH, MSS, Sweep, Judas, Displacement, IDM, EMA cross/bounce...)
 export type SMC_Event
@@ -479,6 +480,22 @@ export f_detectBreaker(SMC_Zone z, int prevState) =>
         int invDir = z.dir == DIR_BULL ? DIR_BEAR : DIR_BULL
         bz := SMC_Zone.new(z.top, z.bottom, invDir, z.barIdx, z.barTime, ZS_ACTIVE, 0.0, z.tf, KIND_BREAKER)
     bz
+
+// --- Propulsion Block [reglas-smc-ict §5.8] · T34 ---
+// f_isPropulsion: ¿el OB nuevo esta anidado en un OB vivo previo del mismo dir? -> OB de continuacion
+// (solapa >= propOverlap de su altura). FLAG (refina #17/#19), no zona nueva. PURA. Devuelve bool.
+export f_isPropulsion(SMC_Zone newOB, array<SMC_Zone> zones, float propOverlap) =>
+    bool prop = false
+    if not na(newOB) and newOB.kind == KIND_OB and array.size(zones) > 0
+        float h = newOB.top - newOB.bottom
+        for i = array.size(zones) - 1 to 0
+            SMC_Zone z = array.get(zones, i)
+            if z.kind == KIND_OB and z.dir == newOB.dir and z.state < ZS_MITIGATED and z.barIdx != newOB.barIdx
+                float ov = math.min(z.top, newOB.top) - math.max(z.bottom, newOB.bottom)
+                if h > 0 and ov >= propOverlap * h
+                    prop := true
+                    break
+    prop
 
 // --- IFVG — Inversion FVG [reglas-smc-ict §5.2] · T27 ---
 // f_detectIFVG: analogo del Breaker pero sobre FVG. Un FVG que paso a ZS_INVALID (cierre a traves)
