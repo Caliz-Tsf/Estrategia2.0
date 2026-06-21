@@ -34,6 +34,7 @@ i_eqThreshold = input.float(0.1, "Umbral igualdad EQH/EQL (x ATR14)", minval = 0
 i_eqlLength   = input.int(3, "Barras confirmacion EQH/EQL", minval = 1, group = GRP_SCORE)
 i_poolTol     = input.float(0.1, "Tolerancia cluster pools (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_SCORE)
 i_minTouches  = input.int(2, "Toques minimos para pool", minval = 2, group = GRP_SCORE)
+i_judasBars   = input.int(6, "Judas: max velas sweep->displacement (§3.5)", minval = 1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -354,6 +355,45 @@ f_detectIDM(float intLow, float intHigh, float curLow, float curHigh, float curC
     else if not na(intHigh) and curHigh > intHigh and curClose < intHigh
         ev := SMC_Event.new(intHigh, DIR_BEAR, barIdx, barTime, "", KIND_IDM)
     ev
+
+// --- Judas Swing [reglas-smc-ict §3.5] · T18 ---
+// f_detectJudas: la TRAMPA de apertura de sesion (el "beso de Judas"). Un sweep/grab (§3.2) en la
+// PRIMERA MITAD de una Kill Zone (movimiento FALSO) seguido de un DISPLACEMENT (§4.1) en la direccion
+// REAL dentro de <= judasBars velas -> confluencia #13. f_detectSweep ya entrega el sesgo CONTRARIO al
+// lado barrido (SSL barrido -> DIR_BULL, BSL barrido -> DIR_BEAR), que es justo la direccion del
+// movimiento real; por eso el Judas exige displacement.dir == sweep.dir (la reversion con FUERZA que
+// confirma la trampa; un sweep que continua sin displacement contrario NO es Judas, solo sweep). dir
+// del Judas = dir del displacement. PURA y SIN estado propio (el core no guarda var, ADR-002): el
+// consumidor mantiene el sweep PENDIENTE (pendDir/pendBarIdx/pendLevel) entre barras y lo pasa por
+// parametro; la funcion lo COMPLETA, lo EXPIRA fuera de ventana, o REGISTRA uno nuevo, y devuelve el
+// estado mutado + el evento. Orden por barra: completar -> expirar -> registrar (el sweep nuevo nunca
+// se autocompleta en su propia barra; el displacement debe SEGUIRLO, age >= 1). pendDir 0 = sin
+// pendiente. El Judas se ancla en la barra del displacement (confirmacion, anti-repaint) al nivel
+// barrido (origen de la trampa). Devuelve [SMC_Event judas, int pendDir, int pendBarIdx, float pendLevel].
+f_detectJudas(SMC_Event sweepEv, SMC_Event dispEv, bool kzFirstHalf, int pendDir, int pendBarIdx, float pendLevel, int curBarIdx, int curBarTime, int judasBars) =>
+    SMC_Event ev   = na
+    int   outDir   = pendDir
+    int   outIdx   = pendBarIdx
+    float outLevel = pendLevel
+    // 1) COMPLETAR: displacement de esta barra en la direccion del sweep pendiente, dentro de ventana
+    if outDir != 0 and not na(dispEv) and dispEv.dir == outDir
+        int age = curBarIdx - outIdx
+        if age >= 1 and age <= judasBars
+            ev       := SMC_Event.new(outLevel, outDir, curBarIdx, curBarTime, "", KIND_JUDAS)
+            outDir   := 0
+            outIdx   := na
+            outLevel := na
+    // 2) EXPIRAR: pendiente que supero la ventana sin displacement contrario
+    if outDir != 0 and (curBarIdx - outIdx) > judasBars
+        outDir   := 0
+        outIdx   := na
+        outLevel := na
+    // 3) REGISTRAR: sweep en 1a mitad de KZ queda PENDIENTE (el mas reciente reemplaza al anterior)
+    if not na(sweepEv) and kzFirstHalf
+        outDir   := sweepEv.dir
+        outIdx   := curBarIdx
+        outLevel := sweepEv.price
+    [ev, outDir, outIdx, outLevel]
 
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // Porta el algoritmo de Order Blocks de LuxAlgo (storeOrdeBlock :502-525,
@@ -1234,6 +1274,9 @@ if barstate.isconfirmed and not na(eqPivotLow)
 // scoring, Sprint 2.1). [P1] Modelo PERSISTENTE (reemplaza el rebuild stateless de T09):
 //   upsert candidatos -> mark barridos (high/low) -> sweep (close, T10) -> prune a MAX_POOLS.
 // NO array.clear: el set persiste y recuerda swept. Orden upsert -> mark (esqueleto §3.A.3).
+// evSweepAlert: espejo de scope externo del sweep de esta barra (evSweep es local al if) para que el
+// Judas [T18] pueda engancharlo tras el bloque de Kill Zones sin tocar el detector.
+SMC_Event evSweepAlert = na
 if barstate.isconfirmed
     if newSwingHigh
         f_upsertPool(SMC_pools, true,  swingHigh, 1, time[i_swingLen], bar_index - i_swingLen, i_poolTol * atr14)
@@ -1247,6 +1290,7 @@ if barstate.isconfirmed
     SMC_Event evSweep = f_detectSweep(SMC_pools, close, bar_index, time, i_minTouches)
     if not na(evSweep)
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
+        evSweepAlert := evSweep
     f_prunePools(SMC_pools, MAX_POOLS)
 
 // --- Kill Zones / sesiones [§3.4 · ADR-001] · T11 ---
@@ -1261,6 +1305,25 @@ bool kzInNYFirst     = kzProfile != SP_NONE and not na(time(timeframe.period, "0
 bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1100", "Asia/Tokyo"))
 bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
 [curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
+
+// --- Judas Swing [§3.5] · T18 ---
+// Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_judas para el scoring, Sprint
+// 2.1, confluencia #13). Composicion sweep+displacement: sweep (§3.2) en 1a mitad de KZ + displacement
+// (§4.1) en la direccion real <= i_judasBars velas despues. Detector PURO; sweep PENDIENTE en var aqui.
+// Entradas de esta barra: evSweepAlert (espejo del bloque pools), evDisp [T16], curKZFirst (gate).
+var array<SMC_Event> SMC_judas = array.new<SMC_Event>()
+var int   judasPendDir   = 0
+var int   judasPendIdx   = na
+var float judasPendLevel = na
+SMC_Event evJudas = na
+if barstate.isconfirmed
+    [jEv, jDir, jIdx, jLvl] = f_detectJudas(evSweepAlert, evDisp, curKZFirst, judasPendDir, judasPendIdx, judasPendLevel, bar_index, time, i_judasBars)
+    judasPendDir   := jDir
+    judasPendIdx   := jIdx
+    judasPendLevel := jLvl
+    evJudas := jEv
+    if not na(evJudas)
+        f_pushEvent(SMC_judas, evJudas, MAX_EVENTS)
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO

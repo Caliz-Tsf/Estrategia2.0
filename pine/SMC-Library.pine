@@ -317,6 +317,39 @@ export f_detectIDM(float intLow, float intHigh, float curLow, float curHigh, flo
         ev := SMC_Event.new(intHigh, DIR_BEAR, barIdx, barTime, "", KIND_IDM)
     ev
 
+// --- Judas Swing [reglas-smc-ict §3.5] · T18 ---
+// f_detectJudas: la TRAMPA de apertura de sesion (el "beso de Judas"). Un sweep/grab (§3.2) en la
+// PRIMERA MITAD de una Kill Zone (movimiento FALSO) seguido de un DISPLACEMENT (§4.1) en la direccion
+// REAL dentro de <= judasBars velas -> confluencia #13. f_detectSweep ya entrega el sesgo CONTRARIO al
+// lado barrido (SSL barrido -> DIR_BULL, BSL barrido -> DIR_BEAR), que es justo la direccion del
+// movimiento real; por eso el Judas exige displacement.dir == sweep.dir (la reversion con FUERZA que
+// confirma la trampa). dir del Judas = dir del displacement. PURA y SIN estado propio (ADR-002): el
+// consumidor mantiene el sweep PENDIENTE (pendDir/pendBarIdx/pendLevel) entre barras y lo pasa por
+// parametro; la funcion lo COMPLETA, lo EXPIRA fuera de ventana, o REGISTRA uno nuevo, y devuelve el
+// estado mutado + el evento. Orden por barra: completar -> expirar -> registrar (age >= 1: el
+// displacement debe SEGUIR al sweep). pendDir 0 = sin pendiente. Devuelve [SMC_Event, int, int, float].
+export f_detectJudas(SMC_Event sweepEv, SMC_Event dispEv, bool kzFirstHalf, int pendDir, int pendBarIdx, float pendLevel, int curBarIdx, int curBarTime, int judasBars) =>
+    SMC_Event ev   = na
+    int   outDir   = pendDir
+    int   outIdx   = pendBarIdx
+    float outLevel = pendLevel
+    if outDir != 0 and not na(dispEv) and dispEv.dir == outDir
+        int age = curBarIdx - outIdx
+        if age >= 1 and age <= judasBars
+            ev       := SMC_Event.new(outLevel, outDir, curBarIdx, curBarTime, "", KIND_JUDAS)
+            outDir   := 0
+            outIdx   := na
+            outLevel := na
+    if outDir != 0 and (curBarIdx - outIdx) > judasBars
+        outDir   := 0
+        outIdx   := na
+        outLevel := na
+    if not na(sweepEv) and kzFirstHalf
+        outDir   := sweepEv.dir
+        outIdx   := curBarIdx
+        outLevel := sweepEv.price
+    [ev, outDir, outIdx, outLevel]
+
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // f_detectOB: porta el algoritmo OB de LuxAlgo (storeOrdeBlock :502-525,
 // deleteOrderBlocks :478-500; v5->v6). El OB es la vela origen del impulso que rompe

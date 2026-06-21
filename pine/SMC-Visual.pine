@@ -58,6 +58,9 @@ i_showSweeps   = input.bool(true,  "Mostrar marcadores de sweep (trampa)", group
 i_maxShowSweeps= input.int(20,     "Max marcadores de sweep (recientes)", minval = 1, group = GRP_LIQ)
 i_showIDM      = input.bool(true,  "Mostrar IDM (inducement interno)", group = GRP_LIQ)
 i_maxShowIDM   = input.int(20,     "Max marcadores de IDM (recientes)", minval = 1, group = GRP_LIQ)
+i_showJudas    = input.bool(true,  "Mostrar Judas (trampa de sesion)", group = GRP_LIQ)
+i_judasBars    = input.int(6,      "Judas: max velas sweep->displacement (§3.5)", minval = 1, group = GRP_LIQ)
+i_maxShowJudas = input.int(20,     "Max marcadores de Judas (recientes)", minval = 1, group = GRP_LIQ)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_showKZ         = input.bool(true, "Sombrear Kill Zone activa", group = GRP_KZ)
 // Mapa MTF [T13a]: hereda los escalares de HTF hacia TF menores (cascada D1->{H1,M5}, H1->{M5}).
@@ -383,6 +386,45 @@ f_detectIDM(float intLow, float intHigh, float curLow, float curHigh, float curC
     else if not na(intHigh) and curHigh > intHigh and curClose < intHigh
         ev := SMC_Event.new(intHigh, DIR_BEAR, barIdx, barTime, "", KIND_IDM)
     ev
+
+// --- Judas Swing [reglas-smc-ict §3.5] · T18 ---
+// f_detectJudas: la TRAMPA de apertura de sesion (el "beso de Judas"). Un sweep/grab (§3.2) en la
+// PRIMERA MITAD de una Kill Zone (movimiento FALSO) seguido de un DISPLACEMENT (§4.1) en la direccion
+// REAL dentro de <= judasBars velas -> confluencia #13. f_detectSweep ya entrega el sesgo CONTRARIO al
+// lado barrido (SSL barrido -> DIR_BULL, BSL barrido -> DIR_BEAR), que es justo la direccion del
+// movimiento real; por eso el Judas exige displacement.dir == sweep.dir (la reversion con FUERZA que
+// confirma la trampa; un sweep que continua sin displacement contrario NO es Judas, solo sweep). dir
+// del Judas = dir del displacement. PURA y SIN estado propio (el core no guarda var, ADR-002): el
+// consumidor mantiene el sweep PENDIENTE (pendDir/pendBarIdx/pendLevel) entre barras y lo pasa por
+// parametro; la funcion lo COMPLETA, lo EXPIRA fuera de ventana, o REGISTRA uno nuevo, y devuelve el
+// estado mutado + el evento. Orden por barra: completar -> expirar -> registrar (el sweep nuevo nunca
+// se autocompleta en su propia barra; el displacement debe SEGUIRLO, age >= 1). pendDir 0 = sin
+// pendiente. El Judas se ancla en la barra del displacement (confirmacion, anti-repaint) al nivel
+// barrido (origen de la trampa). Devuelve [SMC_Event judas, int pendDir, int pendBarIdx, float pendLevel].
+f_detectJudas(SMC_Event sweepEv, SMC_Event dispEv, bool kzFirstHalf, int pendDir, int pendBarIdx, float pendLevel, int curBarIdx, int curBarTime, int judasBars) =>
+    SMC_Event ev   = na
+    int   outDir   = pendDir
+    int   outIdx   = pendBarIdx
+    float outLevel = pendLevel
+    // 1) COMPLETAR: displacement de esta barra en la direccion del sweep pendiente, dentro de ventana
+    if outDir != 0 and not na(dispEv) and dispEv.dir == outDir
+        int age = curBarIdx - outIdx
+        if age >= 1 and age <= judasBars
+            ev       := SMC_Event.new(outLevel, outDir, curBarIdx, curBarTime, "", KIND_JUDAS)
+            outDir   := 0
+            outIdx   := na
+            outLevel := na
+    // 2) EXPIRAR: pendiente que supero la ventana sin displacement contrario
+    if outDir != 0 and (curBarIdx - outIdx) > judasBars
+        outDir   := 0
+        outIdx   := na
+        outLevel := na
+    // 3) REGISTRAR: sweep en 1a mitad de KZ queda PENDIENTE (el mas reciente reemplaza al anterior)
+    if not na(sweepEv) and kzFirstHalf
+        outDir   := sweepEv.dir
+        outIdx   := curBarIdx
+        outLevel := sweepEv.price
+    [ev, outDir, outIdx, outLevel]
 
 // --- Order Blocks + mitigacion [reglas-smc-ict §2.1] · T05 ---
 // Porta el algoritmo de Order Blocks de LuxAlgo (storeOrdeBlock :502-525,
@@ -1334,6 +1376,26 @@ bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0
 bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
 [curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
 
+// --- Judas Swing [§3.5] · T18 ---
+// Composicion sweep+displacement: sweep (§3.2) en 1a mitad de KZ + displacement (§4.1) en la direccion
+// real <= i_judasBars velas despues (confluencia #13). El detector es PURO; el sweep PENDIENTE vive aqui
+// (var, entre barras) y se pasa por parametro. Entradas de ESTA barra: evSweepAlert (sweep, espejo de
+// scope externo del bloque pools [T15]), evDisp (displacement [T16]), curKZFirst (1a mitad KZ, gate de
+// registro). Todas calculadas arriba. Va a su array dedicado SMC_judas (confluencia #13, scoring Fase 3).
+var array<SMC_Event> SMC_judas = array.new<SMC_Event>()
+var int   judasPendDir   = 0
+var int   judasPendIdx   = na
+var float judasPendLevel = na
+SMC_Event evJudas = na
+if barstate.isconfirmed
+    [jEv, jDir, jIdx, jLvl] = f_detectJudas(evSweepAlert, evDisp, curKZFirst, judasPendDir, judasPendIdx, judasPendLevel, bar_index, time, i_judasBars)
+    judasPendDir   := jDir
+    judasPendIdx   := jIdx
+    judasPendLevel := jLvl
+    evJudas := jEv
+    if not na(evJudas)
+        f_pushEvent(SMC_judas, evJudas, MAX_EVENTS)
+
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
 // transporta UDT/array). f_computeTFState se evalua en el contexto del HTF con estado var
@@ -1543,6 +1605,26 @@ if i_showIDM and barstate.islast
             bool bullIdm = im.dir == DIR_BULL
             string itxt = bullIdm ? "IDM ↑" : "IDM ↓"
             array.push(SMC_idmLabels, label.new(im.barTime + idmOffMs, im.price, itxt, style = label.style_label_left, color = color.new(color.yellow, 75), textcolor = color.yellow, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de Judas [T18 · §3.5]. Mismo patron repintado-en-islast (acotado a i_maxShowJudas).
+// Fucsia: lo distingue del naranja (displacement), amarillo (IDM) y verde/rojo (sweep). La trampa de
+// apertura de sesion (sweep en 1a mitad de KZ + displacement contrario). Direccion REAL en la flecha
+// (↑/↓), anclado al nivel barrido (origen de la trampa) en la barra del displacement. Se DESPLAZA ~3
+// barras a la DERECHA (judasOffMs) + style_label_left -> flota despejado, no lo tapa la vela.
+var array<label> SMC_judasLabels = array.new<label>()
+if i_showJudas and barstate.islast
+    for lb in SMC_judasLabels
+        label.delete(lb)
+    array.clear(SMC_judasLabels)
+    int judasOffMs = 3 * (time - time[1])
+    int nJ = array.size(SMC_judas)
+    if nJ > 0
+        int firstJ = math.max(0, nJ - i_maxShowJudas)
+        for i = firstJ to nJ - 1
+            SMC_Event jd = array.get(SMC_judas, i)
+            bool bullJudas = jd.dir == DIR_BULL
+            string jtxt = bullJudas ? "Judas ↑" : "Judas ↓"
+            array.push(SMC_judasLabels, label.new(jd.barTime + judasOffMs, jd.price, jtxt, style = label.style_label_left, color = color.new(color.fuchsia, 70), textcolor = color.fuchsia, size = size.tiny, xloc = xloc.bar_time))
 
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
