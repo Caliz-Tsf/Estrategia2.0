@@ -1235,6 +1235,30 @@ f_killZone(bool inLondon, bool inLondonFirst, bool inNY, bool inNYFirst, bool in
             firstHalf := inTokyoFirst
     [session, firstHalf]
 
+// --- Macros intradia [reglas-smc-ict §5.14] · T39 ---
+// f_macroActive: extiende §3.4 -> ¿la hora local NY (en minutos del dia) cae en una ventana MACRO
+// canonica ICT? Refina #34 (Kill Zone) con sub-ventana de mayor peso; NO es confluencia nueva ni bloquea
+// (ADR-001: el reloj informa). Ventanas (minutos NY): London 02:33-03:00 / 04:03-04:30 (kind 1); NY AM
+// 08:50-09:10 / 09:50-10:10 / 10:50-11:10 / 11:50-12:10 (kind 2); NY PM 13:10-13:40 / 15:15-15:45 (kind
+// 4); NY Lunch 12:00-13:00 (kind 3, baja actividad = filtro). Prioridad AM/PM sobre Lunch en el solape.
+// PURA (aritmetica sobre nyMin que el consumidor calcula con hour/minute en tz NY). Devuelve [activa, kind].
+f_macroActive(int nyMin) =>
+    bool active = false
+    int  kind   = 0
+    if (nyMin >= 153 and nyMin < 180) or (nyMin >= 243 and nyMin < 270)
+        active := true
+        kind   := 1
+    else if (nyMin >= 530 and nyMin < 550) or (nyMin >= 590 and nyMin < 610) or (nyMin >= 650 and nyMin < 670) or (nyMin >= 710 and nyMin < 730)
+        active := true
+        kind   := 2
+    else if (nyMin >= 790 and nyMin < 820) or (nyMin >= 915 and nyMin < 945)
+        active := true
+        kind   := 4
+    else if nyMin >= 720 and nyMin < 780
+        active := true
+        kind   := 3
+    [active, kind]
+
 // f_nearestN [Sprint 1.4 · T13b · ADR-009]: recolecta los capN objetos de un array<SMC_Zone>
 // del 'kind' dado, NO mitigados (state < ZS_MITIGATED), MAS CERCANOS al precio px, y los anexa a
 // los arrays-candidato compartidos (ck/ct/cb/cd/cdist). Generaliza f_pNearZone (que devuelve 1)
@@ -1969,6 +1993,15 @@ bool kzInNYFirst     = kzProfile != SP_NONE and not na(time(timeframe.period, "0
 bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1100", "Asia/Tokyo"))
 bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
 [curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
+
+// --- Macros intradia [§5.14] · T39 ---
+// Mismo wiring que Visual (sin dibujo). Minutos NY -> f_macroActive; refina #34 para el scoring.
+int  nyMinNow = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
+[curMacroActive, curMacroKind] = f_macroActive(nyMinNow)
+// Estado de macro vigente para el scoring (Fase 2): 0 = ninguna, 1 London / 2 NY AM / 3 Lunch / 4 NY PM.
+var int lastMacroKind = 0
+if barstate.isconfirmed
+    lastMacroKind := curMacroActive ? curMacroKind : 0
 
 // --- Judas Swing [§3.5] · T18 ---
 // Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_judas para el scoring, Sprint
