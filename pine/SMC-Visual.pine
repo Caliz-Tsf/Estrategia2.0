@@ -32,6 +32,9 @@ i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STR
 i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
 i_showFlip     = input.bool(true,  "Mostrar Flips (cambio de rol, §2.8)", group = GRP_STRUCT)
 i_maxShowFlip  = input.int(20,     "Max marcadores de flip (recientes)", minval = 1, group = GRP_STRUCT)
+i_showCISD     = input.bool(true,  "Mostrar CISD (cambio estado entrega, §5.6)", group = GRP_STRUCT)
+i_cisdMinRun   = input.int(2,      "CISD: velas mínimas del run de delivery", minval = 1, group = GRP_STRUCT)
+i_maxShowCISD  = input.int(20,     "Max marcadores de CISD (recientes)", minval = 1, group = GRP_STRUCT)
 i_mssDispFactor= input.float(1.5,  "MSS: rango vela ruptura (x ATR14)", minval = 0.5, step = 0.1, group = GRP_STRUCT)
 i_mssBodyPct   = input.float(0.70, "MSS: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_STRUCT)
 // Displacement [§4.1 · T16]: vela impulsiva (calificador de fuerza). Knobs propios
@@ -163,6 +166,7 @@ KIND_EQH = 44
 KIND_EQL = 45
 KIND_VI  = 46
 KIND_BAG = 47
+KIND_CISD = 48
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -685,6 +689,23 @@ f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
     int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
     bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
     [measurable, dir]
+
+// --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
+// f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
+// color = la pierna de delivery) y CIERRA de vuelta cruzando el ORIGEN de ese run (el open de su primera
+// vela). Giro mas TEMPRANO y fino que el CHoCH (rompe el open de la pierna, no un pivote swing). El
+// consumidor mantiene el run vigente (runDir/runLen/runOrigin) y lo pasa aqui (estado de la pierna que
+// termino en la barra previa). CISD alcista: tras run BAJISTA, curClose > runOrigin con curOpen <=
+// runOrigin; bajista simetrico. El gate cisdMinRun (>=2) lo hace distinguible del ruido (NO duplica
+// CHoCH/MSS: puede dispararse sin romper pivote). PURA. Devuelve SMC_Event KIND_CISD o na. Confluencia #47.
+f_detectCISD(float curOpen, float curClose, int runDir, float runOrigin, int runLen, int cisdMinRun, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if runLen >= cisdMinRun and not na(runOrigin)
+        if runDir < 0 and curClose > runOrigin and curOpen <= runOrigin
+            ev := SMC_Event.new(runOrigin, DIR_BULL, barIdx, barTime, "", KIND_CISD)
+        else if runDir > 0 and curClose < runOrigin and curOpen >= runOrigin
+            ev := SMC_Event.new(runOrigin, DIR_BEAR, barIdx, barTime, "", KIND_CISD)
+    ev
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1767,6 +1788,27 @@ if barstate.isconfirmed
         nymoLvl := open
         nymoT   := time
 
+// --- CISD — Change in State of Delivery [§5.6] · T32 ---
+// Mantiene el RUN de delivery vigente (var): direccion, longitud y origen (open de su 1a vela). Cada
+// barra confirmada: primero CHEQUEA el CISD contra el run formado hasta la barra previa, luego ACTUALIZA
+// el run con la barra actual (mismo color -> extiende; cambio/doji -> nuevo run). Va a SMC_cisd.
+var int   cisdRunDir  = 0
+var int   cisdRunLen  = 0
+var float cisdRunOrig = na
+var array<SMC_Event> SMC_cisd = array.new<SMC_Event>()
+SMC_Event evCISD = na
+if barstate.isconfirmed
+    evCISD := f_detectCISD(open, close, cisdRunDir, cisdRunOrig, cisdRunLen, i_cisdMinRun, bar_index, time)
+    if not na(evCISD)
+        f_pushEvent(SMC_cisd, evCISD, MAX_EVENTS)
+    int cisdCol = close > open ? 1 : close < open ? -1 : 0
+    if cisdCol == cisdRunDir and cisdCol != 0
+        cisdRunLen += 1
+    else
+        cisdRunDir  := cisdCol
+        cisdRunLen  := cisdCol == 0 ? 0 : 1
+        cisdRunOrig := cisdCol == 0 ? na : open
+
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Clasificador de estado: al confirmar una ruptura, MARCA y ALMACENA el tramo. legHadDisp recuerda si
 // hubo displacement (§4.1) desde la ultima ruptura (incluida la vela de ruptura, por eso se actualiza
@@ -2272,6 +2314,22 @@ if i_showIR and barstate.islast
             bool bullIr = ir.dir == DIR_BULL
             string irtxt = bullIr ? "IR ↑" : "IR ↓"
             array.push(SMC_irLabels, label.new(ir.barTime + irOffMs, ir.price, irtxt, style = label.style_label_left, color = color.new(color.olive, 70), textcolor = color.olive, size = size.tiny, xloc = xloc.bar_time))
+
+// Marcadores de CISD [T32 · §5.6]. Mismo patron repintado-en-islast (acotado a i_maxShowCISD). Cambio de
+// estado de entrega anclado al origen del run roto. Color VERDE-AZULADO (teal claro), flecha por dir.
+var array<label> SMC_cisdLabels = array.new<label>()
+if i_showCISD and barstate.islast
+    for lb in SMC_cisdLabels
+        label.delete(lb)
+    array.clear(SMC_cisdLabels)
+    int nC = array.size(SMC_cisd)
+    if nC > 0
+        int firstC = math.max(0, nC - i_maxShowCISD)
+        for i = firstC to nC - 1
+            SMC_Event ce = array.get(SMC_cisd, i)
+            bool bullC = ce.dir == DIR_BULL
+            string ctxt = bullC ? "CISD ↑" : "CISD ↓"
+            array.push(SMC_cisdLabels, label.new(ce.barTime, ce.price, ctxt, style = bullC ? label.style_label_up : label.style_label_down, color = color.new(color.rgb(60, 190, 190), 65), textcolor = color.rgb(60, 190, 190), size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de Judas [T18 · §3.5]. Mismo patron repintado-en-islast (acotado a i_maxShowJudas).
 // Fucsia: lo distingue del naranja (displacement), amarillo (IDM) y verde/rojo (sweep). La trampa de

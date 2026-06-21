@@ -42,6 +42,7 @@ export const int KIND_EQH = 44
 export const int KIND_EQL = 45
 export const int KIND_VI  = 46
 export const int KIND_BAG = 47
+export const int KIND_CISD = 48
 
 // --- Direccion canonica y estados de zona ---
 export const int DIR_BULL     = 1
@@ -549,6 +550,20 @@ export f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapM
     int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
     bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
     [measurable, dir]
+
+// --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
+// f_detectCISD: cierre que cruza el ORIGEN (open de la 1a vela) del ultimo run de delivery (>= cisdMinRun
+// velas del mismo color). Giro mas temprano que el CHoCH (no rompe pivote). El consumidor mantiene el run
+// (runDir/runLen/runOrigin). Alcista: tras run bajista, curClose>runOrigin con curOpen<=runOrigin; bajista
+// simetrico. cisdMinRun>=2 lo hace distinguible (no duplica CHoCH/MSS). PURA. Devuelve KIND_CISD o na. #47.
+export f_detectCISD(float curOpen, float curClose, int runDir, float runOrigin, int runLen, int cisdMinRun, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if runLen >= cisdMinRun and not na(runOrigin)
+        if runDir < 0 and curClose > runOrigin and curOpen <= runOrigin
+            ev := SMC_Event.new(runOrigin, DIR_BULL, barIdx, barTime, "", KIND_CISD)
+        else if runDir > 0 and curClose < runOrigin and curOpen >= runOrigin
+            ev := SMC_Event.new(runOrigin, DIR_BEAR, barIdx, barTime, "", KIND_CISD)
+    ev
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la

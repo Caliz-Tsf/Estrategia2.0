@@ -52,6 +52,7 @@ i_irFactor     = input.float(1.0, "IR: rango vela impulso (x ATR14, §5.4)", min
 i_irBodyPct    = input.float(0.60, "IR: cuerpo minimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_SCORE)
 i_viThreshold  = input.float(0.05, "VI: gap minimo de cuerpo (x ATR14, §5.5)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_SCORE)
 i_gapMin       = input.float(0.5, "Gap apertura medible / Breakaway (x ATR14, §5.10)", minval = 0.0, step = 0.1, group = GRP_SCORE)
+i_cisdMinRun   = input.int(2, "CISD: velas minimas del run de delivery (§5.6)", minval = 1, group = GRP_SCORE)
 i_sessionProfile = input.string("FX-London-NY", "Perfil de sesión", options = ["FX-London-NY", "FX-Asia", "None"], group = GRP_KZ)
 i_mtfCapOB    = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG   = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
@@ -107,6 +108,7 @@ KIND_EQH = 44
 KIND_EQL = 45
 KIND_VI  = 46
 KIND_BAG = 47
+KIND_CISD = 48
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -629,6 +631,23 @@ f_classifyOpenGap(float openNew, float closePrev, float atr14, float gapMin) =>
     int  dir = g > 0 ? DIR_BULL : g < 0 ? DIR_BEAR : 0
     bool measurable = not na(atr14) and math.abs(g) >= gapMin * atr14
     [measurable, dir]
+
+// --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
+// f_detectCISD: el precio venia "entregando" en una direccion (un RUN de >= cisdMinRun velas del mismo
+// color = la pierna de delivery) y CIERRA de vuelta cruzando el ORIGEN de ese run (el open de su primera
+// vela). Giro mas TEMPRANO y fino que el CHoCH (rompe el open de la pierna, no un pivote swing). El
+// consumidor mantiene el run vigente (runDir/runLen/runOrigin) y lo pasa aqui (estado de la pierna que
+// termino en la barra previa). CISD alcista: tras run BAJISTA, curClose > runOrigin con curOpen <=
+// runOrigin; bajista simetrico. El gate cisdMinRun (>=2) lo hace distinguible del ruido (NO duplica
+// CHoCH/MSS: puede dispararse sin romper pivote). PURA. Devuelve SMC_Event KIND_CISD o na. Confluencia #47.
+f_detectCISD(float curOpen, float curClose, int runDir, float runOrigin, int runLen, int cisdMinRun, int barIdx, int barTime) =>
+    SMC_Event ev = na
+    if runLen >= cisdMinRun and not na(runOrigin)
+        if runDir < 0 and curClose > runOrigin and curOpen <= runOrigin
+            ev := SMC_Event.new(runOrigin, DIR_BULL, barIdx, barTime, "", KIND_CISD)
+        else if runDir > 0 and curClose < runOrigin and curOpen >= runOrigin
+            ev := SMC_Event.new(runOrigin, DIR_BEAR, barIdx, barTime, "", KIND_CISD)
+    ev
 
 // --- Fair Value Gaps (FVG) + CE [reglas-smc-ict §2.2] · T06 ---
 // f_detectFVG: ineficiencia de 3 velas (hueco sin negociar). Evaluada al CIERRE de la
@@ -1690,6 +1709,26 @@ if barstate.isconfirmed
     if ogNYMid
         nymoLvl := open
         nymoT   := time
+
+// --- CISD — Change in State of Delivery [§5.6] · T32 ---
+// Mismo wiring que Visual (sin dibujo). Mantiene el run de delivery (var); chequea CISD contra el run
+// previo y actualiza con la barra actual. Va a SMC_cisd para el scoring (#47).
+var int   cisdRunDir  = 0
+var int   cisdRunLen  = 0
+var float cisdRunOrig = na
+var array<SMC_Event> SMC_cisd = array.new<SMC_Event>()
+SMC_Event evCISD = na
+if barstate.isconfirmed
+    evCISD := f_detectCISD(open, close, cisdRunDir, cisdRunOrig, cisdRunLen, i_cisdMinRun, bar_index, time)
+    if not na(evCISD)
+        f_pushEvent(SMC_cisd, evCISD, MAX_EVENTS)
+    int cisdCol = close > open ? 1 : close < open ? -1 : 0
+    if cisdCol == cisdRunDir and cisdCol != 0
+        cisdRunLen += 1
+    else
+        cisdRunDir  := cisdCol
+        cisdRunLen  := cisdCol == 0 ? 0 : 1
+        cisdRunOrig := cisdCol == 0 ? na : open
 
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Mismo wiring que Visual pero SIN dibujo: la Strategy solo pobla SMC_legs para el scoring (clasificador
