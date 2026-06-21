@@ -715,3 +715,88 @@ Conceptos que dan **contexto direccional** y confirman (o no) la confluencia: la
 > 2. ✅ **Aprobación final del usuario** (Freddy, Sesion-008) + **veredicto VER-09 de Fable (2026-06-11): APROBADO** — las 3 notas de escasez aceptadas como deuda controlada con criterios de done en Fase 1 (T12 ≥3 MSS · T18 ≥3 Judas · T19 ≥1 retest breaker). Ver ADR-002.
 >
 > **Tier 3 (Wyckoff, PO3, Volume Surge):** fuera de este doc — experimental post-Fase 3 `[P-10]`.
+
+---
+---
+
+## 5. GAP ICT — Sprint 1.6 (primitivas nuevas)
+
+> **Extensión** sobre el set canónico §1–§4. Estas son las primitivas ICT que faltaban (T26–T40, ver `docs/planes/ESQUELETO-P1-conceptos-EA-pine-repos.md`). **Gate (decisión usuario):** ninguna se codifica en Pine hasta tener aquí su regla cuantificada (umbrales relativos a ATR + casos EURUSD verificados + contraejemplo). Las confluencias nuevas son **candidatas #43+**; el número final lo fija el `[impl]` al cablear el scoring (Fase 2). Anti-doble-conteo `[FIX P-05]` aplica: una variante que *refina* un concepto previo NO suma confluencia nueva. Umbrales **CONGELADOS** hasta Fase 3 (ADR-002).
+>
+> *Verificación de esta tanda:* contada sobre `scripts/ver05/eurusd_h1.csv` (H1, 300 velas, la misma pasada TV MCP de Sesion-008). Donde el dato no exista en esa ventana (multi-símbolo, futuros, gaps de fin de semana) se indica explícitamente y queda pendiente de pasada TV dedicada.
+
+### 5.1 True FVG (T.FVG) `f_detectTrueFVG` · T26
+
+**Concepto.** Un FVG (§2.2) de **alta calidad institucional**: no cualquier hueco de 3 velas, sino el creado por una **vela media de displacement** (intención real), no por ruido. Refina el FVG, no es un objeto nuevo.
+
+**Definición cuantificada.** Un FVG (§2.2: alcista `low[0] > high[2]`, bajista `high[0] < low[2]`, altura ≥ `fvgThreshold×ATR14`) es **True FVG** si su **vela media** (la del medio del trío, índice −1) es un **displacement** (§4.1: rango ≥ `dispFactor×ATR14` y cuerpo ≥ `bodyPct×rango`). Se marca como `KIND_TFVG` (o flag `true=1` sobre el FVG); hereda la máquina de mitigación (§2.1). **No suma confluencia** propia: eleva el **peso** del FVG existente (#18/#20) — un FVG "true" pesa más en el scoring (Fase 3).
+
+**Parámetros default.** Heredados: `fvgThreshold 0.25` (§2.2) + `dispFactor 1.5` / `bodyPct 0.70` (§4.1). Sin umbral propio.
+
+**Contraejemplo.** Un FVG cuya vela media es pequeña/indecisa (rango < 1.5×ATR o cuerpo < 70%): es un FVG normal, **no** True FVG — el hueco existe pero no hubo desplazamiento institucional que lo respalde (menor probabilidad de respeto).
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1)*: de **34 FVG** detectados en la ventana, **10 son True FVG** (vela media = displacement) — p.ej. los gaps cuya media coincide con las velas de impulso 06-05. Los 24 restantes son FVG normales (vela media sin displacement) → menor peso.
+
+### 5.2 IFVG — Inversion FVG `f_detectIFVG` · T27
+
+**Concepto.** Un FVG que **falló** (fue invalidado) e **invierte su rol**: un FVG alcista roto a la baja pasa a actuar como resistencia (IFVG bajista) en el retest. Es el **análogo exacto del Breaker (§2.6) pero sobre FVG**.
+
+**Definición cuantificada.** Cuando una `SMC_Zone` KIND_FVG pasa a `state = ZS_INVALID` (§2.1: una vela **cierra** atravesando su borde protector) → se crea una `SMC_Zone` `KIND_IFVG` en las mismas coordenadas con `dir` **invertido** y `ZS_ACTIVE`. El retest lo gestiona la **misma** `f_updateZoneMitigation`. Mismo guard que el breaker: solo nace de un FVG (no un IFVG de otro IFVG) y solo en la transición a inválido.
+
+**Parámetros default.** Heredados de FVG (§2.2). Confluencia **nueva candidata** (#43 IFVG alineado), 1 sola (no se suma con el FVG original que ya murió).
+
+**Contraejemplo.** Un FVG simplemente **mitigado** (`ZS_MITIGATED`: el precio lo tocó y respetó) **no** es IFVG — sigue siendo FVG válido en su dirección. El IFVG exige **invalidación** (cierre a través), no un toque.
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1)*: **27 FVG invalidados** en la ventana → 27 IFVG candidatos. Ej.: FVG bull del 05-27 00:00 invalidado por cierre el 05-27 14:00 → IFVG bajista; FVG bull del 05-28 13:00 invalidado el 06-01 13:00 → IFVG bajista (coincide con el gran giro bajista).
+
+### 5.3 BPR — Balanced Price Range `f_detectBPR` · T28
+
+**Concepto.** Dos FVG de **dirección opuesta que se solapan** → zona de "precio balanceado": el solape es un área de reacción fuerte (oferta y demanda se cruzaron ahí).
+
+**Definición cuantificada.** Entre los FVG vivos (§2.2), si un FVG **alcista** y uno **bajista** creados dentro de `bprWindow` velas entre sí tienen **intersección no vacía** (`max(bottoms) < min(tops)`), se crea una `SMC_Zone` `KIND_BPR` = la **intersección** `[max(bottoms), min(tops)]`, con altura ≥ `bprMinOverlap×ATR14`. `dir` = neutro/ambos (zona de reacción bidireccional; el sesgo lo da el contexto). Ciclo de vida vía `f_updateZoneMitigation`.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `bprWindow` | **20** | velas máximas entre los dos FVG opuestos. |
+| `bprMinOverlap` | **0.05** | × ATR14, altura mínima de la intersección (evita solapes triviales). |
+
+**Contraejemplo.** Dos FVG del **mismo** lado, o dos opuestos que **no se tocan** (sin intersección): no hay BPR — el BPR exige el cruce real de un hueco alcista con uno bajista.
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1)*: **15 solapes** FVG-opuesto dentro de ≤20 velas. Ej.: BPR 05-28 (FVG bear 00:00 ∩ FVG bull 13:00) = [1.16235, 1.16260]; BPR 05-29 (04:00 ∩ 06:00) = [1.16394, 1.16422].
+
+### 5.4 Immediate Rebalance (IR) `f_detectImmediateRebalance` · T29
+
+**Concepto.** Lo **contrario** al FVG: una vela de impulso cuyo desequilibrio es **rebalanceado de inmediato** por la vela siguiente (el precio vuelve a su rango sin dejar hueco). Señala que la ineficiencia ya se "curó" → no quedará FVG imán; matiza el contexto (no es zona operable propia).
+
+**Definición cuantificada.** Una vela `i` de impulso (`rango ≥ irFactor×ATR14` y `cuerpo ≥ irBodyPct×rango`) seguida de una vela `i+1` que **cierra de vuelta dentro del cuerpo de `i`** (alcista: `close[i+1] ≤ (open[i]+close[i])/2`; bajista simétrico) → `KIND_IR`, evento puntual (patrón P4, marca histórica). `dir` = el de la vela de impulso original (la que fue rebalanceada).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `irFactor` | **1.0** | × ATR14, tamaño mínimo de la vela de impulso. |
+| `irBodyPct` | **0.60** | cuerpo mínimo (fracción del rango). |
+
+**Contraejemplo.** Una vela de impulso que **deja FVG** (la siguiente NO rellena su rango) es lo opuesto: hay ineficiencia residual → es contexto de FVG (§2.2), no Immediate Rebalance.
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1)*: **11 Immediate Rebalances** — p.ej. 05-27 07:00, 05-29 06:00/08:00, 06-01 06:00 (vela fuerte rebalanceada por la siguiente, sin gap residual).
+
+### 5.5 Volume Imbalance + SIVI/BIVI `f_detectVolumeImbalance` · T31
+
+**Concepto.** Micro-desequilibrio entre **cuerpos** de velas consecutivas con **solape de mechas** — a diferencia del FVG (hueco entre *extremos*), aquí las mechas se tocan pero los cuerpos dejan un gap (apertura ≠ cierre previo). **BIVI** = buy-side (gap de cuerpo al alza), **SIVI** = sell-side (a la baja).
+
+**Definición cuantificada.** En velas consecutivas `i-1`, `i`: hay **Volume Imbalance** si el cuerpo abre con gap respecto al cierre previo pero las mechas se solapan:
+- **BIVI (alcista):** `open[i] > close[i-1]` con `(open[i] − close[i-1]) ≥ viThreshold×ATR14` **y** `low[i] ≤ high[i-1]` (mechas solapan).
+- **SIVI (bajista):** `open[i] < close[i-1]` con `(close[i-1] − open[i]) ≥ viThreshold×ATR14` **y** `high[i] ≥ low[i-1]`.
+`KIND_VI` (zona micro `[close[i-1], open[i]]` o marca), ciclo de vida vía `f_updateZoneMitigation`. **Una sola confluencia** para la familia (no cuenta 3× por VI/SIVI/BIVI — `[FIX P-05]`).
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `viThreshold` | **0.05** | × ATR14, gap mínimo de cuerpo (micro por naturaleza). |
+
+**Contraejemplo.** Un gap entre velas **sin** solape de mechas (`low[i] > high[i-1]` en alcista): eso es un **FVG/gap real** (§2.2), no Volume Imbalance — el VI exige que las mechas se toquen (sólo los cuerpos dejan el hueco).
+
+**Casos de prueba** *(EURUSD, `eurusd_h1.csv`; H1)*: **13 Volume Imbalances** — p.ej. SIVI 05-26 21:00 (gap cuerpo 0.00031), BIVI 05-27 21:00 (0.00022), SIVI 05-31 21:00 (0.00078). (En M5 son mucho más frecuentes, 53 — coherente con su naturaleza micro.)
+
+> **Lote 1 (familia FVG/imbalance T26–T29, T31) — definido y verificado contra `eurusd_h1.csv`.** Pendientes de esta sección §5: T30 (gaps de apertura), T32 (CISD), T33 (Vacuum), T34 (Propulsion), T35 (IPR), T36 (Std Dev), T37 (Inside Day), T38 (SMT — requiere ADR), T39 (macros), T40 (RTH/ETH).
