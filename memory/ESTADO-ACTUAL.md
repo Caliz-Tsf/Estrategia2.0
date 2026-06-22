@@ -34,10 +34,9 @@
   - **`mql5/ea-nativo`** (nombre propuesto) = Fase 4, el Expert Advisor MT5. Se crea **al cerrar la última sesión de Pine**, después de la aprobación de Fable, partiendo de `main` ya fusionado.
   - Regla: ningún MQL5 hasta cerrar la rama Pine + gate Fable. Cada rama = una gran etapa; main = hitos aprobados.
 
-## Cómo arrancar la próxima sesión
-1. Leer este archivo + WORKPLAN-MAESTRO-V2.md Sección 3 (Fase 0).
-2. Confirmar SEC-01 hecho por el usuario.
-3. Ejecutar Fase 0 en orden: Bloque A → B → C → D → E → F → VER-01..08.
+## Cómo arrancar la próxima sesión (Sesion-049 = VALIDACIÓN del set completo)
+1. **Arranque S049:** validación 1-a-1 AISLADA de los 40+ conceptos (Tier 1+2+3, NO solo los nuevos) según **`docs/sprint-runs/PLAN-VALIDACION-Sesion-049.md`** (lista ordenada + toggle por concepto + TF + casos). Metodología (decisión Freddy S048): Claude apaga TODOS los `i_show*` vía MCP y enciende solo el concepto en turno (aislar = ocultar dibujo, NO la detección → seguro). EURUSD, TF de cada §, scroll a los casos ✓/✗ de reglas-smc-ict.md, screenshot, smc-validator-agent ≥90. Cierra el F1-GATE (≥90 + anti-repaint + perf 20k).
+2. (Histórico Fase 0) Leer este archivo + WORKPLAN-MAESTRO-V2.md Sección 3.
 
 ## Notas de herramientas (Sesion-005)
 - **TV MCP:** lanzar SIEMPRE por `mcp__tradingview__tv_launch` (CDP 9222), nunca manual. Fork en `D:\CODE\BOT\Bot\tradingview-mcp-jackson` +4 ahead de origin (merge upstream sin pushear).
