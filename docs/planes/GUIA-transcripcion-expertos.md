@@ -28,23 +28,31 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 
 ## 2. Playlists extra de "No soy liquidez" (un mentor, varios temas)
 
-Cada playlist temática va a su **propia subcarpeta** (luego se sintetiza en un `knowledge/*.md`, ver `ESQUEMA-HERMES-mentor-module.md` §3). Usa el `-Mentor` con el tema incluido para que el slug genere la carpeta:
+Cada playlist temática va a su **propia subcarpeta** (luego se sintetiza en un `knowledge/*.md`, ver `ESQUEMA-HERMES-mentor-module.md` §3). El `-Mentor` lleva el tema incluido para que el slug genere la carpeta correcta. **URLs reales verificadas (S050, 2026-06-22): las 7 playlists resuelven y los conteos cuadran.** Copia-pega cada bloque (es el LOTE 1 = videos 1-5; sigue con `-PlaylistItems "6-10"`, `"11-15"`… hasta acabar la playlist):
 
 ```powershell
-# Price action  ->  Mentores\no-soy-liquidez-price-action\
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "<URL_PLAYLIST_PRICE_ACTION>" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "1-5"
+# Lectura Price Action (22 vids)  ->  Mentores\no-soy-liquidez-price-action\
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "1-5"
 
-# Live execution  ->  Mentores\no-soy-liquidez-live-execution\
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "<URL_PLAYLIST_LIVE_EXECUTION>" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "1-5"
+# Smart Money Flow (20 vids)  ->  Mentores\no-soy-liquidez-smart-money-flow\
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4CdYD__c0Sqd1U81IX8nVb" -Mentor "no soy liquidez smart-money-flow" -Model small -PlaylistItems "1-5"
 
-# High precision entries  ->  Mentores\no-soy-liquidez-entradas-precision\
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "<URL_PLAYLIST_ENTRADAS>" -Mentor "no soy liquidez entradas-precision" -Model small -PlaylistItems "1-5"
+# Live Execution (32 vids)  ->  Mentores\no-soy-liquidez-live-execution\
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "1-5"
 
-# Smart money flow  ->  Mentores\no-soy-liquidez-smart-money-flow\
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "<URL_PLAYLIST_SMF>" -Mentor "no soy liquidez smart-money-flow" -Model small -PlaylistItems "1-5"
+# Entradas de Alta Precision SMC (8 vids)  ->  Mentores\no-soy-liquidez-entradas-precision\
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4Oq5tx5WsmTu5hZ9LIbroi" -Mentor "no soy liquidez entradas-precision" -Model small -PlaylistItems "1-5"
+
+# High Precision Trading Entries (7 vids)  ->  Mentores\no-soy-liquidez-high-precision\
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4J3gr2fBoqvcxhE746uUvY" -Mentor "no soy liquidez high-precision" -Model small -PlaylistItems "1-5"
+
+# Sesion de Feedback (23 vids)  ->  Mentores\no-soy-liquidez-feedback\
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9" -Mentor "no soy liquidez feedback" -Model small -PlaylistItems "1-5"
 ```
 
-Resultado = el MISMO mentor sabrá de todos esos temas (un agente, varios conocimientos), no 5 agentes distintos.
+> El curso MADRE (65 vids, ✅ ya bajado) es la playlist `PLOwrTT3cFiA5Qo_k27soDPvyPo3Wr7T8S` → `Mentores\no-soy-liquidez\`. Sus comandos por-video están en `COMANDOS-curso-no-soy-liquidez.md`.
+
+Resultado = el MISMO mentor sabrá de todos esos temas (un agente, varios conocimientos), no 6 agentes distintos. Tras bajar cada tema → se sintetiza en un `knowledge/<tema>.md`.
 
 ---
 

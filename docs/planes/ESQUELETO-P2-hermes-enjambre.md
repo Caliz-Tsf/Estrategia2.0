@@ -146,6 +146,55 @@ Cuando la síntesis (⑨) marca una entrada **accionable**, se envía **notifica
 
 ---
 
+## §2.9 — Asignación de modelo por rol (razonamiento vs mecánico) + modelo de costos
+
+> **Origen (S044, 2026-06-21):** duda del usuario — *"¿un agente con Nemotron y uno con GLM 5.2 razonan distinto, o como cada agente tiene su contenido propio da igual el modelo? ¿cuánto costará mantener el enjambre? ¿conviene pagar una API?"*. Refina la regla §0.5 y la fila §5 #8 (reparto de proveedores). Hechos **verificados en vivo** contra el endpoint NIM (`integrate.api.nvidia.com/v1`, key actual) ese día.
+
+### §2.9.1 — Principio: el modelo ≠ el contenido del agente (dos ejes distintos)
+- **Contenido / ficha / knowledge / prompt → QUIÉN es el agente y QUÉ sabe.** Reduce alucinación, aterriza, da voz. **No** sube la profundidad de razonamiento.
+- **Modelo subyacente (Nemotron / GLM / Gemini / Opus) → QUÉ TAN BIEN razona con ese contenido.** Un modelo flojo con la mejor ficha SMC del mundo igual: se salta pasos en inferencias multi-eslabón, pondera mal señales en conflicto (FVG vs OB vs liquidez), inventa confluencias, suena convincente pero plano.
+- **Corolario:** la calidad de la **discusión** del enjambre (§2.3) — ponderar hipótesis, proyectar escenarios, asignar el voto/score — depende del modelo, no solo de la ficha. Y como esos votos alimentan el scoring vía IS/OOS (regla §0.7), **basura de razonamiento entra → basura sale** aguas abajo (Pine/EA). El razonamiento del laboratorio es **alto apalancamiento**.
+
+### §2.9.2 — Criterio: qué modelo según el tipo de trabajo
+| Tipo de tarea | Roles del enjambre | ¿Importa el modelo? | Modelo recomendado |
+|---|---|---|---|
+| **Mecánico / detección / formato / visión** | Vigía/cron, describir gráfico, detección (que además es **determinista** por el Pine), router, doc/sync | **Poco** | gratis rápido (mapeados HOY): `nvidia/nemotron-3-super-120b-a12b` · `nvidia/llama-3.3-nemotron-super-49b-v1.5` · visión `meta/llama-3.2-90b-vision-instruct` · `gemini-2.5-flash` |
+| **Razonamiento / debate / escenarios** | Mentores que debaten (§2.3 ronda 1/2), Escéptico | **Mucho** | el mejor mapeado HOY: `nvidia/nemotron-3-super-120b-a12b` (NIM gratis) o `z-ai/glm-5.2-free` (ZenMux gratis); **medir primero**; pago solo si la calidad lo pide |
+| **Juez / voto consolidado** | Supervisor de Confluencia (la llamada de **mayor apalancamiento**) | **Máximo** | el más capaz mapeado (`nemotron-3-super-120b` / `glm-5.2-free`); aquí es donde un modelo de pago rendiría si se decide escalar |
+
+- **Diversidad cognitiva (refuerza §3, "espejismo de consenso").** Mezclar modelos distintos entre agentes **es deseable**: N agentes con el MISMO modelo cometen errores correlacionados (eco). El Escéptico **ya** debe correr un modelo distinto del proponente (§3, línea de cierre). Extender: el debate gana si proponentes corren modelos heterogéneos (p.ej. `nemotron-super-120b` vs `glm-5.2-free` vs `hermes3:8b` local).
+- Esto **refina §0.5** (que fijaba vigía=flash / mentores=pro asumiendo solo-Gemini): con NVIDIA NIM operativo, el reparto por criticidad tiene más opciones gratis.
+
+### §2.9.3 — Modelo de costos: probablemente $0, y por qué
+- **Hermes Workspace NO tiene suscripción** — es self-hosted (gateway 8642, modo portable). Lo único que cuesta son las **llamadas a modelos**.
+- **NVIDIA NIM free = 40 req/MIN, sin costo por token, sin tarjeta** (vs OpenRouter free 50/día con <$10). Si el enjambre corre sobre NIM + Ollama local → **$0/mes**. El cuello real es **req/min y confiabilidad en picos, NO el dinero** — exactamente lo que decía §0.5, ahora cuantificado.
+- **El diseño event-driven (orquestador-vigía único, agentes dormidos hasta evento, cron 15m §0.5) ES el control de costos.** Estimación 1 símbolo/24h: ~900 llamadas/día del vigía + ~150 de ráfagas de enjambre ≈ **~1.000/día**, trivial para 40 rpm (una ráfaga de ~15 llamadas cabe de sobra/min).
+- **Cuándo pagar (solo por holgura, no necesidad):** (1) $0 → NIM + ZenMux-free + Ollama, **viable hoy** (es lo mapeado); (2) si NIM falla en picos → red de seguridad de pago (OpenRouter $10/1000-req-día u otra) **solo si la medición lo justifica**; (3) plan de pago para razonamiento → solo si un modelo de pago demuestra ganar a `nemotron-super-120b`/`glm-5.2-free` gratis en un caso SMC real. **Regla: medir RPD/calidad con el enjambre real ANTES de pagar nada** (alineado §0.5). Nota: Gemini free-tier-pro hoy devuelve **429 (límite 0)** → no contar con él; usar NIM como caballo de batalla.
+
+### §2.9.4 — MAPEO ACTUAL de modelos (fuente de verdad — solo lo que existe HOY)
+> Saneado en S050 (2026-06-22) contra **`~/.hermes/config.yaml`** (Hermes) y **`~/.hermes/start-jarvis.ps1`** (Jarvis). **Esta es la lista a usar; no inventar modelos fuera de aquí.** Lo que estaba antes y NO está mapeado se retiró (ver "Retirados" abajo).
+
+**HERMES — `providers` de `config.yaml` (4 proveedores):**
+| Proveedor | Modelos mapeados | Uso / estado |
+|---|---|---|
+| `nvidia_nim` | `nvidia/nemotron-3-super-120b-a12b` · `nvidia/llama-3.3-nemotron-super-49b-v1.5` · `meta/llama-3.2-90b-vision-instruct` (en `auxiliary.vision`) | **Caballo de batalla.** Gratis 40 req/min. NIM = razonamiento + mecánico; vision-90b = visión. ✅ verificado (el mentor NSL respondió por aquí, S050). |
+| `ollama` (local, `D:\ollama`) | `hermes3:8b` · `alibayram/mimo-7b-rl` | $0, sin cuota, offline. hermes3 = hablar rápido (español); mimo = razonar (verboso/inglés). |
+| `zenmux` | `z-ai/glm-5.2-free` · `moonshotai/kimi-k2.7-code-free` · `stepfun/step-3.7-flash-free` | Gratis. GLM-5.2 = alternativa de razonamiento (diversidad cognitiva). *(Resuelve la nota vieja "ZenMux 403": hoy opera con modelos free.)* |
+| `google` | `gemini-2.5-flash` · `gemini-2.5-pro` | ⚠️ **free-tier-pro = 429/límite 0 hoy** (no contar con pro). flash sí responde. |
+
+**JARVIS — tiers de `start-jarvis.ps1` (híbrido ahorrativo):**
+| Tier | Motor | Modelo mapeado | Uso |
+|---|---|---|---|
+| 1 LOCAL | `ollama` | `hermes3:8b` (default) · `alibayram/mimo-7b-rl` (`-Model mimo`) | charlar / PC básico (gratis/offline) |
+| 2 NVIDIA gratis | `litellm` | `meta/llama-4-maverick` (`default_model`, NO pasar `--model`) | `-Cloud` navegar/investigar/tools · `-Do` orchestrator (browser + web + MCP TV) |
+| 3 Claude | — | _pendiente de cablear_ | último recurso |
+
+**Retirados (estaban en el doc, NO están mapeados → no usar):** `puter`/`claude-sonnet-4-6` vía Puter (proveedor eliminado de la config) · `nvidia/nemotron-3-ultra-550b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `minimaxai/minimax-m3` · `mistralai/mistral-large-3` · `openai/gpt-oss-120b` · cadenas OpenRouter (proveedor `openrouter` referenciado en `task_profiles` pero **no configurado** como provider). Si se quiere usar alguno → primero añadirlo a `providers` y verificar 200, recién entonces documentarlo aquí.
+
+> **Pendiente `⏳ [impl]`:** definir un `task_profile` del enjambre con la cadena ya mapeada: razonamiento `nemotron-super-120b` → fallback `glm-5.2-free` → fallback local `mimo-7b-rl`; visión `llama-3.2-90b-vision`; mecánico `nemotron-49b`/`hermes3:8b`. (El mini-test "modelo de pago vs gratis" se hará solo si la medición lo pide.)
+
+---
+
 ## §3 — Roster del enjambre (4 familias) y cómo se instancian
 
 De `MODULO-MENTORES-WORKFLOW.md §Roster` + `PLAN-modulo-mentores-swarm.md §C`. La **plantilla concreta** de cada agente está en `PLANTILLA-agente-mentor.md`.
