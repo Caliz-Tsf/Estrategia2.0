@@ -28,26 +28,45 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 
 ## 2. Playlists extra de "No soy liquidez" (un mentor, varios temas)
 
-Cada playlist temática va a su **propia subcarpeta** (luego se sintetiza en un `knowledge/*.md`, ver `ESQUEMA-HERMES-mentor-module.md` §3). El `-Mentor` lleva el tema incluido para que el slug genere la carpeta correcta. **URLs reales verificadas (S050, 2026-06-22): las 7 playlists resuelven y los conteos cuadran.** Copia-pega cada bloque (es el LOTE 1 = videos 1-5; sigue con `-PlaylistItems "6-10"`, `"11-15"`… hasta acabar la playlist):
+Cada playlist temática va a su **propia subcarpeta** (luego se sintetiza en un `knowledge/*.md`, ver `ESQUEMA-HERMES-mentor-module.md` §3). El `-Mentor` lleva el tema incluido para que el slug genere la carpeta correcta. **URLs reales verificadas (S050, 2026-06-22): las 7 playlists resuelven y los conteos cuadran. Lotes 5-en-5 completos generados (S051).** Corre los lotes de cada playlist **en orden, uno tras otro** (esperar a que termine el anterior); si un video falla se loguea y sigue.
 
 ```powershell
-# Lectura Price Action (22 vids)  ->  Mentores\no-soy-liquidez-price-action\
+# === Lectura Price Action (22 vids)  ->  Mentores\no-soy-liquidez-price-action\  (5 lotes) ===
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "1-5"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "6-10"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "11-15"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "16-20"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4aLY0PxiFCY2VO1paxV9xf" -Mentor "no soy liquidez price-action" -Model small -PlaylistItems "21-22"
 
-# Smart Money Flow (20 vids)  ->  Mentores\no-soy-liquidez-smart-money-flow\
+# === Smart Money Flow (20 vids)  ->  Mentores\no-soy-liquidez-smart-money-flow\  (4 lotes) ===
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4CdYD__c0Sqd1U81IX8nVb" -Mentor "no soy liquidez smart-money-flow" -Model small -PlaylistItems "1-5"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4CdYD__c0Sqd1U81IX8nVb" -Mentor "no soy liquidez smart-money-flow" -Model small -PlaylistItems "6-10"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4CdYD__c0Sqd1U81IX8nVb" -Mentor "no soy liquidez smart-money-flow" -Model small -PlaylistItems "11-15"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4CdYD__c0Sqd1U81IX8nVb" -Mentor "no soy liquidez smart-money-flow" -Model small -PlaylistItems "16-20"
 
-# Live Execution (32 vids)  ->  Mentores\no-soy-liquidez-live-execution\
+# === Live Execution (32 vids)  ->  Mentores\no-soy-liquidez-live-execution\  (7 lotes) ===
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "1-5"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "6-10"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "11-15"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "16-20"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "21-25"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "26-30"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA5raD2oTFE5JTo48uw7o3fR" -Mentor "no soy liquidez live-execution" -Model small -PlaylistItems "31-32"
 
-# Entradas de Alta Precision SMC (8 vids)  ->  Mentores\no-soy-liquidez-entradas-precision\
+# === Entradas de Alta Precision SMC (8 vids)  ->  Mentores\no-soy-liquidez-entradas-precision\  (2 lotes) ===
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4Oq5tx5WsmTu5hZ9LIbroi" -Mentor "no soy liquidez entradas-precision" -Model small -PlaylistItems "1-5"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4Oq5tx5WsmTu5hZ9LIbroi" -Mentor "no soy liquidez entradas-precision" -Model small -PlaylistItems "6-8"
 
-# High Precision Trading Entries (7 vids)  ->  Mentores\no-soy-liquidez-high-precision\
+# === High Precision Trading Entries (7 vids)  ->  Mentores\no-soy-liquidez-high-precision\  (2 lotes) ===
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4J3gr2fBoqvcxhE746uUvY" -Mentor "no soy liquidez high-precision" -Model small -PlaylistItems "1-5"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA4J3gr2fBoqvcxhE746uUvY" -Mentor "no soy liquidez high-precision" -Model small -PlaylistItems "6-7"
 
-# Sesion de Feedback (23 vids)  ->  Mentores\no-soy-liquidez-feedback\
+# === Sesion de Feedback (23 vids)  ->  Mentores\no-soy-liquidez-feedback\  (5 lotes) ===
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9" -Mentor "no soy liquidez feedback" -Model small -PlaylistItems "1-5"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9" -Mentor "no soy liquidez feedback" -Model small -PlaylistItems "6-10"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9" -Mentor "no soy liquidez feedback" -Model small -PlaylistItems "11-15"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9" -Mentor "no soy liquidez feedback" -Model small -PlaylistItems "16-20"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLOwrTT3cFiA6ozzF8PHaiDY-0N03Os0N9" -Mentor "no soy liquidez feedback" -Model small -PlaylistItems "21-23"
 ```
 
 > El curso MADRE (65 vids, ✅ ya bajado) es la playlist `PLOwrTT3cFiA5Qo_k27soDPvyPo3Wr7T8S` → `Mentores\no-soy-liquidez\`. Sus comandos por-video están en `COMANDOS-curso-no-soy-liquidez.md`.
@@ -94,13 +113,13 @@ Canal: `https://www.youtube.com/@InnerCircleTrader/playlists` — **el canal com
 
 > Slug ICT: `ict` (madre) + `ict-<tema>`. Es el mentor-experto de los conceptos raíz → su knowledge alimenta el cierre del gap (matriz).
 
-### Los otros 4 expertos ya tienen su doc de comandos
-`COMANDOS-boxxocode.md` · `COMANDOS-profittrading.md` · `COMANDOS-tj-trading.md` · `COMANDOS-fedex.md`.
+### Los demás expertos ya tienen su doc de comandos (con lotes de 5 completos)
+`COMANDOS-ict.md` (5 playlists esenciales, S051) · `COMANDOS-boxxocode.md` · `COMANDOS-profittrading.md` · `COMANDOS-tj-trading.md` · `COMANDOS-fedex.md`.
 
-### ⚠️ Traducción inglés → español (ICT y Boxxocode)
+### ⚠️ Inglés → español (ICT y Boxxocode): la síntesis la hace CLAUDE, no Gemini
 faster-whisper **solo traduce hacia inglés** (no a español). Para fuentes en inglés:
-- **Transcribir en su idioma nativo** (`-Language en`) — es lo más fiel.
-- **El español sale en la SÍNTESIS (Fase 2):** la ficha y los knowledge `.md` se generan con **Gemini**, que produce el resumen **en español** aunque la transcripción esté en inglés. No hace falta traducir las transcripciones crudas (eso solo añade error); se traduce/sintetiza el conocimiento, no el verbatim.
+- **Transcribir en su idioma nativo** (`-Language en`) — es lo más fiel; no traducir el verbatim crudo (solo añade error).
+- **El español sale en la SÍNTESIS, que la redacta CLAUDE** leyendo las transcripciones íntegras (igual que se hizo con NSL en Sesion-050: la destiló Opus directo, NO el pipeline cloud). La `ficha-mentor.md` (9 campos) y cada `knowledge/<tema>.md` los escribe Claude en español. Cero invención: cita literal entre comillas, lo no cubierto se marca `[no cubierto en el material]`. **No es Gemini ni map-reduce cloud** — ese fue el cuello de botella que se descartó.
 
 ---
 
