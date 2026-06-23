@@ -6,8 +6,10 @@
     Carga la skill mentor-<slug> y abre Hermes en su voz. Resuelve el modelo en este orden:
       1) parametro -Model explicito
       2) sidecar <SkillsDir>\mentor-<slug>\model.txt (override declarado en la ficha)
-      3) default global: claude-sonnet-4-6
-    Siempre via Puter (NIM/OR suspendidos). Toolset terminal,file (file = recall del vault).
+      3) default global: nvidia/nemotron-3-super-120b-a12b (NVIDIA NIM, gratis 40/min)
+    Proveedor configurable con -Provider (default nvidia_nim). Otros mapeados HOY en config.yaml:
+    google, zenmux, ollama. (Puter quedo obsoleto; ya no esta en la config.)
+    Toolset terminal,file (file = recall del vault).
 
     Con -q hace una consulta one-shot (no interactivo, --yolo). Sin -q abre el chat interactivo.
 
@@ -41,6 +43,8 @@ param(
     [Alias('q')]
     [string]$Question,
 
+    [string]$Provider = 'nvidia_nim',
+
     [string]$SkillsDir = (Join-Path $env:USERPROFILE '.hermes\skills')
 )
 
@@ -71,7 +75,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $skillDir 'SKILL.md'))) {
 }
 
 # --- Resolver modelo: -Model > sidecar model.txt > default ---
-$defaultModel = 'claude-sonnet-4-6'
+$defaultModel = 'nvidia/nemotron-3-super-120b-a12b'
 $resolved = $null
 $source = ''
 if ($Model) {
@@ -87,13 +91,13 @@ else {
 if (-not $resolved) { $resolved = $defaultModel; $source = 'default global' }
 
 Write-Step "Mentor : $Mentor (skill: $skillName)"
-Write-Step "Modelo : $resolved  [$source]  via puter"
+Write-Step "Modelo : $resolved  [$source]  via $Provider"
 Write-Host ""
 
 # --- Invocar Hermes ---
 if ($Question) {
-    & hermes chat -s $skillName -m $resolved --provider puter -t terminal,file -q $Question --yolo -Q
+    & hermes chat -s $skillName -m $resolved --provider $Provider -t terminal,file -q $Question --yolo -Q
 } else {
-    & hermes chat -s $skillName -m $resolved --provider puter -t terminal,file
+    & hermes chat -s $skillName -m $resolved --provider $Provider -t terminal,file
 }
 exit $LASTEXITCODE

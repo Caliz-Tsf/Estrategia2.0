@@ -15,7 +15,9 @@
     Con -SinglePass (o un solo video) se omite el MAP y se hace un unico pase.
 
     NOTA: archivo solo-ASCII (PS 5.1 lee .ps1 como ANSI). La ficha de salida la escribe Hermes
-    en UTF-8 (es contenido). Modelo SIEMPRE forzado a Puter (NIM/OR suspendidos).
+    en UTF-8 (es contenido). Proveedor configurable con -Provider (default nvidia_nim, gratis 40/min;
+    otros mapeados HOY: google, zenmux, ollama). Puter quedo obsoleto (ya no esta en config.yaml).
+    PRINCIPIO §2.9: MAP = modelo rapido/barato (NIM nemotron-120b); REDUCE = modelo fuerte.
 
     Codigos de salida: 0 OK | 1 error.
 
@@ -49,8 +51,9 @@ param(
     [string]$MentorFolder,
 
     [string]$VaultRoot   = 'D:\obsidian\boveda MENTE\Mente',
-    [string]$MapModel    = 'gemini-2.5-pro',
-    [string]$ReduceModel = 'claude-sonnet-4-6',
+    [string]$Provider    = 'nvidia_nim',
+    [string]$MapModel    = 'nvidia/nemotron-3-super-120b-a12b',
+    [string]$ReduceModel = 'nvidia/llama-3.3-nemotron-super-49b-v1.5',
     [switch]$SinglePass,
     [switch]$Force
 )
@@ -64,9 +67,9 @@ function Write-Bad($m)  { Write-Host "[X]  $m"  -ForegroundColor Red }
 # Aplana un texto multilinea a una sola linea (CommandLineToArgvW fragmenta el multilinea).
 function ConvertTo-Flat([string]$t) { return ($t -replace "`r`n", ' ' -replace "`n", ' ' -replace '\s{2,}', ' ').Trim() }
 
-# Invoca Hermes con una instruccion (ya aplanada) forzando Puter. Devuelve el exit code.
+# Invoca Hermes con una instruccion (ya aplanada) por el proveedor $Provider. Devuelve el exit code.
 function Invoke-Hermes([string]$flatPrompt, [string]$model) {
-    & hermes chat -q $flatPrompt -t terminal,file --yolo -Q -m $model --provider puter
+    & hermes chat -q $flatPrompt -t terminal,file --yolo -Q -m $model --provider $Provider
     return $LASTEXITCODE
 }
 
