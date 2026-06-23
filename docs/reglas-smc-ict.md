@@ -962,3 +962,101 @@ Devuelve `macroActiva` (bool) + identificador. Anti-repaint: por reloj (no repin
 > **Lote 4 (T38 SMT · T39 macros · T40 RTH/ETH) — definido.** SMT con **BLOQUEO ADR** (código pendiente del ADR-SMT). Macros/RTH-ETH son ventanas de reloj canónicas (no aplican a EURUSD 24h salvo macros).
 >
 > **✅ §5 GAP ICT (T26–T40) COMPLETO en Fase 0 (reglas).** Las 15 primitivas tienen regla cuantificada + umbrales ATR-relativos verificados contra `eurusd_h1.csv` (donde el dato existe) o marcados como pendientes de pasada TV dedicada (SMT multi-símbolo, RTH/ETH índices). **Ningún código Pine aún** (gate). Falta antes de codear: (1) **ADR-SMT** para T38; (2) confirmar números de confluencia #43–#51 al cablear scoring (Fase 2). **Ruta B** (DOL, IRL/ERL, HRLR/LRLR, IPDA/PDArray) NO está aquí: son moduladores de bias/scoring → Sprint 2.1.
+
+---
+
+## 6. CAPA DE CALIDAD / DISCRIMINACIÓN (graduada) — *variante · fuerza · invalidación · visual*
+
+> **Estado: ESQUELETO (Sesion-054).** Añade una capa **graduada** sobre las §1–§5 (que solo *detectan*). NO modifica ninguna definición ni umbral congelado de §0–§5 — es **aditiva**. Mapea a la columna vertebral **Detectar → Graduar → Contextualizar → Decidir** (ver [`METODOLOGIA-VERIFICACION-VISUAL.md`](METODOLOGIA-VERIFICACION-VISUAL.md)).
+>
+> **Decisión Freddy (HÍBRIDA):** Pine expone un **tag de fuerza barato por marca** reusando primitivos que el CORE ya calcula; el peso/grading completo vive aguas abajo (scoring + cadena ADR-012). Se marca todo, cada marca lleva su `strength`.
+>
+> **Cómo se rellena (cualquier IA):** cada concepto de §1–§5 recibe un sub-bloque con la **plantilla §6.0**, citando **solo** primitivos del **inventario §6.1**. Aquí (§6.2) viven los **ejemplos trabajados** de referencia (1 completo + 4 slots). El resto de los 40+ se rellenan concepto a concepto siguiendo el HANDOFF ([`HANDOFF-OPUS-ULTRACODE-discriminacion-visual.md`](planes/HANDOFF-OPUS-ULTRACODE-discriminacion-visual.md) §8 checklist). Los `strength` y pesos son **candidatos CONGELADOS por defecto hasta calibración Fase 3** (ADR-002), igual que todos los umbrales.
+
+### 6.0 Plantilla del sub-bloque por concepto (canónica)
+
+```
+**Variante correcta / desempate.** Cuando hay N candidatos, cuál es EL relevante (regla DETERMINISTA).
+   Qué descarta y por qué (citables). [cubre el FALLO #1]
+**Fuerza (0–1).** Fórmula con primitivos de §6.1: cuerpo%, ×ATR, ¿con displacement?, ¿barrió liquidez (sweep)?,
+   distancia al nivel (×ATR), ¿mitigado?, edad/frescura, alineación con bias. Define el tag `strength` que Pine
+   expone (alta/media/baja o número 0–1). [cubre el FALLO #2]
+**Invalidación externa.** Qué contexto lo anula aunque la regla se cumpla, y DÓNDE se chequea
+   (Pine `state` / scoring / cadena ADR-012 Q1–Q7). NO se hardcodea "no marcar". [cubre el FALLO #3]
+**Visual (jerarquía).** Cómo se rinde según fuerza/relevancia → Primario (render completo) / Secundario
+   (atenuado/pequeño) / Terciario (oculto o colapsado al panel T14). Mapea a su `i_show*` / `GRP_*`.
+**MTF (si transferible).** ¿Baja a TF menores? con qué cap 0–10; cae en mismo `bar_time`/nivel que el origen HTF.
+```
+
+### 6.1 Inventario de primitivos de fuerza (citar SOLO de aquí — no inventar)
+
+Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un concepto necesita un primitivo que no está aquí, el HANDOFF pide **proponer el cálculo** como indicación (no rellenarlo a ciegas).
+
+| Primitivo | Fuente en el código / § | Mide |
+|---|---|---|
+| **cuerpo%** | `f_detectDisplacement` (§4.1) | convicción de la vela (cuerpo / rango) |
+| **rango ×ATR** | ATR(14) / ATR(200) (§0) | tamaño relativo de la vela/gap |
+| **displacement** | `f_detectDisplacement` (§4.1: ≥1.5×ATR ∧ cuerpo≥70%) | impulso institucional de la pierna |
+| **mitigado / state** | `f_updateZoneMitigation` · `SMC_Zone.state` 0/1/2/3 (§2.1) | frescura: activa/parcial/mitigada/invalidada |
+| **sweep / grab** | `f_detectSweep` (§3.2) · `f_detectGrab` (§3.3) | ¿barrió liquidez antes de la marca? |
+| **distancia al nivel ×ATR** | precio actual vs nivel (§0) | cercanía/inmediatez |
+| **edad/frescura** | `barTime` de la marca vs barra actual | decaimiento histórico |
+| **alineación con bias** | bias estructural (§"Modelo de bias", P/D §2.3) | ¿a favor del sesgo del TF? |
+| **flags de refinamiento** | `SMC_Zone.trueFvg` (T26), `.propulsion` (T34) | calidad institucional ya marcada |
+| **cap / cercanía MTF** | `f_nearestN` / `f_nearestNPools` (ADR-010) | presupuesto de tinta top-N |
+
+### 6.2 Ejemplos trabajados (1 completo + 4 slots)
+
+> Cubren los 3 tipos de fallo. El OB está **completo** como calibración de profundidad/tono; los otros 4 son **slots** con el fallo objetivo, los primitivos y el caso PLAN-049 ya fijados — listos para rellenar.
+
+#### 6.2.1 Order Block (§2.1) — EJEMPLO COMPLETO *(cubre fallo #1 variante + #2 fuerza)*
+
+**Variante correcta / desempate.** En una pierna que rompe estructura puede haber **N velas contrarias** candidatas a OB. EL relevante = la **última vela contraria** (la más cercana al origen del impulso/BOS) que cumple las dos condiciones de §2.1: (i) su pierna contiene ≥1 vela de **alta volatilidad** (`(high−low) ≥ 2× volMeasure`) y (ii) **no está mitigada** (`state < 2`). **Empate** entre dos igual de cercanas → gana la de mayor rango ×ATR. **Descarta** (citable): las velas contrarias anteriores de la misma pierna, y cualquier OB con `state ≥ 2` (mitigado) o `state = 3` (invalidado → es Breaker §2.6, no OB).
+
+**Fuerza (0–1).** Combinación normalizada de: `rango_vela_OB ×ATR` (mayor = más fuerte) · `displacement` de la pierna que rompió (§4.1, binario que sube la fuerza) · `frescura` (`state`: activa=1, parcial=0.5, mitigada=0) · `¿sweep previo?` (§3.2, sube la fuerza: el OB que nace tras barrer liquidez es más fiable). Quantización sugerida: **alta** (displacement ∧ activa ∧ sweep), **media** (displacement ∨ sweep, activa), **baja** (sin displacement, rango normal). Tag expuesto = `SMC_Zone.strength`.
+
+**Invalidación externa.** Aunque sea OB válido: (1) **OB en premium** cuando se busca long (o en discount para short) → opera contra localización (§2.3) — **se marca**, lo degrada el scoring (#31 P/D). (2) **borde protector cerrado a través** (`state = 3`) → la tesis falló, deja de ser OB (candidato Breaker). DÓNDE: localización = scoring; `state=3` = Pine; secuencia "1er toque débil vs 2º válido" = cadena ADR-012 **Q4** (¿barrieron a los tempranos?).
+
+**Visual (jerarquía).** **Primario:** OB activo, alta `strength`, cercano y alineado al bias → caja sólida + etiqueta. **Secundario:** parcial/lejano o `strength` media → caja atenuada, etiqueta corta. **Terciario:** mitigado total → oculto o colapsado al panel T14; invalidado → se dibuja como Breaker, no como OB. Toggle `i_showOB` / `GRP_*` zonas.
+
+**MTF.** Transferible (cap `i_mtfCapOB`, 0–10). Caja anclada `xloc.bar_time`; cae en la misma vela/nivel que el OB nativo del TF alto (ADR-010). *Casos de verificación (de §2.1):* OB bajista 06-01 12:00 [1.16452, 1.16506]; OB bajista 06-05 11:00 [1.16345, 1.16420] (pierna −5.27×ATR → strength alta); OB alcista 06-08 08:00 [1.15079, 1.15235].
+
+#### 6.2.2 FVG / variantes (§2.2 · True FVG §5.1 · IFVG §5.2) — SLOT *(fallo #1 variante)*
+
+> **Objetivo del slot:** desempate **cuál de FVG / True FVG / IFVG** es el relevante. Primitivos: tamaño ×ATR (§2.2), displacement de la **vela media** (`trueFvg` flag, §5.1), `state` (invalidado → IFVG §5.2). Caso PLAN-049: True FVG H1 (etiqueta "T.FVG", 10/34 en H1); IFVG (27 FVG invalidados). Toggle `i_showFVG`/`i_showIFVG`.
+
+- **Variante correcta / desempate.** `[RELLENAR: True FVG (vela media displacement) > FVG normal; si invalidado por cierre → IFVG con dir invertida. Desempate entre FVG vivos: …]`
+- **Fuerza (0–1).** `[RELLENAR: tamaño ×ATR + trueFvg + sin mitigar + CE no tocado …]`
+- **Invalidación externa.** `[RELLENAR: cierre a través → IFVG (no borrar); FVG en equilibrium resta (§2.3 #31); DÓNDE …]`
+- **Visual (jerarquía).** `[RELLENAR: Primario T.FVG fresco cercano; Terciario micro/mitigado → panel …]`
+- **MTF.** `[RELLENAR: cap i_mtfCapFVG; caja anclada bar_time …]`
+
+#### 6.2.3 Cruce de EMA (§4.3 #40) — SLOT *(fallo #2 fuerza — caso explícito del usuario)*
+
+> **Objetivo del slot:** distinguir cruce **alineado al sesgo + con separación/fuerza** vs. cruce **pegado al precio en neutro** (ruido). La fuerza viene del **ángulo/separación + alineación**, NO del cruce en sí. Primitivos: separación entre EMAs ×ATR, alineación con bias, pendiente. Caso PLAN-049: 20×50 / 50×200. Toggle `i_showEmaCross`.
+
+- **Variante correcta / desempate.** `[RELLENAR: par de EMAs que cruza (20×50 vs 50×200); cuál importa según escala …]`
+- **Fuerza (0–1).** `[RELLENAR: separación post-cruce ×ATR + alineación con bias + pendiente; cruce pegado en neutro → strength ~0 …]`
+- **Invalidación externa.** `[RELLENAR: cruce contra el bias dominante = ruido; DÓNDE (scoring) …]`
+- **Visual (jerarquía).** `[RELLENAR: Primario cruce alineado con separación; Terciario cruce plano → oculto …]`
+- **MTF.** `[RELLENAR: ¿se transfiere? normalmente contexto del TF propio …]`
+
+#### 6.2.4 Rejection (§2.7) — SLOT *(fallo #2 fuerza + #3 invalidación)*
+
+> **Objetivo del slot:** variante real (**mecha ≥2× cuerpo TOCANDO nivel**) vs. ruido (mecha larga **sin nivel**); invalidación: si el **retorno cruza el nivel**. Primitivos: ratio mecha/cuerpo, ¿hay nivel? (pool/EQH/OB), cierre vs nivel. Caso PLAN-049: 06-08 09:00, 05-27 12:00. Toggle `i_showRej`.
+
+- **Variante correcta / desempate.** `[RELLENAR: rejection con nivel > mecha sin nivel (descarta) …]`
+- **Fuerza (0–1).** `[RELLENAR: ratio mecha/cuerpo + presencia de nivel + sweep del nivel …]`
+- **Invalidación externa.** `[RELLENAR: el retorno cruza el nivel → anulada (se marca); DÓNDE (ADR-012 Q3 ¿rompió por cierre?) …]`
+- **Visual (jerarquía).** `[RELLENAR: Primario rejection en nivel con sweep; Terciario mecha sin nivel → oculto …]`
+- **MTF.** `[RELLENAR …]`
+
+#### 6.2.5 MSS (§1.5) — SLOT *(fallo #1 desempate + #3 invalidación)*
+
+> **Objetivo del slot:** desempate **MSS vs CHoCH normal** por **displacement** (ya en §1.5: rango ≥1.5×ATR ∧ cuerpo≥70%); invalidación externa contra el **bias dominante** (majorLen=50). Primitivos: `f_detectDisplacement`, escala swing vs dominante. Caso PLAN-049: 06-01 13:00 (3.5×ATR). Toggle `i_showMSS`.
+
+- **Variante correcta / desempate.** `[RELLENAR: CHoCH swing + displacement = MSS; CHoCH sin displacement = aviso (descarta como MSS) …]`
+- **Fuerza (0–1).** `[RELLENAR: magnitud del displacement ×ATR + cuerpo% de la vela de ruptura …]`
+- **Invalidación externa.** `[RELLENAR: MSS contra el bias dominante de gran escala = menor convicción; DÓNDE (scoring / ADR-012 Q1) …]`
+- **Visual (jerarquía).** `[RELLENAR: Primario MSS de alta convicción; Secundario MSS-interno de apoyo …]`
+- **MTF.** `[RELLENAR: transferible origen→ruptura; cae en mismo bar_time que el HTF …]`
