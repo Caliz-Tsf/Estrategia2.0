@@ -8,6 +8,7 @@ Bot de trading **SMC/ICT** para Forex. Primero un sistema completo y validado en
 - **Fuente de verdad del plan:** [WORKPLAN-MAESTRO-V2.md](WORKPLAN-MAESTRO-V2.md) + [docs/workplan/](docs/workplan/).
 - **Fuente de verdad SMC:** [docs/reglas-smc-ict.md](docs/reglas-smc-ict.md) — definiciones cuantificadas. Si cambia ahí, cambia en todo el sistema.
 - **Convenciones de código:** [docs/reglas-dev.md](docs/reglas-dev.md).
+- **Conectores MCP (Claude Desktop):** [docs/CONECTORES-MCP.md](docs/CONECTORES-MCP.md) — TV y MT5 montados; config MSIX y cómo lanzarlos (`tv_launch` / terminal MT5).
 - **Estado inter-sesión:** [memory/ESTADO-ACTUAL.md](memory/ESTADO-ACTUAL.md) — leer SIEMPRE al arrancar.
 
 ## ⚠️ Referencias externas (regla absoluta)
