@@ -96,3 +96,10 @@ coincide con `(close-bottom)/(top-bottom)`). No hace falta reconciliar §2.3: la
   estilo LuxAlgo `drawTrailingExtremes`).
 - Decisión **congelada** hasta Fase 3 (anti-overfitting, ADR-002). Revisitar B solo con
   evidencia out-of-sample.
+
+## Nota S057 (2026-06-24) — observación del usuario confirma el disparador de revisit Fase 3
+Durante la validación visual (S057), el usuario observó en vivo que el rango P/D **"camina" hacia el precio en tendencia bajista**: el premium se reancló de ~1.14388 a ~1.13845 (cerca del precio) y los discounts de D1/H1/M5 se amontonaron cerca del precio. **Diagnóstico (datos reales, precio 1.1365):** D1 discount 1.13757 (panel −1%, precio por debajo del piso D1), H1 ~1.13613 (2%), M5 ~1.13613 (20%). El D1 aparece arriba (junto al EQ del M5) porque su estado viene por `request.security("D", lookahead_off)` y **solo se actualiza al cierre de la vela diaria** (anti-repaint); H1/M5 se solapan porque capturaron el mismo mínimo fresco.
+
+**Conclusión:** es la **Opción A operando como se diseñó** (re-anclaje de cada extremo al swing P/D de 50 más reciente → el rango sigue a la tendencia), NO un bug. El comportamiento que el usuario esperaba (mantener anclado el extremo no roto; reanclar solo el roto) **es la Opción B**, ya descartada para Fase 1. Esta observación es **evidencia cualitativa que confirma el disparador documentado** ("si el rango local de A degrada el scoring de localización, revisitar B/híbrido en Fase 3"). **Decisión S057 del usuario: mantener Opción A**; el cambio a B/híbrido se evalúa en Fase 3 con datos OOS.
+
+**Micro-pulido cosmético OPCIONAL (diferido):** cuando el precio queda fuera del rango (pct<0 o >100%), el panel muestra "Discount −1%"; podría mostrar "bajo rango"/"sobre rango" (solo Visual, no toca CORE).
