@@ -76,26 +76,105 @@ Para cada concepto del checklist §8, **anexar al final de su ficha en `reglas-s
 
 ---
 
-## 5. Esqueleto del tag de fuerza en Pine (especificar → implementar)
+## 5. Esqueleto del tag de fuerza en Pine (ESPECIFICADO S056 — listo para implementar)
 
-> Objetivo: `strength` por marca, **barato**, en el CORE, sin romper core-sync ni anti-repaint.
+> Objetivo: `strength` por marca, **barato**, en el CORE, sin romper core-sync ni anti-repaint. Spec anclada en los UDTs/funciones reales (`pine/SMC-Library.pine`, CORE 1517 líneas). Pesos = **candidatos CONGELADOS hasta Fase 3** (ADR-002).
 
-- **Campo nuevo en `SMC_Zone`** (`SMC-Library.pine` ~223): `float strength` (0–1). Para conceptos de evento (BOS/CHoCH/MSS/sweep) que no son `SMC_Zone`, exponer `strength` en sus buffers de evento paralelos (los que ADR-010 ya usa para MTF).
-- **Cálculo en CORE** (función pura, p.ej. `f_zoneStrength` / `f_eventStrength`) reusando: `f_detectDisplacement` (cuerpo% + ×ATR), `state` (frescura/mitigado), `f_detectSweep` (¿barrió liquidez?), distancia al precio ×ATR, alineación con bias. `[RELLENAR: pesos por primitivo — candidatos, congelar hasta Fase 3]`.
-- **Quantización opcional** a 3 niveles (alta/media/baja) para el tag visual barato; el 0–1 fino lo consume el scoring.
-- **Exposición:** el `strength` viaja en la ranura MTF (ADR-010, ranura de 6 campos → evaluar si cabe un 7º o se quantiza al `dir`) y se lee vía `data_get_pine_labels` para el Eje 2.
-- **Gotchas:** no recalcular ATR intra-vela; `strength` solo cambia al cierre; mantener el cálculo en CORE (byte-idéntico), el *dibujo* del tag en Visual.
+### 5.1 Campos nuevos en el CORE (byte-idéntico — exige `check-core-sync.ps1` + SHA nuevo)
+- **`SMC_Zone`** (`SMC-Library.pine` L98–L109): añadir `float strength = 0.0` tras `propulsion` (L109). Cubre OB/FVG/Breaker/IFVG/BPR/Vacuum/VI/IPR/Flip-zona/Mitigation (todo lo que es zona).
+- **`SMC_Event`** (L112–L118): añadir `float strength = 0.0` tras `kind`. Cubre BOS/CHoCH/MSS/Sweep/Judas/Displacement/IDM/CISD/EMA-cross/EMA-bounce (eventos puntuales).
+- **`SMC_Swing`** (L121–L126) y **`SMC_Pool`** (L129–L138): añadir `float strength = 0.0`. Swing → escala+frescura+rol; Pool → `touches`+frescura+cercanía.
+- *No tocar `SMC_TFState`* (L141–L158): el strength viaja en los buffers de evento/zona que ADR-010 ya aplana para MTF, no en el snapshot plano.
+
+### 5.2 Funciones puras de fuerza (en el `=== LIBRARY CORE ===`, byte-idénticas)
+Dos funciones nuevas, ambas **puras** y calculadas **solo al cierre** (anti-repaint, reusan ATR ya calculado — nunca recalcular intra-vela):
+
+```
+f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
+    // normaliza a 0–1 combinando primitivos §6.1 ya disponibles
+f_eventStrength(SMC_Event e, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
+```
+
+**Pesos candidatos por primitivo (congelados hasta Fase 3 — ADR-002).** Suma ponderada normalizada a [0,1]; cada término en [0,1]:
+| Primitivo (§6.1) | Fuente | Peso cand. | Mapa a [0,1] |
+|---|---|---|---|
+| `rango ×ATR` / `displacement` | `f_detectDisplacement` (L310) | **0.30** | `min(rangeAtr / 3.0, 1)`; +0.0 si no hay displacement, término pleno si lo hay |
+| `cuerpo%` | misma vela | **0.15** | `(bodyPct − 0.5) / 0.5` clamp [0,1] |
+| `frescura / state` | `SMC_Zone.state` (0/1/2/3) | **0.20** | activa=1 · parcial=0.5 · mitigada/inval=0 |
+| `sweep previo` | `f_detectSweep`/`f_detectGrab` | **0.15** | binario (1 si barrió liquidez antes) |
+| `distancia al nivel ×ATR` | `curPrice` vs zona | **0.10** | `1 − min(distAtr / 2.0, 1)` (cercano = más fuerte) |
+| `alineación con bias` | `biasDir` vs `z.dir`/`e.dir` | **0.10** | 1 si coincide · 0.5 neutro · 0 en contra |
+| `flags refinamiento` | `trueFvg` / `propulsion` | **bonus +0.10** | eleva el strength del base `[FIX P-05]` (no suma confluencia) |
+
+- **Eventos** (`f_eventStrength`): solo aplican `rango×ATR`(0.40) + `cuerpo%`(0.20) + `sweep previo`(0.20) + `alineación`(0.20) — no tienen `state` ni distancia de zona.
+- **Swing/Pool** (inline, no función propia): swing = `escala`(0.5: dominante 1 / swing 0.5 / interno 0.2) + `frescura no-roto`(0.3) + `alineación`(0.2); pool = `min(touches/3,1)`(0.5) + `¬swept`(0.3) + `cercanía`(0.2).
+
+### 5.3 Quantización a 3 niveles (para el tag visual barato)
+`f_strengthLevel(float s) => s >= 0.66 ? 2 : s >= 0.33 ? 1 : 0` → **alta/media/baja**. El 0–1 fino lo consume el scoring (Fase 3); el entero 0/1/2 alimenta la jerarquía visual (§6). **No confundir** con el `cap` 0–10 MTF (ADR-010) ni con el nivel visual {Primario/Secundario/Terciario} (gotcha S054).
+
+### 5.4 Exposición MTF + lectura
+- El `strength` viaja en los buffers de evento/zona que ADR-010 ya aplana para MTF (mismo patrón que `dir`/`kind`). La ranura de 6 campos → **se quantiza al nivel 0/1/2** y se empaqueta junto al `dir` (no requiere 7º campo: `dir·3 + level` cabe en un int, o campo float extra si el aplanado lo permite — decisión del `[impl]` al cablear).
+- Lectura para el **Eje 2** (verificación de fuerza): `data_get_pine_labels` (el tag de la etiqueta lleva el nivel) o `data_get_pine_tables` (panel T14).
+
+### 5.5 Gotchas duros
+- **No recalcular ATR intra-vela**; `strength` solo cambia al cierre (`barstate.isconfirmed`).
+- **Cálculo en CORE** (byte-idéntico → tras tocarlo: `scripts/check-core-sync.ps1` + documentar SHA nuevo, regla #2); el **dibujo** del tag vive en Visual (fuera del CORE, L3131+).
+- Reusar el `atr14` ya disponible en el consumidor — las funciones lo reciben como parámetro, no lo calculan.
 
 ---
 
-## 6. Esqueleto de jerarquía visual + arreglo de errores de dibujo (especificar → implementar)
+## 6. Jerarquía visual + arreglo de errores de dibujo (ESPECIFICADO S056 — listo para implementar)
 
-Ver `METODOLOGIA-VERIFICACION-VISUAL.md` §5 (jerarquía) y §6 (errores). Resumen de lo implementable:
+Ver `METODOLOGIA-VERIFICACION-VISUAL.md` §5 (jerarquía) y §6 (errores). Todo el dibujo vive **fuera** del `=== LIBRARY CORE ===` (Visual L3131+) → **no rompe `check-core-sync`**.
 
-- **3 niveles visuales** derivados de `strength × cercanía`: Primario (completo) / Secundario (atenuado) / Terciario (oculto o → panel T14).
-- **Master input `i_densidad`** (Operación / Estudio / Todo) que filtra por nivel; z-order por familia; anti-solape `style_label_left`.
-- **Presupuesto de tinta:** top-N por familia vía `f_nearestN`; el resto se **cuenta** en el panel T14 (no se dibuja).
-- **Arreglo de errores de dibujo MTF — ESTADO REAL:** los 5 síntomas de revision-T13b **ya cerrados** (T13c/S042); resolver los **3 pendientes diferidos** (metodología §6.b): (a) tag `(D1/H1)` en BOS/CHoCH fusionados, (b) cuadre fino EQH/EQL, (c) exactitud vela-a-vela OB/FVG. `[RELLENAR: síntoma→causa→arreglo→criterio de verificación de cada uno]`.
+### 6.1 Nivel visual = `f_visualLevel(strengthLevel, withinCap)`
+Mapa determinista a {Primario=2 / Secundario=1 / Terciario=0}:
+```
+f_visualLevel(int sLevel, bool withinCap) =>
+    not withinCap ? 0 : sLevel   // fuera del presupuesto top-N → Terciario sí o sí
+```
+- **Primario** (render completo: caja/línea sólida + etiqueta) = `strength` alta **y** dentro del cap top-N.
+- **Secundario** (atenuado: color con transparencia ~60%, etiqueta corta) = `strength` media o lejana.
+- **Terciario** (oculto del chart, **contado** en panel T14) = `strength` baja **o** fuera del cap.
+
+### 6.2 Master input `i_densidad` (nuevo, `GRP_PANEL` o grupo propio `GRP_DENS`)
+`input.string("Operación", "Densidad visual", options=["Operación","Estudio","Todo"])`:
+| Modo | Qué dibuja | Para |
+|---|---|---|
+| **Operación** (default) | solo Primario | trading en vivo, chart limpio |
+| **Estudio** | Primario + Secundario | análisis/validación |
+| **Todo** | + Terciario | depuración/verificación graduada (Eje 2) |
+- Filtro: cada bloque de dibujo añade `and f_visualLevel(...) >= i_densThreshold` junto a su `i_show*` existente (los `i_show*` por familia **se mantienen** — `i_densidad` es un filtro transversal adicional, no los reemplaza).
+- **Z-order por familia** (dibujar de menor a mayor relevancia): contexto/PD (fondo) → zonas → liquidez → estructura/eventos (frente). Anti-solape de etiquetas: `style_label_left` / `style_label_right` alternado por lado del nivel (ya usado en el MTF).
+- **Presupuesto de tinta:** top-N por familia con `f_nearestN`/`f_nearestNPools` (ADR-010) ya existentes → `withinCap`; el resto incrementa el contador de la familia en el **panel T14** (no se dibuja).
+
+### 6.3 Arreglo de los 3 pendientes diferidos MTF (síntoma → causa → arreglo → criterio)
+> Los 5 síntomas de `revision-T13b-mtf-dibujo-nativo.md §2` están **cerrados** (T13c/S042, commit 88500fd). Quedan estos 3 (metodología §6.b):
+
+**(a) Tag `(D1)`/`(H1)` en BOS/CHoCH fusionados.**
+- *Síntoma:* un evento BOS/CHoCH heredado de HTF y dibujado en M5 no indica de qué TF viene; si coincide con el nativo se fusionan sin distinguir origen.
+- *Causa:* la etiqueta del evento MTF no concatena `e.tf` (el campo ya existe en `SMC_Event.tf`); el anti-duplicado S042 los une pero pierde el rótulo de procedencia.
+- *Arreglo:* en el bloque de dibujo de eventos MTF (Visual, fuera del CORE), añadir sufijo `" (" + e.tf + ")"` al texto de la etiqueta cuando `e.tf != timeframe.period`; si fusionado con el nativo, rótulo combinado `"BOS (H1·M5)"`.
+- *Criterio:* en M5 con D1+H1 activos, cada marca heredada muestra su TF; 0 marcas ambiguas en una pasada de 300 velas.
+
+**(b) Cuadre fino EQH/EQL HTF↔LTF.**
+- *Síntoma:* el nivel de un EQH/EQL heredado de HTF cae unos ticks desviado del cluster nativo en LTF.
+- *Causa:* el `pool.level` HTF (promedio de extremos clusterizados, §3.1) se ancla por `bar_time` pero el redondeo de precio del TF menor no cuadra exacto.
+- *Arreglo:* anclar la línea heredada al `pool.level` HTF **literal** (no recalcular en LTF) y dibujar con `xloc.bar_time`; tolerancia de fusión con el nativo = `poolTol×ATR` del LTF (ya parametrizado).
+- *Criterio:* desviación HTF↔LTF ≤ `poolTol×ATR` en los EQH/EQL de los casos §2.4 (05-27/05-28 BSL, 06-03 SSL).
+
+**(c) Exactitud vela-a-vela de OB/FVG heredados.**
+- *Síntoma:* la caja de un OB/FVG HTF heredado a M5 se ancla a una vela M5 adyacente, no a la exacta del origen HTF.
+- *Causa:* el mapeo `bar_time` HTF→LTF cae entre dos velas M5 cuando el `bar_time` HTF no coincide con un open M5 (FVG ancla la **vela media**, `time[1]`).
+- *Arreglo:* anclar con `xloc.bar_time` al `barTime` exacto del UDT (`SMC_Zone.barTime`, ya guardado) y dejar que TV resuelva la vela contenedora; para FVG usar el `barTime` de la vela media real (ya corregido en T13c — verificar que el heredado use el mismo campo).
+- *Criterio:* caja heredada cubre la misma vela origen que el OB/FVG nativo del HTF en los casos §2.1/§2.2 (OB 06-01/06-05/06-08; FVG 06-01/06-05).
+
+### 6.4 Orden de implementación sugerido (paso 4 del plan §7)
+1. CORE: campos `strength` (§5.1) → compila 3 + `check-core-sync` + SHA. **1 commit** `feat(pine-core): S1.x strength en UDTs`.
+2. CORE: `f_zoneStrength`/`f_eventStrength`/`f_strengthLevel` (§5.2–5.3) + cálculo en sitios de creación → compila 3 + core-sync. **1 commit**.
+3. Visual: `i_densidad` + `f_visualLevel` + filtro transversal (§6.1–6.2) → compila Visual. **1 commit**.
+4. Visual: 3 arreglos MTF (§6.3), uno por commit con su criterio verificado.
+5. → entra el **paso 5** (revisión visual graduada concepto a concepto = lo que el usuario revisa 1-a-1).
 
 ---
 
@@ -117,18 +196,19 @@ Ver `METODOLOGIA-VERIFICACION-VISUAL.md` §5 (jerarquía) y §6 (errores). Resum
 ## 8. Apéndice — Checklist de los 40+ conceptos (orden MTF D1→H1→M5)
 
 > De PLAN-049 §"Lista ordenada". Marcar ☑ al rellenar el sub-bloque §6 + ☑ al verificar (4 ejes). TF de PLAN-049; revisión MTF en orden D1→H1→M5.
+> **Estado S056:** los **sub-bloques §6 de TODOS los conceptos están RELLENOS** (5 en §6.2 + ~35 en §6.3). El segundo ☑ (verificación de 4 ejes) sigue **pendiente** para todos (paso 5 del plan §7). Notación: `☑relleno ⬜verif`.
 
-**Tier 1 — Estructura (H1):** ⬜ Swings §1.1 · ⬜ BOS/CHoCH swing §1.3/1.4 · ⬜ BOS/CHoCH interno §1.4 · ⬜ Estructura dominante §1.4 · ⬜ MSS §1.5 *(slot 6.2.5)*
+**Tier 1 — Estructura (H1):** ☑⬜ Swings §1.1 *(6.3.1)* · ☑⬜ BOS/CHoCH swing §1.3/1.4 *(6.3.2)* · ☑⬜ BOS/CHoCH interno §1.4 *(6.3.3)* · ☑⬜ Estructura dominante §1.4 *(6.3.4)* · ☑⬜ MSS §1.5 *(slot 6.2.5)*
 
-**Tier 2 — Zonas (H1):** ⬜ Order Block §2.1 *(ejemplo 6.2.1 ✅)* · ⬜ FVG+CE §2.2 *(slot 6.2.2)* · ⬜ True FVG §5.1 · ⬜ Premium/Discount/Eq §2.3 · ⬜ EQH/EQL §2.4 · ⬜ OTE/GP §2.5 · ⬜ Breaker §2.6 · ⬜ Rejection §2.7 *(slot 6.2.4)* · ⬜ Flip §2.8 · ⬜ Mitigation Block §2.8#24
+**Tier 2 — Zonas (H1):** ☑⬜ Order Block §2.1 *(ejemplo 6.2.1 ✅)* · ☑⬜ FVG+CE §2.2 *(slot 6.2.2)* · ☑ True FVG §5.1 *([FIX P-05] → strength FVG)* · ☑⬜ Premium/Discount/Eq §2.3 *(6.3.5)* · ☑⬜ EQH/EQL §2.4 *(6.3.6)* · ☑⬜ OTE/GP §2.5 *(6.3.7)* · ☑⬜ Breaker §2.6 *(6.3.8)* · ☑⬜ Rejection §2.7 *(slot 6.2.4)* · ☑⬜ Flip §2.8 *(6.3.9)* · ☑⬜ Mitigation Block §2.8#24 *(6.3.10)*
 
-**Liquidez (M5; sweeps/pools también H1):** ⬜ Pools BSL/SSL §3.1 · ⬜ Sweep §3.2 · ⬜ IDM §3.6 · ⬜ Judas §3.5 · ⬜ False Breakout §3.7 · ⬜ Kill Zones §3.4
+**Liquidez (M5; sweeps/pools también H1):** ☑⬜ Pools BSL/SSL §3.1 *(6.3.11)* · ☑⬜ Sweep §3.2 *(6.3.12, +Grab §3.3)* · ☑⬜ IDM §3.6 *(6.3.13)* · ☑⬜ Judas §3.5 *(6.3.14)* · ☑⬜ False Breakout §3.7 *(6.3.15)* · ☑⬜ Kill Zones §3.4 *(6.3.16)*
 
-**Contexto/ICT/EMAs (H1; macros M5):** ⬜ Displacement §4.1 · ⬜ EMAs estado §4.3 · ⬜ EMA rebote #41 §4.3 · ⬜ EMA cruce #40 §4.3 *(slot 6.2.3)* · ⬜ EMA Stack Flip §4.3 · ⬜ Impulsive/Corrective §4.4
+**Contexto/ICT/EMAs (H1; macros M5):** ☑⬜ Displacement §4.1 *(6.3.17)* · ☑⬜ EMAs estado §4.3 *(6.3.18)* · ☑⬜ EMA rebote #41 §4.3 *(6.3.19)* · ☑⬜ EMA cruce #40 §4.3 *(slot 6.2.3)* · ☑⬜ EMA Stack Flip §4.3 *(6.3.20)* · ☑⬜ Session Opens §4.2 *(6.3.21)* · ☑⬜ Impulsive/Corrective §4.4 *(6.3.22)*
 
-**Gap ICT (H1 salvo nota):** ⬜ IFVG §5.2 · ⬜ BPR §5.3 · ⬜ Immediate Rebalance §5.4 · ⬜ Volume Imbalance §5.5 · ⬜ CISD §5.6 · ⬜ Propulsion Block §5.8 · ⬜ Vacuum Block §5.7 *(frontera/finde)* · ⬜ IPR §5.9 · ⬜ Inside Day §5.12 · ⬜ Std Dev §5.11 *(herramienta, no confluencia)* · ⬜ Gaps apertura NWOG/NDOG/NYMO+BAG §5.10 *(frontera)* · ⬜ Macros §5.14 *(M5)* · ⬜ SMT §5.13 *(requiere GBPUSD)* · ⬜ RTH/ETH §5.15 *(N/A FX, Fase 5)*
+**Gap ICT (H1 salvo nota):** ☑⬜ IFVG §5.2 *(6.3.23)* · ☑⬜ BPR §5.3 *(6.3.24)* · ☑⬜ Immediate Rebalance §5.4 *(6.3.25)* · ☑⬜ Volume Imbalance §5.5 *(6.3.26)* · ☑⬜ CISD §5.6 *(6.3.27)* · ☑ Propulsion Block §5.8 *([FIX P-05] → strength OB)* · ☑⬜ Vacuum Block §5.7 *(6.3.28, frontera/finde)* · ☑⬜ IPR §5.9 *(6.3.29)* · ☑⬜ Inside Day §5.12 *(6.3.30)* · ☑ Std Dev §5.11 *(6.3.31, herramienta, no confluencia)* · ☑⬜ Gaps apertura NWOG/NDOG/NYMO+BAG §5.10 *(6.3.32)* · ☑ Macros §5.14 *([FIX P-05] → refina #34 en 6.3.16)* · ☑⬜ SMT §5.13 *(6.3.33, requiere GBPUSD)* · ☑ RTH/ETH §5.15 *(6.3.34, N/A FX, Fase 5)*
 
-**MTF:** ⬜ Herencia D1/H1 (bias+P/D+zonas) en M5 — visibilidad cruzada por `bar_time`.
+**MTF:** ☑⬜ Herencia D1/H1 (bias+P/D+zonas) en M5 *(6.3.35)* — visibilidad cruzada por `bar_time`.
 
 ---
 

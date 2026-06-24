@@ -967,7 +967,7 @@ Devuelve `macroActiva` (bool) + identificador. Anti-repaint: por reloj (no repin
 
 ## 6. CAPA DE CALIDAD / DISCRIMINACIÓN (graduada) — *variante · fuerza · invalidación · visual*
 
-> **Estado: ESQUELETO (Sesion-054).** Añade una capa **graduada** sobre las §1–§5 (que solo *detectan*). NO modifica ninguna definición ni umbral congelado de §0–§5 — es **aditiva**. Mapea a la columna vertebral **Detectar → Graduar → Contextualizar → Decidir** (ver [`METODOLOGIA-VERIFICACION-VISUAL.md`](METODOLOGIA-VERIFICACION-VISUAL.md)).
+> **Estado: POBLADO (Sesion-056).** Esqueleto creado en S054; 4 slots §6.2.2–6.2.5 rellenados (S055/056); **§6.3 poblado con los ~35 conceptos restantes (S056)**. Añade una capa **graduada** sobre las §1–§5 (que solo *detectan*). NO modifica ninguna definición ni umbral congelado de §0–§5 — es **aditiva**. Pendiente del set: implementar el tag `strength` + jerarquía visual en Pine (HANDOFF §5–§6) y ejecutar la verificación graduada (F1-GATE ampliado). Mapea a la columna vertebral **Detectar → Graduar → Contextualizar → Decidir** (ver [`METODOLOGIA-VERIFICACION-VISUAL.md`](METODOLOGIA-VERIFICACION-VISUAL.md)).
 >
 > **Decisión Freddy (HÍBRIDA):** Pine expone un **tag de fuerza barato por marca** reusando primitivos que el CORE ya calcula; el peso/grading completo vive aguas abajo (scoring + cadena ADR-012). Se marca todo, cada marca lleva su `strength`.
 >
@@ -1025,38 +1025,338 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 
 > **Objetivo del slot:** desempate **cuál de FVG / True FVG / IFVG** es el relevante. Primitivos: tamaño ×ATR (§2.2), displacement de la **vela media** (`trueFvg` flag, §5.1), `state` (invalidado → IFVG §5.2). Caso PLAN-049: True FVG H1 (etiqueta "T.FVG", 10/34 en H1); IFVG (27 FVG invalidados). Toggle `i_showFVG`/`i_showIFVG`.
 
-- **Variante correcta / desempate.** `[RELLENAR: True FVG (vela media displacement) > FVG normal; si invalidado por cierre → IFVG con dir invertida. Desempate entre FVG vivos: …]`
-- **Fuerza (0–1).** `[RELLENAR: tamaño ×ATR + trueFvg + sin mitigar + CE no tocado …]`
-- **Invalidación externa.** `[RELLENAR: cierre a través → IFVG (no borrar); FVG en equilibrium resta (§2.3 #31); DÓNDE …]`
-- **Visual (jerarquía).** `[RELLENAR: Primario T.FVG fresco cercano; Terciario micro/mitigado → panel …]`
-- **MTF.** `[RELLENAR: cap i_mtfCapFVG; caja anclada bar_time …]`
+- **Variante correcta / desempate.** Tres estados mutuamente excluyentes de la **misma coordenada de gap**: (1) **True FVG** (§5.1) = la vela media es displacement (`rango ≥ 1.5×ATR ∧ cuerpo ≥ 70%`) → variante de mayor calidad; (2) **FVG normal** (§2.2) = gap válido (`≥ 0.25×ATR`) sin displacement en la media; (3) **IFVG** (§5.2) = un FVG que **cerró a través** de su borde protector (`state = ZS_INVALID`) → invierte `dir` y rol. EL relevante entre los **vivos** = el de mayor `strength` (abajo), más cercano al precio y alineado al bias; a igualdad de cercanía **True FVG > FVG normal** (flag `trueFvg`). **Descarta** (citable): micro-gaps `< 0.25×ATR` (§2.2 contraejemplo, ruido); y **no** sumar el FVG original muerto junto a su IFVG (§5.2: 1 sola confluencia — `[FIX P-05]`).
+- **Fuerza (0–1).** `tamaño_gap ×ATR` (mayor = más fuerte) · `trueFvg` (displacement de la vela media, sube la fuerza) · `state` (activa=1 / parcial CE no tocado=0.7 / mitigada CE tocado=0.3) · `¿sweep previo?` (§3.2). Quant: **alta** (trueFvg ∧ activa ∧ CE intacto), **media** (FVG normal activo ∨ True FVG parcial), **baja** (mitigado / micro). Tag = `SMC_Zone.strength` (con `.trueFvg`).
+- **Invalidación externa.** Cierre a través del borde → **no se borra**, transiciona a **IFVG** con `dir` invertida (§5.2, `state = 3`); FVG en **equilibrium / contra-localización** resta (§2.3 #31). DÓNDE: transición `state=3` = Pine (`f_updateZoneMitigation`); localización P/D = scoring; secuencia "1er toque débil vs 2º válido" = cadena ADR-012 **Q4**.
+- **Visual (jerarquía).** **Primario:** True FVG fresco, cercano, CE intacto → caja sólida + etiqueta "T.FVG" + línea CE. **Secundario:** FVG normal activo o True FVG parcial → caja atenuada. **Terciario:** micro/mitigado → oculto o panel T14; invalidado → se redibuja como **IFVG**, no como FVG. Toggle `i_showFVG` / `i_showIFVG`.
+- **MTF.** Transferible (cap `i_mtfCapFVG`, 0–10); caja anclada `xloc.bar_time` en la **vela media real** (`time[1]`, ADR-010); cae en el mismo gap que el FVG nativo del TF alto.
 
 #### 6.2.3 Cruce de EMA (§4.3 #40) — SLOT *(fallo #2 fuerza — caso explícito del usuario)*
 
 > **Objetivo del slot:** distinguir cruce **alineado al sesgo + con separación/fuerza** vs. cruce **pegado al precio en neutro** (ruido). La fuerza viene del **ángulo/separación + alineación**, NO del cruce en sí. Primitivos: separación entre EMAs ×ATR, alineación con bias, pendiente. Caso PLAN-049: 20×50 / 50×200. Toggle `i_showEmaCross`.
 
-- **Variante correcta / desempate.** `[RELLENAR: par de EMAs que cruza (20×50 vs 50×200); cuál importa según escala …]`
-- **Fuerza (0–1).** `[RELLENAR: separación post-cruce ×ATR + alineación con bias + pendiente; cruce pegado en neutro → strength ~0 …]`
-- **Invalidación externa.** `[RELLENAR: cruce contra el bias dominante = ruido; DÓNDE (scoring) …]`
-- **Visual (jerarquía).** `[RELLENAR: Primario cruce alineado con separación; Terciario cruce plano → oculto …]`
-- **MTF.** `[RELLENAR: ¿se transfiere? normalmente contexto del TF propio …]`
+- **Variante correcta / desempate.** Cuál **par** cruza importa por **escala** (§4.3): `20×50` = frecuente, menor peso (momentum corto); `50×200` / `20×200` = raros, mayor peso (death/golden cross, cambio de régimen). EL relevante = el cruce de **mayor escala reciente alineado al bias**. El **Stack Flip** (§4.3: 20 **y** 50 cruzando al mismo lado de la 200) **domina** sobre cualquier cruce de par aislado. **Descarta** (citable): cruce `20×50` aislado mientras ambas siguen del **mismo lado** de la 200 (§4.3 contraejemplo) → no cambia el régimen → es ruido `#40`, no evento reforzado.
+- **Fuerza (0–1).** `separación entre EMAs post-cruce ×ATR` (mayor = más convicción) · `alineación con bias` estructural (a favor sube; en contra ~0) · `pendiente/ángulo`. **Cruce pegado en neutro** (separación ~0, EMAs planas) → `strength ~0` aunque el cruce ocurra (caso explícito del usuario). Quant: **alta** (`50×200` o Stack Flip alineado + separación creciente), **media** (`20×50` alineado con pendiente), **baja** (cruce plano / contra-bias).
+- **Invalidación externa.** Cruce **contra el bias dominante** (majorLen=50 / EMA200) = ruido contratendencia, no señal. DÓNDE: el peso lo aplica el **scoring** (#37–#39 direccionales **únicas** `[FIX P-05]`; #42 stack); ADR-012 **Q1** (¿el contexto mayor lo respalda?).
+- **Visual (jerarquía).** **Primario:** cruce de gran escala (`50×200` / Stack Flip) alineado con separación → marca destacada. **Secundario:** `20×50` alineado. **Terciario:** cruce plano / contra-bias → oculto o panel T14. Toggle `i_showEmaCross`.
+- **MTF.** Normalmente **NO** se transfiere como objeto: la EMA es **contexto del TF propio** (cada TF tiene su 20/50/200). Se hereda como **estado de bias** del HTF en el panel T14, no como marca anclada por `bar_time`.
 
 #### 6.2.4 Rejection (§2.7) — SLOT *(fallo #2 fuerza + #3 invalidación)*
 
 > **Objetivo del slot:** variante real (**mecha ≥2× cuerpo TOCANDO nivel**) vs. ruido (mecha larga **sin nivel**); invalidación: si el **retorno cruza el nivel**. Primitivos: ratio mecha/cuerpo, ¿hay nivel? (pool/EQH/OB), cierre vs nivel. Caso PLAN-049: 06-08 09:00, 05-27 12:00. Toggle `i_showRej`.
 
-- **Variante correcta / desempate.** `[RELLENAR: rejection con nivel > mecha sin nivel (descarta) …]`
-- **Fuerza (0–1).** `[RELLENAR: ratio mecha/cuerpo + presencia de nivel + sweep del nivel …]`
-- **Invalidación externa.** `[RELLENAR: el retorno cruza el nivel → anulada (se marca); DÓNDE (ADR-012 Q3 ¿rompió por cierre?) …]`
-- **Visual (jerarquía).** `[RELLENAR: Primario rejection en nivel con sweep; Terciario mecha sin nivel → oculto …]`
-- **MTF.** `[RELLENAR …]`
+- **Variante correcta / desempate.** Rejection **real** = mecha `≥ rejWickFactor × cuerpo` (default 2×) **TOCANDO un nivel clave** (OB/FVG/pool/EQHL/PD/EMA) y cierre en la mitad favorable del rango (§2.7). Mecha larga **SIN nivel** = ruido → se descarta (§2.7 contraejemplo: 06-02 21:00, mecha 32× a media estructura). EL relevante entre varias = la de **mayor ratio mecha/cuerpo sobre el nivel más fuerte** (pool/EQH > OB/FVG > EMA).
+- **Fuerza (0–1).** `ratio mecha/cuerpo` (mayor = más fuerte; casos §2.7: 2.1× / 2.8× / 4.5×) · **jerarquía del nivel** tocado (SSL/BSL/EQH/pool > OB/FVG > EMA) · `¿sweep del nivel justo antes?` (§3.2 — sube mucho la fuerza: barrer y volver = trampa confirmada) · `alineación con bias`. Quant: **alta** (ratio alto + sweep + alineada), **media** (ratio ≥2 sobre nivel sin sweep), **baja** (apenas ≥2× sobre EMA).
+- **Invalidación externa.** Si el **retorno posterior cruza el nivel por cierre** → la rejection queda **anulada** (se marca como fallida, no se borra). DÓNDE: cadena ADR-012 **Q3** (¿rompió por cierre?); el `state` del nivel subyacente (Pine) y el scoring la degradan.
+- **Visual (jerarquía).** **Primario:** rejection en nivel fuerte (pool/EQH) con sweep, alineada → marca ▲/▼ destacada. **Secundario:** rejection sobre OB/EMA sin sweep. **Terciario:** mecha sin nivel → no se marca (ya filtrada por §2.7). Toggle `i_showRej`.
+- **MTF.** Transferible como **marca en su `bar_time`** (la mecha es de su vela); cae en el nivel del HTF que tocó. Cap moderado (evento puntual y frecuente; no saturar).
 
 #### 6.2.5 MSS (§1.5) — SLOT *(fallo #1 desempate + #3 invalidación)*
 
 > **Objetivo del slot:** desempate **MSS vs CHoCH normal** por **displacement** (ya en §1.5: rango ≥1.5×ATR ∧ cuerpo≥70%); invalidación externa contra el **bias dominante** (majorLen=50). Primitivos: `f_detectDisplacement`, escala swing vs dominante. Caso PLAN-049: 06-01 13:00 (3.5×ATR). Toggle `i_showMSS`.
 
-- **Variante correcta / desempate.** `[RELLENAR: CHoCH swing + displacement = MSS; CHoCH sin displacement = aviso (descarta como MSS) …]`
-- **Fuerza (0–1).** `[RELLENAR: magnitud del displacement ×ATR + cuerpo% de la vela de ruptura …]`
-- **Invalidación externa.** `[RELLENAR: MSS contra el bias dominante de gran escala = menor convicción; DÓNDE (scoring / ADR-012 Q1) …]`
-- **Visual (jerarquía).** `[RELLENAR: Primario MSS de alta convicción; Secundario MSS-interno de apoyo …]`
-- **MTF.** `[RELLENAR: transferible origen→ruptura; cae en mismo bar_time que el HTF …]`
+- **Variante correcta / desempate.** **MSS** = CHoCH de nivel **swing** **CON displacement** (`rango ≥ 1.5×ATR ∧ cuerpo ≥ 70%`, §1.5). CHoCH swing **SIN displacement** = CHoCH normal / aviso → **se descarta como MSS** (§1.5 contraejemplo: 05-29 14:00, rango 2.93×ATR pero **cuerpo 63%** → no MSS, mecha dominante). El MSS **nunca es interno** (solo escala swing). Desempate a igualdad → gana el de mayor `displacement ×ATR`.
+- **Fuerza (0–1).** `magnitud del displacement ×ATR` de la vela de ruptura (caso 06-01 13:00 = **3.51×ATR** → muy alta) · `cuerpo%` de esa vela (98% en el caso) · **escala** (swing dominante majorLen=50 > swing simple). Quant: **alta** (displacement ≥3×ATR ∧ cuerpo ≥90% en swing dominante), **media** (≥1.5×ATR ∧ ≥70%); por debajo **no es MSS** (es CHoCH normal).
+- **Invalidación externa.** MSS **contra el bias dominante** de gran escala (majorLen=50) = **menor convicción** (giro contra la corriente mayor, más propenso a deviation). DÓNDE: **scoring** (peso del MSS vs bias dominante); cadena ADR-012 **Q1** (¿el contexto mayor lo respalda?).
+- **Visual (jerarquía).** **Primario:** MSS swing de alta convicción → línea origen→ruptura destacada + etiqueta "MSS". **Secundario:** MSS-interno de apoyo (§1.5 nota: CHoCH interno con displacement, p.ej. 06-02 16:00 1.57×ATR/85%), menor peso. **Terciario:** N/A (un MSS siempre es relevante si existe). Toggle `i_showMSS`.
+- **MTF.** Transferible **origen→ruptura** (buffer de eventos ADR-010); cae en el mismo `bar_time`/nivel que el MSS del HTF; **anti-duplicado** con estructura nativa (S042: si coincide con la nativa M5, no se redibuja).
+
+### 6.3 Sub-bloques del resto de conceptos (§1–§5)
+
+> Mismo formato que §6.0 (variante · fuerza · invalidación · visual · MTF). Cada fórmula de fuerza cita **solo** primitivos de §6.1. Los **refinamientos `[FIX P-05]`** (True FVG §5.1, Propulsion §5.8, familia Volume Imbalance, Macros §5.14) **no** llevan sub-bloque independiente: **elevan el `strength`** del concepto base. Todos los `strength`/pesos son **candidatos CONGELADOS hasta calibración Fase 3** (ADR-002). Los nombres de toggle `i_show*` / `GRP_*` son los de diseño (igual que en §6.2); el `[impl]` los confirma al cablear el tag de fuerza en Pine (HANDOFF §5).
+
+#### TIER 1 — Estructura
+
+##### 6.3.1 Swings (§1.1) *(fallo #1 desempate)*
+
+- **Variante correcta / desempate.** Entre N pivotes candidatos lo relevante es **la escala** (§1.1: interno `internalLen=3` < swing `swingLen=5` < dominante `majorLen=50`) **y el rol estructural**: EL primario = el **structure high/low vigente y NO roto** (el que extiende o protege el bias, §"Modelo de bias"). Desempate de *detección* ya cerrado en §1.1 (empate al tick a ambos lados → no se estampa swing). **Descarta** (citable): pivote **no confirmado** (le faltan `swingLen` velas a la derecha → marcarlo es repaint, §1.1 contraejemplo); swing interno ya roto por cierre (deja de ser nivel activo).
+- **Fuerza (0–1).** Sin cuerpo%/×ATR (el swing es geométrico): `escala` (dominante > swing > interno) · `edad/frescura` (`barTime`: swing reciente no roto > viejo) · `alineación con bias` (¿es el nivel protector/extensor del TF?). Quant: **alta** (structure high/low dominante vigente), **media** (swing simple no roto), **baja** (interno o ya rozado). Tag = `strength` del evento-swing (buffer ADR-010).
+- **Invalidación externa.** Un swing **roto por cierre** (lo consume un BOS/CHoCH) deja de ser imán y pasa a contexto histórico. DÓNDE: estado estructural (Pine); el scoring ya no lo cuenta como nivel vivo.
+- **Visual (jerarquía).** **Primario:** structure high/low vigente (etiqueta + línea). **Secundario:** swing confirmado no-protector. **Terciario:** interno viejo / roto → oculto o contado en panel T14. Toggle `i_showSwings`.
+- **MTF.** Transferible como **nivel** anclado a `bar_time` del pivote; presupuesto de tinta top-N (`f_nearestN`, ADR-010); cae en el mismo nivel que el swing nativo del HTF.
+
+##### 6.3.2 BOS / CHoCH **swing** (§1.3/§1.4) *(fallo #1 desempate + #3 invalidación)*
+
+- **Variante correcta / desempate.** Determinista por **qué swing se rompe** (§"Modelo de bias"): romper el nivel que **extiende** = **BOS** (continuación); romper el que **protege** = **CHoCH** (cambio). Base de ruptura = **`close`**, no mecha (§1.3). EL relevante = el evento de **escala swing** más reciente que cambia el estado estructural. **Descarta** (citable): **mecha** que pincha el nivel y cierra de vuelta → es **sweep/grab** (§3.2/§3.3), NO BOS (§1.3 contraejemplo 05-27 12:00 high 1.16615 / close 1.16440); ruptura **interna** que no toca el swing protector → es CHoCH interno (§6.3.3), no voltea el bias swing.
+- **Fuerza (0–1).** `magnitud del cierre más allá del nivel ×ATR` · `displacement` de la vela de ruptura (§4.1 — si la lleva, sube; un CHoCH swing **con** displacement ya es **MSS**, §6.2.5) · `alineación con bias` (BOS siempre alineado = alta convicción de continuación; CHoCH va contra el bias vigente = aviso) · `¿sweep previo del pool objetivo?` (§3.2). Quant: **alta** (BOS con displacement tras sweep), **media** (BOS/CHoCH limpio sin displacement), **baja** (cierre apenas más allá del nivel).
+- **Invalidación externa.** Un CHoCH swing **aislado** contra el bias **dominante** (`majorLen=50`) puede ser deviation que revierte (§1.5 nota): menor convicción hasta que un BOS confirme la nueva dirección. DÓNDE: cadena ADR-012 **Q1** (¿el contexto mayor lo respalda?) y **Q3** (¿rompió por cierre real?); el scoring pondera BOS (#2/#4) vs CHoCH (#5 vía MSS).
+- **Visual (jerarquía).** **Primario:** BOS/CHoCH swing que cambia el bias → línea de nivel roto + etiqueta "BOS"/"CHoCH". **Secundario:** BOS de continuación rutinario en tendencia ya establecida. **Terciario:** N/A (evento estructural siempre relevante). Toggle `i_showStructure` / `GRP_*` estructura.
+- **MTF.** Transferible **origen→ruptura** (buffer de eventos ADR-010); cae en mismo `bar_time`/nivel que el del HTF; **tag `(D1/H1)`** en eventos fusionados (pendiente diferido (a), metodología §6.b); anti-duplicado con la estructura nativa del TF (S042).
+
+##### 6.3.3 BOS / CHoCH **interno** (§1.4) *(fallo #2 fuerza)*
+
+- **Variante correcta / desempate.** Misma mecánica de cierre que §6.3.2 pero sobre estructura `internalLen=3` (gatillo fino / IDM). EL relevante = el CHoCH interno **a favor** del bias swing vigente (gatillo de entrada limpio). **Descarta como giro mayor** (citable): tratar un CHoCH interno como vuelta del bias swing (§1.4 contraejemplo 06-02 04:00: rompe swing interno 1.16370 pero NO el LH swing → el bias mayor sigue bajista). Regla dura §1.4: **no voltear el bias mayor con una ruptura interna.**
+- **Fuerza (0–1).** Inherentemente **menor** que el swing (escala fina): `magnitud ×ATR` · `displacement` (§4.1) · `alineación con el bias swing` (interno a favor del swing = útil; en contra = ruido). Quant: **media** (interno alineado con displacement, buen gatillo), **baja** (interno contra el bias swing — ruido típico). Nunca **alta** solo por ser interno.
+- **Invalidación externa.** Interno **contra** el bias swing/dominante = ruido de pullback, no señal. DÓNDE: scoring (peso interno < swing); cadena ADR-012 **Q1**.
+- **Visual (jerarquía).** **Secundario** por defecto (es estructura fina): marca pequeña/atenuada. **Terciario:** interno contra-bias → panel T14. **Primario:** solo si es el gatillo de entrada confirmado a favor del swing. Toggle `i_showInternal`.
+- **MTF.** Normalmente **no** se transfiere a TF menores (sería ruido sobre ruido); se consume en su TF. Cap muy bajo si se hereda.
+
+##### 6.3.4 Estructura **dominante** (`majorLen=50`) (§1.1/§1.4) *(fallo #1 desempate + #3 invalidación)*
+
+- **Variante correcta / desempate.** La **escala grande** [T07B] (= swing structure de LuxAlgo). EL relevante = el último BOS/CHoCH dominante que define el **contexto mayor**. **Descarta** (citable): confundir un BOS swing/interno con cambio de contexto — la capa dominante **no voltea el bias headline por sí sola** hasta calibración Fase 3 (§1.3/§1.4). El dominante **se detecta y dibuja**, pero su efecto sobre el bias está **diferido**.
+- **Fuerza (0–1).** `escala` (dominante = máxima por definición) · `displacement ×ATR` de la vela de ruptura dominante · `frescura` (el dominante confirma ~2 días tarde en H1, §1.1 — es correcto, no bug). Quant: **alta** siempre que exista (es contexto rector); el matiz lo da si está **respaldado** o **enfrentado** al precio actual.
+- **Invalidación externa.** Un CHoCH dominante recién confirmado **antes** de que el precio dé continuación = cambio de régimen **candidato**, no confirmado (efecto diferido a Fase 3). DÓNDE: cadena ADR-012 **Q1** (es la respuesta misma al "¿contexto mayor?"); el scoring lo usa como **modulador de bias**, no como voto puntual.
+- **Visual (jerarquía).** **Primario:** estructura dominante vigente → línea gruesa/destacada + etiqueta de bias dominante en panel T14. **Secundario/Terciario:** N/A (siempre es el marco rector). Toggle `i_showMajor` / panel de bias.
+- **MTF.** Es **el** insumo de herencia HTF→LTF (§6.3.35): baja a M5 como **estado de bias dominante** del panel T14, no como marca puntual.
+
+#### TIER 2 — Zonas
+
+> **True FVG (§5.1) — NO sub-bloque [FIX P-05]:** eleva el `strength` del FVG base (ver §6.2.2, primitivo `trueFvg`). Una vela media de displacement → variante de mayor calidad del MISMO gap, no confluencia ni objeto nuevo.
+
+##### 6.3.5 Premium / Discount / Equilibrium (§2.3) *(fallo #3 invalidación — es el invalidador de localización)*
+
+- **Variante correcta / desempate.** No es "una marca entre varias": es el **filtro de localización** del *dealing range* `[strong_low, strong_high]` vigente (§2.3). EL relevante = el rango **dominante** activo (`majorLen`). **Descarta** (citable): medir P/D sobre un rango ya superado por estructura (el rango se actualiza con cada nuevo strong high/low).
+- **Fuerza (0–1).** `distancia al `eq` (50%) ×ATR` o % del rango (más extremo = más ventaja de localización): discount profundo (≤25%) = alta para long; premium profundo (≥75%) = alta para short · `alineación con bias`. **Banda equilibrium [45–55%]** (§2.3: `[1.15835, 1.16021]` en el caso) → `strength ~0` de localización. No es zona dibujable con `strength` propia; es un **multiplicador** del `strength` de las demás zonas según dónde caigan.
+- **Invalidación externa.** Es **ella** la que invalida a otras: un OB/FVG en **contra-localización** (OB alcista en premium) se marca pero el **scoring lo degrada** (#31 resta 50% en equilibrium; §2.1/§6.2.1 invalidación #1). DÓNDE: **scoring** (#31); cadena ADR-012 (contexto de valor).
+- **Visual (jerarquía).** **Primario:** las tres bandas (premium/eq/discount) como fondo/zonas tenues del rango vigente + línea `eq`. **Secundario:** rangos de escala menor. No satura (es contexto de fondo, no marca puntual). Toggle `i_showPD`.
+- **MTF.** Transferible como **bandas del HTF** heredadas a M5 (el dealing range D1/H1 colorea el fondo de M5); el `eq` HTF es un nivel ancla por `bar_time` del rango.
+
+##### 6.3.6 Equal Highs / Equal Lows (§2.4) *(fallo #1 desempate + #2 fuerza)*
+
+- **Variante correcta / desempate.** EQH/EQL = **≥2 swings confirmados** a `|Δ| ≤ eqThreshold×ATR` (default 0.1, §2.4). EL relevante entre varios = el de **más toques** y más cercano al precio (más liquidez acumulada → mejor objetivo de sweep). **Descarta** (citable): dos highs a `0.6×ATR` (§2.4 contraejemplo) → no son EQH, son HH/LH; un EQH **ya barrido** deja de ser pool activo (§3.1: su liquidez se tomó).
+- **Fuerza (0–1).** `nº de toques` (`touches`, §3.1 — más = más fuerte) · `igualdad` (Δ menor ×ATR = doble techo más limpio) · `frescura` (no barrido) · `alineación` (EQH sobre el precio = objetivo BSL para bias bajista). Quant: **alta** (≥3 toques, no barrido, alineado al objetivo), **media** (2 toques limpios), **baja** (2 toques con Δ cerca del umbral).
+- **Invalidación externa.** Un EQH/EQL **barrido** (sweep §3.2) cumple su función y deja de atraer → pasa a contexto (y suele preceder el giro contrario). DÓNDE: `pool.swept` (Pine); el scoring lo reconvierte en señal de sweep (#10).
+- **Visual (jerarquía).** **Primario:** EQH/EQL de alto `touches` no barrido cercano → línea de liquidez + etiqueta "BSL"/"SSL". **Secundario:** 2 toques lejano. **Terciario:** barrido → oculto o panel T14. Toggle `i_showEQHL` (alimenta `i_showPools`).
+- **MTF.** Transferible como **nivel de liquidez** (`bar_time` del cluster); cuadre fino HTF/LTF es el pendiente diferido (b) (metodología §6.b); cae en el mismo nivel que el EQH/EQL nativo del HTF.
+
+##### 6.3.7 OTE / Golden Pocket (§2.5) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Fib `[0=origen, 1=extremo]` **solo sobre la última pierna IMPULSIVA que produjo BOS** (§2.5/§4.4). GP = `[50–61.8%]` (#28); OTE = `[61.8–79%]` (#27, más profundo = mejor R:R). EL relevante = el fib de la pierna impulsiva **vigente** (se redibuja con cada nuevo impulso). **Descarta** (citable): medir fib sobre una pierna **correctiva** sin BOS propio (§2.5/§4.4 contraejemplo 06-09→06-10) → OTE sin significado institucional.
+- **Fuerza (0–1).** `profundidad del retroceso` (OTE 79% > GP 50% en precio/R:R) · `confluencia con OB/FVG dentro de la zona` (sube mucho: OTE+OB = entrada premium) · `alineación con bias` · `calidad de la pierna` (impulsiva con displacement §4.4). Quant: **alta** (OTE con OB/FVG alineado), **media** (GP solo), **baja** (toque superficial del 50%).
+- **Invalidación externa.** Si el retroceso **supera el 100%** (cierra más allá del origen de la pierna) → la pierna se anuló, el fib deja de valer (es CHoCH/cambio). DÓNDE: estado de la pierna (Pine); cadena ADR-012 **Q1**.
+- **Visual (jerarquía).** **Primario:** zona OTE/GP de la pierna vigente con confluencia → caja fib + niveles 0.618/0.79. **Secundario:** GP sin confluencia. **Terciario:** fib de pierna ya superada → oculto. Toggle `i_showOTE`.
+- **MTF.** Transferible como **zona** anclada a la pierna HTF (`bar_time` origen/extremo); cae en el mismo rango fib que el nativo del HTF.
+
+##### 6.3.8 Breaker (§2.6) *(fallo #1 desempate + #3 invalidación)*
+
+- **Variante correcta / desempate.** Un **OB invalidado** (`state = 3`, cierre a través del borde protector, §2.1) → `KIND_BREAKER` con `dir` invertido (§2.6). EL relevante = el breaker **fresco** retesteado desde el otro lado. **Descarta** (citable): un OB solo **mitigado** (`state 2`, lo tocó y respetó, §2.6 contraejemplo) → sigue siendo OB en su dir original, NO breaker; el breaker exige **invalidación por cierre**, no un toque.
+- **Fuerza (0–1).** `magnitud del cierre que invalidó ×ATR` (rompió con convicción) · `¿sweep previo?` (§3.2 — el breaker "real" ICT nace tras barrer liquidez antes de fallar) · `frescura del retest` (`state` del breaker) · `alineación con el nuevo bias`. Quant: **alta** (invalidación con displacement tras sweep, retest fresco), **media** (invalidación limpia sin sweep), **baja** (invalidación marginal).
+- **Invalidación externa.** Si el precio **cierra de vuelta** a través del breaker → el flip de polaridad falló (doble invalidación). DÓNDE: `f_updateZoneMitigation` (Pine, hereda máquina del OB); cadena ADR-012 **Q4** (¿barrieron a los tempranos antes del flip?).
+- **Visual (jerarquía).** **Primario:** breaker fresco alineado con el nuevo bias → caja con borde de "flip" + etiqueta "BRK". **Secundario:** breaker lejano/parcial. **Terciario:** breaker re-invalidado → oculto. Toggle `i_showBreaker`. *(Nota §2.6: el retest limpio es escaso en ventana bajista persistente — gate Fase 1 T19 pide ≥1.)*
+- **MTF.** Transferible como **zona** (`bar_time` de las coordenadas del OB original); cae en el mismo nivel que el breaker nativo del HTF.
+
+##### 6.3.9 Flip (§2.8 · #25) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Nivel (swing/OB/EQHL) roto por **`close` limpio** y luego **retesteado desde el lado opuesto** y respetado → cambio de rol (§2.8). EL relevante = el flip cuyo retest **respeta** (cierre que no lo vuelve a cruzar). **Descarta** (citable): nivel roto **solo por mecha** sin cierre limpio (§2.8 contraejemplo: sweep BSL 1.16615 del 05-27 sin cierre) → no es flip, el cierre definitorio nunca ocurrió. Distinción dura: `breaker`=falló tras barrido; `flip`=cambio de rol por retest; `mitigation block`=relleno sin barrido.
+- **Fuerza (0–1).** `limpieza de la ruptura` (cierre claro ×ATR) · `respeto del retest` (rechazo con mecha, §2.7) · `jerarquía del nivel flippeado` (swing/EQHL > OB) · `alineación con bias`. Quant: **alta** (ruptura limpia + retest rechazado en nivel fuerte), **media** (flip de OB), **baja** (retest tibio).
+- **Invalidación externa.** Si el retest **cruza por cierre** el nivel flippeado → el flip se anula (el rol no cambió). DÓNDE: estado del nivel (Pine); cadena ADR-012 **Q3** (¿rompió por cierre?).
+- **Visual (jerarquía).** **Primario:** flip confirmado por retest en nivel fuerte → línea con marca de cambio de rol. **Secundario:** flip de OB. **Terciario:** ruptura sin retest aún → latente/atenuado. Toggle `i_showFlip`.
+- **MTF.** Transferible como **nivel** (`bar_time`); cae en el mismo nivel que el flip nativo del HTF.
+
+##### 6.3.10 Mitigation Block (§2.8 · #24) *(fallo #1 desempate)*
+
+- **Variante correcta / desempate.** Última vela contraria antes de un impulso que rompe estructura interna **SIN sweep previo** de un pool (§2.8). EL relevante = el mitigation block que rellena un desequilibrio previo sin haber barrido liquidez. **Descarta** (citable): si **hubo sweep** antes del impulso → es contexto de **breaker/OB**, no mitigation block (§2.8). Es la distinción que lo separa del breaker (que sí invalida tras barrido).
+- **Fuerza (0–1).** `magnitud del impulso que lo origina ×ATR` (displacement §4.1) · `frescura` (`state`) · `alineación con bias`. Inherentemente **menor peso** que OB/breaker (rellena desequilibrio sin la limpieza de liquidez que da convicción). Quant: **media** (impulso con displacement, fresco), **baja** (impulso normal).
+- **Invalidación externa.** Cierre a través de su borde → invalidado (deja de ser zona). Si retrospectivamente **sí hubo sweep**, se reclasifica a OB/breaker. DÓNDE: `f_updateZoneMitigation` (Pine); scoring (#24, peso bajo).
+- **Visual (jerarquía).** **Secundario** por defecto (zona de apoyo, menor convicción): caja atenuada. **Terciario:** mitigado → panel T14. Toggle `i_showMitBlock` (puede colapsarse en `GRP_*` zonas).
+- **MTF.** Transferible como **zona** (`bar_time`) con cap bajo (zona secundaria; no saturar).
+
+#### LIQUIDEZ
+
+##### 6.3.11 Pools de liquidez BSL / SSL (§3.1) *(fallo #2 fuerza)*
+
+- **Variante correcta / desempate.** Cluster de EQH/EQL + swings no barridos dentro de `poolTol×ATR` (default 0.1, ≥`minTouches`=2, §3.1). EL relevante = el pool **no barrido** con **más toques** más cercano al precio (mayor imán). **Descarta** (citable): swing aislado **ya barrido** (§3.1 contraejemplo: 1.14997 tras el rally) → su liquidez se tomó, no es pool activo.
+- **Fuerza (0–1).** `touches` (más toques = más liquidez acumulada = más fuerte, §3.1) · `frescura` (`swept=false`) · `distancia al precio ×ATR` (cercano = imán inmediato) · `alineación` (pool sobre el precio = objetivo para bias bajista). Quant: **alta** (≥3 toques, no barrido, cercano), **media** (2 toques), **baja** (pool lejano).
+- **Invalidación externa.** Pool **barrido** (`swept=true`, §3.2) → deja de ser imán (cumplió su rol). DÓNDE: `pool.swept` (Pine); el scoring lo convierte en input de sweep (#10), no de pool activo.
+- **Visual (jerarquía).** **Primario:** pool de alto `touches` no barrido cercano → línea de liquidez + etiqueta con nº toques. **Secundario:** 2 toques lejano. **Terciario:** barrido → oculto o contado en panel T14. Toggle `i_showPools`.
+- **MTF.** Transferible como **nivel** (`bar_time` del cluster, persistente — ADR pools); presupuesto top-N (`f_nearestNPools`, ADR-010); cae en el mismo nivel que el pool nativo del HTF.
+
+##### 6.3.12 Sweep (§3.2) + Grab (§3.3) *(fallo #1 variante + #2 fuerza)*
+
+- **Variante correcta / desempate.** **Sweep** = perfora un **pool confirmado** (≥2 touches) intra-vela y `close` vuelve dentro (§3.2). **Grab** = misma mecánica sobre un **swing aislado** sin pool (§3.3, más fino/frecuente, menor peso). EL relevante = el sweep sobre el pool de **más liquidez** (mayor `touches` → Raid §3.7 si `touches≥3`). **Descarta** (citable): perfora **y cierra más allá** (no vuelve) → es BOS/false breakout (§3.2 contraejemplo 06-05 12:00), NO sweep; mecha que no alcanza ningún nivel (§3.3) → no hay liquidez que tomar.
+- **Fuerza (0–1).** `touches del pool barrido` (sweep de pool > grab de swing aislado) · `profundidad de la perforación ×ATR` y `fuerza del cierre de retorno` (cuánto vuelve dentro = convicción de la trampa) · `displacement posterior` (§4.1 — si reversiona con impulso, es Judas/Spring, sube mucho). Quant: **alta** (sweep de pool alto + displacement contrario = trampa confirmada), **media** (sweep simple con retorno claro), **baja** (grab de swing aislado).
+- **Invalidación externa.** Si tras el sweep el precio **continúa** en la dirección del barrido sin reversión → no era trampa, era ruptura genuina (degrada a contexto de BOS). DÓNDE: cadena ADR-012 **Q3/Q4** (¿rompió por cierre? ¿barrieron a los tempranos?); scoring (#10 sweep, #11 grab).
+- **Visual (jerarquía).** **Primario:** sweep de pool alto con reversión → marca de barrido destacada (✸) en su `bar_time`. **Secundario:** grab de swing aislado. **Terciario:** sweep sin reversión → panel T14. Toggle `i_showSweep`.
+- **MTF.** Transferible como **marca puntual** (`bar_time` de la vela del barrido); cae sobre el pool/nivel del HTF barrido. Cap moderado (evento frecuente en M5).
+
+##### 6.3.13 IDM — Inducement (§3.6 · #33) *(fallo #2 fuerza)*
+
+- **Variante correcta / desempate.** Swing low/high **interno** (`internalLen`) más cercano cuya liquidez se barre **antes** de que el precio alcance el OB/FVG objetivo (§3.6). EL relevante = el inducement **entre el origen del impulso y la zona objetivo** que se toma justo antes del movimiento real. **Descarta** (citable): si el precio llega al OB **sin** barrer ningún inducement intermedio (§3.6 contraejemplo) → entrada de menor calidad (camino no "limpio"), no hay IDM que sumar.
+- **Fuerza (0–1).** `¿se barrió el inducement antes de tocar el objetivo?` (binario clave: camino limpio sube la fuerza de la entrada) · `proximidad del IDM al objetivo` · `alineación con el impulso esperado`. Es **calificador de calidad de la entrada**, no zona propia. Quant: **alta** (IDM barrido limpio justo antes del empuje, p.ej. 06-11 06:05 nivel 1.15426), **baja** (sin IDM previo).
+- **Invalidación externa.** Si tras barrer el IDM el precio **no** alcanza el objetivo (revierte antes) → el inducement no validó el camino. DÓNDE: scoring (#33 IDM barrido); cadena ADR-012 **Q4** (¿barrieron a los tempranos? — el IDM **es** esa liquidez señuelo).
+- **Visual (jerarquía).** **Secundario** (es contexto fino de la entrada): marca pequeña sobre el swing interno barrido. **Primario** solo cuando es el gatillo confirmado hacia el objetivo. **Terciario:** IDM no barrido → no se marca. Toggle `i_showIDM`.
+- **MTF.** Normalmente **no** se transfiere (liquidez interna del TF de entrada); se consume en M5.
+
+##### 6.3.14 Judas Swing (§3.5 · #13) *(fallo #1 variante + #3 invalidación)*
+
+- **Variante correcta / desempate.** Sweep/grab en la **primera mitad de una Kill Zone** (§3.4) seguido de **displacement contrario** en `≤ judasBars` velas (default 6 M5, §3.5). `dir` = el del displacement (el movimiento real). EL relevante = la trampa de apertura de sesión. **Descarta** (citable): sweep a mitad de sesión **sin** displacement contrario (§3.5 contraejemplo 06-11 12:25, continuó a la baja) → solo sweep, NO Judas (exige la reversión con fuerza); barrido **fuera de la 1ª mitad de KZ** → clasifica como Spring/sweep (§3.7), no Judas.
+- **Fuerza (0–1).** `magnitud del displacement de reversión ×ATR` (§4.1) · `cercanía al open de sesión` · `touches del pool barrido` (barrer liquidez real antes de la trampa). Quant: **alta** (sweep de pool + displacement fuerte en 1ª mitad de KZ, p.ej. 06-11 06:05→06:10 1.62×ATR), **media** (Judas con displacement moderado), **baja** (reversión apenas ≥umbral).
+- **Invalidación externa.** Si el displacement contrario **no** llega en ≤6 velas, o el precio retoma la dirección del barrido → la trampa no se confirmó. DÓNDE: ventana temporal (Pine, §3.5); cadena ADR-012 **Q4**.
+- **Visual (jerarquía).** **Primario:** Judas confirmado en KZ → marca de trampa + flecha del movimiento real. **Terciario:** sweep sin reversión → no es Judas. Toggle `i_showJudas`. *(Nota §3.5: Judas completo escaso — gate Fase 1 T18 pide ≥3.)*
+- **MTF.** Concepto de **M5 intradía** (ligado a la KZ); no se transfiere a HTF (es evento de sesión).
+
+##### 6.3.15 False Breakout / Spring / Raid (§3.7 · #14/#15/#16) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Tres variantes de barrido en extremo de rango: **False Breakout** = `close` cruza el nivel + reversión que cierra de vuelta en `≤fbBars` velas (default 2) — a diferencia del sweep (solo mecha); **Spring** = sweep de SSL bajo el mínimo de un rango lateral + reversión rápida al alza (`dir+1`); **Raid** = sweep de pool con `touches≥raidTouches` (default 3, mayor peso). EL relevante = el de **pool más líquido** (Raid > Spring > FB simple). **Descarta** (citable): cierre más allá que **no** revierte en ≤2 velas (§3.7 contraejemplo 06-05 12:00) → breakout real (BOS), no falso.
+- **Fuerza (0–1).** `touches del pool` (Raid alto = máxima) · `velocidad/magnitud de la reversión ×ATR` (Spring: rally 4.84×ATR del 06-11 17:15) · `¿coincide con extremo de rango/mínimo de consolidación?`. Quant: **alta** (Raid de cluster alto con reversión explosiva), **media** (Spring/FB sobre 2 toques), **baja** (FB marginal).
+- **Invalidación externa.** Si la reversión excede `fbBars` o no se materializa → era ruptura genuina. DÓNDE: ventana `fbBars` (Pine); cadena ADR-012 **Q3/Q4**; scoring (#14/#15/#16).
+- **Visual (jerarquía).** **Primario:** Raid/Spring en extremo con reversión → marca destacada. **Secundario:** False Breakout simple. **Terciario:** sin confirmar → panel T14. Toggle `i_showFalseBreak` (familia con `i_showSweep`).
+- **MTF.** Transferible como **marca** (`bar_time`) sobre el extremo del rango del HTF; cap moderado.
+
+##### 6.3.16 Kill Zones (§3.4 · #34) + Macros (§5.14) *(fallo #2 fuerza — peso, no veto)*
+
+- **Variante correcta / desempate.** Ventana horaria por `sessionProfile` (default FX-London-NY, §3.4). **NO es filtro duro** (ADR-001): aporta **peso** a #34, no bloquea. **Macros (§5.14, `[FIX P-05]`)** = sub-ventanas de minutos dentro de la KZ → **refinan #34** (mayor peso), no suman confluencia. EL relevante = la sesión activa (+ macro si coincide). **Descarta** como veto (citable): bloquear una señal a las 03:00 GMT por reloj (§3.4 contraejemplo) → el reloj informa, gobierna spread/score.
+- **Fuerza (0–1).** `¿sesión activa?` (binario, suma peso #34) · `¿primera mitad?` (relevante para Judas §3.5) · `¿macro activa?` (§5.14, sube el peso). El reloj **no** tiene `strength` de marca; **modula** el peso de las demás señales que caen en la ventana. Quant: **alta** (señal en macro dentro de KZ), **media** (señal en KZ sin macro), **baja**/neutra (fuera de KZ — no resta, solo no aporta).
+- **Invalidación externa.** No invalida nada (no es señal): es modulador. NY Lunch (§5.14: 12:00–13:00 NY) = **filtro de baja actividad** (no entrada). DÓNDE: scoring (#34, peso por símbolo Fase 3/5); en `sessionProfile=None` (cripto/índices 24h) #34 no aporta.
+- **Visual (jerarquía).** **Primario:** sombreado de la KZ activa en el fondo del chart (contexto, no marca). Macros como sub-sombreado fino. Toggle `i_showKZ` / `i_showMacros`. Anti-repaint: por reloj.
+- **MTF.** Es **contexto de M5 intradía**; no se transfiere como objeto (cada TF lee su propio reloj).
+
+#### CONTEXTO / ICT / EMAs
+
+##### 6.3.17 Displacement (§4.1 · #32) *(fallo #2 fuerza — es la fuente del primitivo)*
+
+- **Variante correcta / desempate.** Vela/tramo con `rango ≥ dispFactor×ATR14` (1.5) **y** `cuerpo ≥ bodyPct×rango` (0.70), opcional tras ≥3 velas de compresión (§4.1). EL relevante = el displacement **a favor del bias** que crea el OB/FVG o califica el MSS/Judas. **Descarta** (citable): rango grande con **cuerpo pequeño** (mecha dominante, §4.1 contraejemplo 05-29 14:00 cuerpo 63%) → indecisión/rechazo, NO displacement. Es **el primitivo de fuerza** que alimenta a casi todos los demás (§6.1).
+- **Fuerza (0–1).** Él **es** un primitivo de §6.1, pero como evento propio su fuerza = `rango ×ATR` (5.27×ATR del 06-05 12:00 = extrema) · `cuerpo%` (97–98% = máxima convicción) · `¿tras compresión?`. Quant: **alta** (≥3×ATR, cuerpo ≥90%), **media** (≥1.5×ATR, ≥70%), **baja**: por debajo no es displacement.
+- **Invalidación externa.** Displacement **contra el bias dominante** = expansión correctiva (puede ser una vela fuerte en pierna correctiva §4.4) → no implica cambio de tendencia. DÓNDE: cadena ADR-012 **Q1**; el scoring lo pondera por alineación.
+- **Visual (jerarquía).** **Primario:** displacement extremo a favor del bias → realce de la vela (color/marca). **Secundario:** displacement moderado. **Terciario:** rara vez se oculta (es informativo). Toggle `i_showDisp`.
+- **MTF.** Transferible como **marca de vela** (`bar_time`); cae en la misma vela que el displacement nativo del HTF. La **exactitud vela-a-vela** es el pendiente diferido (c) (metodología §6.b).
+
+##### 6.3.18 EMAs — estado / alineación (§4.3 · #37–#39, #42) *(fallo #2 fuerza)*
+
+- **Variante correcta / desempate.** Estados direccionales **únicos** `[FIX P-05]`: #37 vs EMA200, #38 vs EMA50, #39 vs EMA20 (cada uno suma a long **O** short, nunca infla), #42 = 3 EMAs alineadas (`E20>E50>E200` → +1 fuerte). EL relevante para convicción = la **alineación completa** (#42) > estado vs una sola EMA. **Descarta** (citable): contar "close>EMA200" Y "close<EMA200" como confluencias separadas (§4.3 contraejemplo `[FIX P-05]`) → una siempre activa, +peso garantizado.
+- **Fuerza (0–1).** `nº de EMAs alineadas` (3 alineadas = alta) · `separación entre EMAs ×ATR` (abanico abierto = tendencia fuerte; pegadas = chop) · `pendiente`. Quant: **alta** (#42 con abanico abierto, 06-08→06-11 E20<E50<E200), **media** (sobre/bajo 1–2 EMAs), **baja** (EMAs entrelazadas/planas). Confirman, no lideran (§4.3: peso base bajo).
+- **Invalidación externa.** EMAs **entrelazadas/planas** = sin tendencia → el estado no aporta dirección fiable (no resta, neutraliza). DÓNDE: scoring (#37–#42, peso base bajo calibrado Fase 3).
+- **Visual (jerarquía).** **Primario:** las 3 EMAs (20/50/200) siempre visibles como contexto; realce cuando #42 alineado. No es marca puntual. Toggle `i_showEMAs`.
+- **MTF.** **NO** se transfiere como objeto (cada TF tiene sus 20/50/200, §6.2.3); se hereda como **estado de bias** del HTF en panel T14.
+
+##### 6.3.19 EMA rebote (§4.3 · #41) *(fallo #2 fuerza + #3 invalidación)*
+
+- **Variante correcta / desempate.** El precio toca una EMA y cierra de vuelta con `mecha ≥ rejWickFactor×cuerpo` (2×, reusa §2.7) **en dirección de la tendencia** (§4.3 #41). EL relevante = el rebote en la EMA **alineada con el bias** (rebote en EMA50/200 en tendencia > toque de EMA20 en chop). **Descarta** (citable): toque de EMA **contra** la tendencia (rebote en contra = no confirma); mecha sin rebote real (cierra del lado equivocado).
+- **Fuerza (0–1).** `ratio mecha/cuerpo` (reusa Rejection §2.7) · `jerarquía de la EMA tocada` (200 > 50 > 20) · `alineación con bias`. Quant: **alta** (rebote fuerte en EMA200 a favor), **media** (rebote en EMA50), **baja** (toque tibio de EMA20).
+- **Invalidación externa.** Si el precio **cierra a través** de la EMA tras el rebote → el rebote falló (la EMA no aguantó). DÓNDE: cadena ADR-012 **Q3**; scoring (#41).
+- **Visual (jerarquía).** **Secundario** por defecto (confirmación, peso bajo): marca pequeña sobre la EMA. **Primario** solo si confluye con OB/FVG en la EMA. Toggle `i_showEmaBounce` (familia EMAs).
+- **MTF.** Como las EMAs, **contexto del TF propio**; no se transfiere como marca.
+
+##### 6.3.20 EMA Stack Flip (§4.3) *(fallo #1 desempate)*
+
+- **Variante correcta / desempate.** **EMA20 y EMA50 ambas cruzan al mismo lado de la EMA200** habiendo estado al otro (golden/death cross del grupo rápido, §4.3). Es la **entrada** al estado #42 y **domina** sobre cualquier cruce de par aislado (§6.2.3). **Descarta** (citable): cruce 20×50 aislado mientras ambas siguen del mismo lado de la 200 (§4.3 contraejemplo) → no cambia el régimen, es ruido #40, no Stack Flip.
+- **Fuerza (0–1).** `magnitud del cruce respecto a la 200 ×ATR` · `separación posterior` (régimen consolidándose) · `alineación con la estructura dominante` (Stack Flip bajista 06-08 coincidió con el inicio del tramo dominante bajista). Es **evento de mayor convicción** (§4.3). Quant: **alta** siempre que es flip real alineado con el cambio de régimen estructural; **media** si va por delante del precio.
+- **Invalidación externa.** Stack Flip **contra** la estructura dominante (`majorLen=50`) = posible whipsaw → menor convicción hasta confirmación estructural. DÓNDE: scoring (#42/#40 reforzado); cadena ADR-012 **Q1**.
+- **Visual (jerarquía).** **Primario:** Stack Flip (cambio de régimen) → marca destacada `KIND_EMASTACK` + etiqueta. **Secundario/Terciario:** N/A (siempre es evento relevante). Toggle `i_showStackFlip`.
+- **MTF.** Como las EMAs, **contexto del TF propio**; se hereda como cambio de bias del HTF en panel T14.
+
+##### 6.3.21 Session Opens (§4.2 · #36) *(fallo #2 fuerza)*
+
+- **Variante correcta / desempate.** Niveles de apertura diaria/semanal/mensual (§4.2); #36 activa cuando el precio está dentro de `openProx×ATR` (0.5) de uno. EL relevante = la apertura **más cercana** al precio actuando como S/R inmediato. **Descarta** (citable): apertura a `~3×ATR` del precio (§4.2 contraejemplo) → el nivel existe pero NO es confluencia activa (lejos para influir).
+- **Fuerza (0–1).** `proximidad al nivel ×ATR` (cuanto más cerca, más peso #36) · `jerarquía` (semanal/mensual > diaria) · `lado` (direccional según de qué lado esté el precio). Quant: **alta** (precio pegado a apertura semanal/mensual), **media** (cerca de la diaria), **baja**/inactiva (lejos).
+- **Invalidación externa.** El precio se aleja >`openProx×ATR` → #36 se desactiva (sin resta). DÓNDE: scoring (#36, direccional).
+- **Visual (jerarquía).** **Primario:** apertura semanal/mensual como líneas ancla persistentes. **Secundario:** diaria. **Terciario:** aperturas viejas lejanas → ocultas. Toggle `i_showOpens`. *(Se extiende como **serie de gaps** en §6.3.32.)*
+- **MTF.** Niveles **globales** (mismos en todo TF); se dibujan una vez y heredan naturalmente a M5.
+
+##### 6.3.22 Impulsive / Corrective (§4.4 · #7/#8) *(fallo #1 variante — es clasificador de estado)*
+
+- **Variante correcta / desempate.** **No es confluencia aditiva**: clasifica el **tramo** contra el bias dominante (§4.4). **IMPULSIVO** = `hasDisplacement` (§4.1) **Y** `breakAligned` (BOS alineado o MSS que voltea). **CORRECTIVO** = lo demás (retroceso contra-sesgo, solapado). EL relevante = la clasificación del tramo **vigente** (define si §2.5 OTE tiene sentido). **Descarta** (citable): clasificar impulsivo un retroceso contra-sesgo por **una** vela fuerte (§4.4 contraejemplo 06-09→06-10) → es correctivo (no rompe estructura dominante a su favor); el ER **no** es el criterio (verificado: 0.28 impulso < 0.6–0.89 correcciones).
+- **Fuerza (0–1).** Para el tramo impulsivo: `magnitud del displacement ×ATR` · `nº de BOS encadenados` (2+ sin CHoCH = #7 impulso) · `alineación con bias dominante`. Para el correctivo: es el **insumo** del OTE (su "fuerza" = profundidad del retroceso fib §6.3.7). Quant impulso: **alta** (displacement extremo + BOS encadenados, caída 06-04→06-08), **media** (1 displacement + 1 BOS).
+- **Invalidación externa.** Un "impulso" sin displacement (BOS aislado de rango normal, §1.6 contraejemplo 06-08 08:00 1.21×ATR cuerpo 52%) → no califica como impulso. DÓNDE: cadena ADR-012 **Q1**; scoring (#7 impulso previo / #8 corrección en curso).
+- **Visual (jerarquía).** **Contexto, no marca puntual:** colorea/etiqueta el tramo vigente (impulsivo vs correctivo) en el panel T14 o como sombreado de pierna. **Primario:** tramo impulsivo dominante. Toggle `i_showLegs`.
+- **MTF.** Se hereda como **estado del tramo HTF** en el panel T14 (el M5 sabe si el H1 está impulsivo o correctivo).
+
+#### GAP ICT (§5)
+
+> **Refinamientos `[FIX P-05]` (sin sub-bloque propio):** **True FVG §5.1** eleva `strength` del FVG (§6.2.2); **Propulsion Block §5.8** eleva `strength` del OB de continuación (§6.2.1); la familia **Volume Imbalance/SIVI/BIVI** cuenta como **1 sola** confluencia (§6.3.26).
+
+##### 6.3.23 IFVG — Inversion FVG (§5.2 · #43) *(fallo #3 invalidación)*
+
+- **Variante correcta / desempate.** Análogo exacto del Breaker pero sobre FVG: un FVG que pasa a `ZS_INVALID` (cierre a través del borde, §2.1) → `KIND_IFVG` con `dir` invertido (§5.2). EL relevante = el IFVG **fresco** retesteado desde el otro lado. **Descarta** (citable): FVG solo **mitigado** (`ZS_MITIGATED`, lo tocó y respetó, §5.2 contraejemplo) → sigue siendo FVG válido, NO IFVG (exige invalidación por cierre); **no** sumar el FVG muerto + su IFVG (1 sola confluencia, `[FIX P-05]`).
+- **Fuerza (0–1).** `magnitud del cierre que invalidó ×ATR` · `¿el FVG original era True FVG?` (`trueFvg` — invertir un gap de calidad pesa más) · `frescura del retest` · `alineación con el nuevo bias`. Quant: **alta** (invalidación con displacement de un True FVG, retest fresco), **media** (IFVG normal), **baja** (invalidación marginal).
+- **Invalidación externa.** Cierre de vuelta a través del IFVG → doble invalidación. DÓNDE: `f_updateZoneMitigation` (Pine, misma máquina del FVG); cadena ADR-012 **Q4**.
+- **Visual (jerarquía).** **Primario:** IFVG fresco alineado → caja con marca de inversión + etiqueta "IFVG". **Secundario:** IFVG lejano. **Terciario:** re-invalidado → oculto. Toggle `i_showIFVG`. *(Ventana: 27 FVG invalidados → 27 IFVG candidatos.)*
+- **MTF.** Transferible como **zona** (`bar_time` de las coordenadas del FVG original); cae en el mismo gap que el IFVG nativo del HTF.
+
+##### 6.3.24 BPR — Balanced Price Range (§5.3 · #44 cand.) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Intersección de un FVG **alcista** con uno **bajista** creados en `≤bprWindow` velas (20), altura `≥bprMinOverlap×ATR` (0.05), §5.3 → `KIND_BPR` = `[max(bottoms), min(tops)]`, `dir` neutro (reacción bidireccional). EL relevante = el solape **vivo** más cercano. **Descarta** (citable): dos FVG del **mismo** lado, o dos opuestos que **no se tocan** (§5.3 contraejemplo) → no hay BPR. Opuesto conceptual del IPR (§6.3.29: mismo lado, apilados).
+- **Fuerza (0–1).** `altura de la intersección ×ATR` (solape mayor = zona de reacción más fuerte) · `trueFvg de los gaps que lo forman` · `frescura` (`state`) · `proximidad al precio`. Quant: **alta** (solape amplio de dos True FVG frescos), **media** (solape normal), **baja** (solape mínimo cerca del umbral).
+- **Invalidación externa.** El precio cierra a través de toda la zona → BPR mitigado/anulado. La dirección de reacción la da el **contexto** (P/D, bias), no el BPR en sí. DÓNDE: `f_updateZoneMitigation` (Pine); el sesgo lo aporta el scoring.
+- **Visual (jerarquía).** **Primario:** BPR fresco cercano → caja con doble borde (zona de equilibrio). **Secundario:** lejano/parcial. **Terciario:** mitigado → panel T14. Toggle `i_showBPR`. *(Ventana: 15 solapes, p.ej. BPR 05-28 [1.16235, 1.16260].)*
+- **MTF.** Transferible como **zona** (`bar_time`); cae en la misma intersección que el BPR nativo del HTF.
+
+##### 6.3.25 Immediate Rebalance (§5.4) *(fallo #1 variante — matiz de contexto)*
+
+- **Variante correcta / desempate.** Lo **contrario** al FVG: vela de impulso (`rango≥irFactor×ATR`=1.0, `cuerpo≥irBodyPct`=0.60) cuyo desequilibrio es **rebalanceado de inmediato** por la vela siguiente (cierra de vuelta dentro del cuerpo), §5.4 → `KIND_IR`, evento puntual. EL relevante = el IR que confirma que **no quedará FVG imán** ahí. **Descarta** (citable): vela de impulso que **deja FVG** (la siguiente no rellena, §5.4 contraejemplo) → es contexto de FVG (§2.2), NO Immediate Rebalance.
+- **Fuerza (0–1).** Es **matiz de contexto, no zona operable** (§5.4): su "fuerza" = `cuán completo fue el rebalance` (qué fracción del cuerpo se devolvió). No genera marca de entrada con `strength` alta; informa que la ineficiencia se curó. Quant: **baja**/informativa.
+- **Invalidación externa.** N/A operativo (es marca histórica P4). Si retrospectivamente queda hueco residual, se reclasifica a FVG. DÓNDE: detección (Pine).
+- **Visual (jerarquía).** **Terciario** por defecto (marca histórica, peso bajo): pequeño marcador o solo en panel T14. Toggle `i_showIR`. *(Ventana: 11 IR.)*
+- **MTF.** Rara vez se transfiere (evento de microestructura del TF); cap mínimo.
+
+##### 6.3.26 Volume Imbalance — SIVI / BIVI (§5.5 · #46 cand.) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Micro-gap entre **cuerpos** de velas consecutivas con **mechas solapadas** (`open[i]` con gap ≥`viThreshold×ATR`=0.05 sobre `close[i-1]`, y mechas se tocan), §5.5. **BIVI** alcista / **SIVI** bajista. **Una sola confluencia** para la familia `[FIX P-05]` (no 3×). EL relevante = el VI más cercano sin mitigar. **Descarta** (citable): gap **sin** solape de mechas (`low[i]>high[i-1]`, §5.5 contraejemplo) → es FVG/gap real (§2.2), NO Volume Imbalance (el VI exige que las mechas se toquen).
+- **Fuerza (0–1).** `tamaño del gap de cuerpo ×ATR` (micro por naturaleza) · `frescura` (`state`) · `¿en zona de displacement?`. Inherentemente **baja-media** (es microestructura). Quant: **media** (VI grande en impulso), **baja** (micro típico).
+- **Invalidación externa.** El precio rellena el micro-gap → mitigado. DÓNDE: `f_updateZoneMitigation` (Pine); scoring (1 confluencia familia).
+- **Visual (jerarquía).** **Terciario** por defecto (microestructura, satura fácil): solo en `i_densidad=Todo` o panel T14. **Secundario** si confluye con zona mayor. Toggle `i_showVI`. *(Ventana H1: 13; M5: 53 — coherente con su naturaleza micro.)*
+- **MTF.** **No** se transfiere a TF menores (ya es lo más fino); en HTF puede tener valor puntual con cap mínimo.
+
+##### 6.3.27 CISD — Change in State of Delivery (§5.6 · #47 cand.) *(fallo #1 desempate + #3 invalidación)*
+
+- **Variante correcta / desempate.** Giro **más temprano y fino** que el CHoCH: tras un run de `≥cisdMinRun` velas del mismo color (default 2), el precio **cierra cruzando el `open` origen del run** (§5.6). **Distinto de CHoCH/MSS** (rompe el *open de la pierna*, no un pivote swing → ocurre antes; guard obligatorio). EL relevante = el CISD sobre el run de delivery más largo/reciente. **Descarta** (citable): cierre que cruza el open de **una sola** vela (run de 1, §5.6 contraejemplo) → ruido (39 señales/300 velas con minRun=1; con ≥2 → 8 distinguibles).
+- **Fuerza (0–1).** `longitud del run de delivery` (run de 6 del 06-05 12:00 = shift mayor > run de 2) · `displacement del cierre de giro ×ATR` (§4.1) · `alineación con el bias esperado`. Quant: **alta** (run largo + giro con displacement, 06-05 12:00), **media** (run de 2–3 limpio), **baja**: run de 1 no es CISD.
+- **Invalidación externa.** Si el precio retoma la dirección del run original tras el CISD → el cambio de entrega no se sostuvo. Si además rompe el pivote swing → ya es CHoCH/MSS (no lo duplica). DÓNDE: cadena ADR-012 **Q3**; scoring (#47).
+- **Visual (jerarquía).** **Primario:** CISD de run largo (shift mayor) → marca + etiqueta "CISD". **Secundario:** CISD de run de 2–3. **Terciario:** N/A (run de 1 ya filtrado). Toggle `i_showCISD`. *(Ventana: 8 CISD.)*
+- **MTF.** Transferible como **marca** (`bar_time` del cierre de giro); cae en el mismo punto que el CISD nativo del HTF; gatillo fino más útil en LTF.
+
+##### 6.3.28 Vacuum Block (§5.7 · #48 cand.) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Un **único gap grande de apertura** (frontera de día/semana del broker) `≥vacuumFactor×ATR` (0.5), §5.7 → `KIND_VACUUM` = `[min,max]` de `(close[i-1], open[i])`, imán de retorno. EL relevante = el Vacuum no rellenado más cercano. **Descarta** (citable): micro-gap de cuerpo con mechas solapadas <0.5×ATR (§5.7 contraejemplo) → es Volume Imbalance (§5.5), NO Vacuum (el Vacuum exige salto grande de apertura). Distinto de FVG (hueco de 3 velas).
+- **Fuerza (0–1).** `tamaño del gap ×ATR` (0.72/0.53/0.85×ATR en los casos) · `frescura` (no rellenado) · `tipo de frontera` (semanal NWOG > diaria). Quant: **alta** (gap semanal grande no rellenado), **media** (gap de día), **baja** (cerca del umbral).
+- **Invalidación externa.** El precio rellena el gap → mitigado (cumplió de imán). DÓNDE: `f_updateZoneMitigation` (Pine); scoring (#48).
+- **Visual (jerarquía).** **Primario:** Vacuum grande no rellenado → caja + etiqueta. **Secundario:** parcial. **Terciario:** rellenado → oculto. Toggle `i_showVacuum`. *(Ventana FX: 3, todos en frontera 21:00 GMT — escasos en FX, más frecuentes en índices/futuros con cierre, ADR-001.)*
+- **MTF.** Transferible como **zona** (`bar_time` de la frontera); coincide con NWOG (§6.3.32); cae en el mismo gap del HTF.
+
+##### 6.3.29 IPR — Imbalanced Price Range (§5.9 · #49 cand.) *(fallo #1 variante — es contexto/bias)*
+
+- **Variante correcta / desempate.** `≥iprMinGaps` FVG del **mismo `dir`** en `≤iprWindow` velas sin opuesto que neutralice (default 3/10), §5.9 → `KIND_IPR` = `[min(bottoms), max(tops)]`, **contexto/bias** (no zona puntual). EL relevante = la ventana con más gaps apilados unidireccionales. **Descarta** (citable): ventana con FVG **mezclados** (§5.9 contraejemplo) → balanceada, tiende a BPR/equilibrio (§5.3), NO IPR. Opuesto del BPR (§6.3.24).
+- **Fuerza (0–1).** `nº de gaps apilados del mismo lado` (más = más desbalance = más "tirón") · `tamaño total del rango ×ATR` · `alineación con bias`. Es **input de bias**, no voto puntual (§5.9). Quant: **alta** (≥4 gaps apilados en impulso direccional), **media** (3 gaps).
+- **Invalidación externa.** Aparición de gaps opuestos en la ventana → se rebalancea, el IPR se disuelve. DÓNDE: scoring/motor de bias (modulador, no voto); cadena ADR-012 **Q1**.
+- **Visual (jerarquía).** **Secundario** (es zona de contexto, no entrada): sombreado del rango desbalanceado. **Terciario:** disuelto → panel T14. Toggle `i_showIPR`. *(Ventana: 5 IPR, en tramos de impulso.)*
+- **MTF.** Transferible como **rango de contexto** (`bar_time`); se hereda como modulador de bias del HTF en panel T14.
+
+##### 6.3.30 Inside Day (§5.12 · #50 cand.) *(fallo #1 variante — contexto de volatilidad)*
+
+- **Variante correcta / desempate.** Día D1 con `high[D]<high[D-1]` **y** `low[D]>low[D-1]` (contención de ambos extremos, §5.12) → `KIND_INSIDEDAY`, compresión que precede expansión, `dir` neutro (la ruptura del rango previo lo define). EL relevante = el inside day **más reciente** confirmado (D1 cerrado, anti-repaint). **Descarta** (citable): día con `high` mayor **o** `low` menor (outside/trending day, §5.12 contraejemplo) → no es inside day (rompe la contención).
+- **Fuerza (0–1).** `cuán contenido` (rango D vs rango D-1; más estrecho = más compresión = expansión más probable) · `nº de inside days consecutivos` (compresión acumulada). Es **contexto de volatilidad, peso bajo** (§5.12). Quant: **media** (contención fuerte), **baja** (contención marginal).
+- **Invalidación externa.** Una vez el precio **rompe** el rango del día previo → el inside day se "resuelve" (la dirección de ruptura pasa a mandar). DÓNDE: scoring (#50, peso bajo); el bias lo da la ruptura.
+- **Visual (jerarquía).** **Secundario/Terciario:** marca en la barra D1 o sombreado del rango contenido (heredado a M5). Toggle `i_showInsideDay`. *(Ventana: 3 inside days: 05-31, 06-02, 06-11.)*
+- **MTF.** Es un patrón **D1**; se hereda a H1/M5 como sombreado del rango D1 contenido (visibilidad cruzada por `bar_time`, §6.3.35).
+
+##### 6.3.31 Standard Deviation (§5.11) — **HERRAMIENTA, no confluencia** *(no aplica fallo de discriminación)*
+
+- **Variante correcta / desempate.** **No es una zona detectada** (§0.9/§5.11): es una **proyección** `nivel(k)=B+k·(B−A)` para `k∈{−1,−2,−2.5,−4}` sobre un rango ancla (pierna de manipulación / dealing range). No hay "variante relevante entre candidatos": hay un cálculo determinista de objetivos. **Descarta** (citable): usarla como confluencia que **suma al score** (§5.11 contraejemplo) → error de categoría (es proyección de TP, no señal).
+- **Fuerza (0–1).** **N/A** — no tiene `strength` de marca. Alimenta `f_computeSLTP` (TP del motor EA), no el scoring.
+- **Invalidación externa.** N/A (es una regla/fórmula). El ancla se redibuja con cada nuevo rango.
+- **Visual (jerarquía).** **Líneas de objetivo** (no marca de confluencia): niveles −1/−2/−2.5/−4 como targets opcionales. **Terciario** por defecto (solo cuando se estudia SL/TP). Toggle `i_showStdDev`.
+- **MTF.** Se proyecta sobre el rango del TF que se opera; los niveles son globales una vez fijado el ancla.
+
+##### 6.3.32 Serie de gaps de apertura — NWOG/NDOG/NYMO/ORG + Breakaway (§5.10 · #45 cand. Breakaway) *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Extiende Session Opens (§4.2/§6.3.21) como **serie de niveles**: en cada frontera (semana/día broker/00:00 NY) capturar `(close_previo, open_nuevo)`. **Nivel ancla** siempre (NWOG/NDOG/NYMO); **gap medible** si `≥gapMin×ATR` (0.5); **Breakaway Gap** (`KIND_BAG`) si el gap **además rompe estructura** (BOS §1.3 en su dir) → gap direccional. EL relevante = el ancla más cercana / el Breakaway si rompe estructura. **Descarta** (citable): `open` ≈ `close` previo (gap <0.5×ATR, típico FX intradía, §5.10 contraejemplo) → solo aporta el **nivel** (#36 serie), no zona-gap ni Breakaway.
+- **Fuerza (0–1).** Para el **nivel**: `proximidad ×ATR` + jerarquía (NWOG semanal > NDOG diario). Para el **Breakaway**: `tamaño del gap ×ATR` + `¿confirmó BOS?` (binario, lo hace direccional) + `alineación`. Quant: **alta** (Breakaway que rompe estructura), **media** (gap medible neutro), **baja** (nivel ancla puro).
+- **Invalidación externa.** Gap rellenado → nivel mitigado; Breakaway negado si el BOS se revierte. DÓNDE: scoring (#36 serie / #45 Breakaway); cadena ADR-012 **Q1/Q3**.
+- **Visual (jerarquía).** **Primario:** NWOG y Breakaway → líneas ancla persistentes + punto medio. **Secundario:** NDOG/NYMO. **Terciario:** gaps viejos rellenados → ocultos. Toggle `i_showOpeningGaps`. *(Ventana FX: NWOG fin de semana 06-07 ~0.85×ATR, 05-31 ~0.72×ATR; gaps diarios ≈0.)*
+- **MTF.** Niveles **globales** (mismos en todo TF), se heredan a M5 naturalmente; el Breakaway transfiere su `bar_time` de frontera.
+
+##### 6.3.33 SMT Divergence (§5.13 · #51 cand.) — **requiere símbolo correlacionado (ADR-011)** *(fallo #1 variante)*
+
+- **Variante correcta / desempate.** Divergencia entre el chart y un `smtSymbol` correlacionado (default EURUSD↔GBPUSD **correlación positiva**, ADR-011): uno hace HH/LL y el otro **no confirma**, equiparados por `smtTol` velas (3), §5.13 → `KIND_SMT`. EL relevante = la divergencia en el swing equiparable más reciente. **Descarta** (citable): ambos símbolos hacen **el mismo** extremo (se confirman, §5.13 contraejemplo) → no es SMT (exige que **uno falle** en confirmar).
+- **Fuerza (0–1).** `claridad de la divergencia` (cuánto falla el correlacionado en confirmar) · `escala del swing divergente` (swing > interno) · `¿coincide con sweep de liquidez?` (§3.2 — uno barrió, el otro no = manipulación confirmada). Señal de **calidad alta** (§5.13). Quant: **alta** (divergencia de swing dominante con sweep), **media** (divergencia de swing simple).
+- **Invalidación externa.** Si el símbolo rezagado **luego confirma** el extremo → la divergencia se cierra (no era manipulación). DÓNDE: scoring (#51 fuerte); cadena ADR-012 **Q4** (es manipulación de liquidez).
+- **Visual (jerarquía).** **Primario:** SMT confirmado → marca de divergencia + etiqueta en ambos extremos. **Secundario/Terciario:** N/A (siempre relevante si existe). Toggle `i_showSMT`. *(No verificable con `eurusd_h1.csv` — un solo símbolo; casos en pasada TV con el par correlacionado tras ADR-011.)*
+- **MTF.** Transferible como **marca** (`bar_time` del swing divergente); requiere el 2º `request.security` aplanado (ADR-009) en cada TF.
+
+##### 6.3.34 RTH vs ETH (§5.15 · modula #34) — **N/A en FX (Fase 5, par nuevo)** *(no aplica a EURUSD)*
+
+- **Variante correcta / desempate.** Por `rthProfile` (input por símbolo): hora local en ventana RTH → `RTH`, si no → `ETH` (§5.15). Modula el peso de #34. **EURUSD (FX 24h) → no aplica** (§5.15 contraejemplo): el perfil FX neutraliza (RTH≡ETH, toda hora es "regular"). EL relevante solo en instrumentos con sesión acotada (índices/futuros, p.ej. RTH 09:30–16:00 NY).
+- **Fuerza (0–1).** **N/A en FX.** En instrumentos acotados: `¿RTH?` (binario, sube el peso de #34; ETH = menor calidad). Quant (no-FX): **alta** RTH, **baja** ETH.
+- **Invalidación externa.** No invalida (modula #34). En FX está **desactivado** por perfil. DÓNDE: scoring (#34, solo no-FX).
+- **Visual (jerarquía).** En FX: **no se dibuja** (perfil neutraliza). En no-FX: sombreado RTH/ETH del fondo. Toggle `i_showRTH` (oculto en perfil FX).
+- **MTF.** Contexto de reloj del TF propio (como KZ §6.3.16); no se transfiere como objeto.
+
+#### MTF — Herencia cross-timeframe
+
+##### 6.3.35 Herencia D1/H1 (bias + P/D + zonas) en M5 *(fallo #1 desempate — qué baja y con qué prioridad)*
+
+- **Variante correcta / desempate.** El M5 hereda del HTF: **bias dominante** (§6.3.4), **bandas P/D** (§6.3.5), **zonas** (OB/FVG/breaker/pools) ancladas por `bar_time`/nivel (ADR-010). EL relevante en M5 = la herencia HTF **más cercana al precio** dentro del presupuesto top-N (`f_nearestN`/`f_nearestNPools`). **Descarta** (citable): saturar M5 con todas las zonas HTF → se respeta el cap top-N por familia; el resto se **cuenta** en panel T14 (no se dibuja). Anti-duplicado con la estructura nativa M5 (S042: si el evento HTF coincide con el nativo, no se redibuja).
+- **Fuerza (0–1).** La marca heredada conserva el `strength` de su origen HTF, **modulado por `cap/cercanía MTF`** (§6.1, `f_nearestN`, 0–10) — el cap 0–10 es el presupuesto de tinta, **distinto** del `strength` 0–1 y del nivel visual (gotcha S054). Quant: hereda alta/media/baja del HTF; las que no entran en el cap caen a Terciario.
+- **Invalidación externa.** Una zona HTF invalidada en su TF de origen deja de heredarse a M5. DÓNDE: estado de la zona en su TF (Pine, vía ADR-010); el panel T14 refleja el conteo HTF.
+- **Visual (jerarquía).** **Primario:** bias dominante + P/D + top-N zonas HTF cercanas (con tag `(D1)`/`(H1)` — pendiente diferido (a), metodología §6.b). **Secundario:** zonas HTF medias. **Terciario:** sobrantes del cap → panel T14. Master input `i_densidad` (Operación/Estudio/Todo) filtra por nivel.
+- **MTF.** **Es** la capa MTF: la dirección de transferencia es siempre HTF→LTF (`lookahead_off`, §0); nunca LTF→HTF. Los 3 pendientes diferidos (tag D1/H1, cuadre EQH/EQL, exactitud vela OB/FVG) se cierran aquí (metodología §6.b).
