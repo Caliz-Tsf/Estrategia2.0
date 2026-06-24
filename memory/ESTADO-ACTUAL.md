@@ -57,7 +57,7 @@
 
 **COMÚN:**
 - Leer ESTADO-ACTUAL.md + WORKPLAN-MAESTRO-V2.md Sección 3.
-- **Firma usuario F1-GATE pendiente** (formalizar aprobación Ejes 0/1/3, registrar en sesión 058).
+- **Firma usuario F1-GATE: ✅ FIRMADO (2026-06-24, S057)** — aprobación Ejes 0/1/3 formalizada. Tag `fase-1-gate-completa`.
 - CORE: 1517 líneas SHA `80fad14dd8d03758`, compila 0/0 los 3, core-sync OK.
 
 ## Notas de herramientas (Sesion-005)

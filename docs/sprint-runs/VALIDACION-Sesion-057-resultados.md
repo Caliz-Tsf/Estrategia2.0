@@ -121,4 +121,4 @@ La spec §5.10 pide "**serie de niveles**" (múltiples gaps de apertura como S/R
 ### Premium/Discount — decisión S057: mantener Opción A
 Observación del usuario (rango "camina" hacia el precio; 3 discounts amontonados; D1 con retraso de cierre diario) = **Opción A operando como diseñada**, no bug. Confirma el disparador de revisit Fase 3 hacia Opción B/híbrido. Documentado en [`decisiones-pd-rango.md` §"Nota S057"](../decisiones-pd-rango.md). Micro-pulido cosmético del "% fuera de rango" diferido/opcional.
 
-**Estado F1-GATE:** 40 conceptos + #41 MTF validados (Ejes 0/1/3; Eje 2 fuerza diferido a Paso 4). Pendiente: firma del usuario + 2 follow-ups documentados (NWOG serie T30; P/D Opción B revisit Fase 3).
+**Estado F1-GATE:** 40 conceptos + #41 MTF validados (Ejes 0/1/3; Eje 2 fuerza diferido a Paso 4). **✅ FIRMADO POR EL USUARIO (2026-06-24, S057)** — gate cerrado, tag `fase-1-gate-completa`. Follow-ups NO bloqueantes: NWOG serie (T30); P/D Opción B revisit (Fase 3).
