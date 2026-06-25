@@ -47,12 +47,21 @@
 .PARAMETER VaultRoot
     Raiz del vault. Default: D:\obsidian\boveda MENTE\Mente
 
+.PARAMETER Vision
+    Si se pasa, usa process-video-vision.ps1 (NVIDIA NIM, describe frames) en vez de
+    process-video.ps1 (whisper). Para canales MUDOS (ej. Boxxocode) donde whisper solo
+    transcribe alucinaciones del ruido/musica de fondo. -Model y -Language se ignoran.
+
 .EXAMPLE
     powershell -File scripts/process-channel.ps1 -ChannelUrl "https://www.youtube.com/@Boxxocode/videos" -Mentor "boxxocode" -MaxVideos 3
 
 .EXAMPLE
     # Prueba rapida del pipeline completo: 2 videos, 20s cada uno
     powershell -File scripts/process-channel.ps1 -ChannelUrl "<playlist>" -Mentor "Test" -MaxVideos 2 -MaxSeconds 20 -Model tiny
+
+.EXAMPLE
+    # Canal mudo: lote de 5 via vision (NVIDIA NIM) en vez de whisper
+    powershell -File scripts/process-channel.ps1 -ChannelUrl "<playlist>" -Mentor "boxxocode backtest" -Vision -PlaylistItems "1-5"
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +77,8 @@ param(
     [int]$MaxVideos = 0,
     [int]$MaxSeconds = 0,
     [string]$PlaylistItems = '',
-    [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente'
+    [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente',
+    [switch]$Vision
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,9 +92,9 @@ if (-not (Get-Command 'yt-dlp' -ErrorAction SilentlyContinue)) {
     Write-Bad "Falta 'yt-dlp' en PATH."
     exit 1
 }
-$procVideo = Join-Path $PSScriptRoot 'process-video.ps1'
+$procVideo = if ($Vision) { Join-Path $PSScriptRoot 'process-video-vision.ps1' } else { Join-Path $PSScriptRoot 'process-video.ps1' }
 if (-not (Test-Path -LiteralPath $procVideo)) {
-    Write-Bad "No existe scripts/process-video.ps1 junto a este script."
+    Write-Bad "No existe $(Split-Path -Leaf $procVideo) junto a este script."
     exit 1
 }
 
@@ -138,10 +148,14 @@ foreach ($vid in $ids) {
         '-ExecutionPolicy', 'Bypass', '-File', $procVideo,
         '-Url', $vurl,
         '-SubFolder', $subFolder,
-        '-Model', $Model,
-        '-Language', $Language
+        '-VaultRoot', $VaultRoot
     )
-    if ($MaxSeconds -gt 0) { $argList += @('-MaxSeconds', "$MaxSeconds") }
+    if ($Vision) {
+        if ($MaxSeconds -gt 0) { $argList += @('-MaxSeconds', "$MaxSeconds") }
+    } else {
+        $argList += @('-Model', $Model, '-Language', $Language)
+        if ($MaxSeconds -gt 0) { $argList += @('-MaxSeconds', "$MaxSeconds") }
+    }
 
     & powershell @argList
     if ($LASTEXITCODE -eq 0) {
