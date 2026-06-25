@@ -99,7 +99,14 @@ def main():
         i, frame_path = i_path
         ts = timestamps[i] if i < len(timestamps) else None
         print("Describiendo %s (%d/%d)..." % (frame_path.name, i + 1, len(frames)), file=sys.stderr)
-        desc = describe_frame(frame_path, api_key)
+        # No dejar que un frame ilegible (borrado por otro proceso, corrupto, etc.)
+        # tumbe el lote entero: se degrada a una nota de error por-frame.
+        try:
+            desc = describe_frame(frame_path, api_key)
+        except FileNotFoundError:
+            desc = "[frame no disponible: el archivo desaparecio antes de leerlo]"
+        except Exception as e:
+            desc = "[error al procesar el frame: %s]" % e
         return i, {"frame": frame_path.name, "timestamp": ts, "description": desc}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:

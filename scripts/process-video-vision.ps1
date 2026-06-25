@@ -107,7 +107,11 @@ if (-not $apiKey) {
     exit 1
 }
 
-if (-not $WorkDir) { $WorkDir = Join-Path $env:TEMP 'smc-video-vision' }
+# WorkDir UNICO por proceso ($PID): evita que dos lotes en paralelo (dos
+# ventanas de PowerShell) compartan %TEMP%\smc-video-vision\frames y se borren
+# los frames entre si (causaba FileNotFoundError en el script de python).
+$autoWorkDir = $false
+if (-not $WorkDir) { $WorkDir = Join-Path $env:TEMP "smc-video-vision-$PID"; $autoWorkDir = $true }
 if (-not (Test-Path -LiteralPath $WorkDir)) { New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null }
 $framesDir = Join-Path $WorkDir 'frames'
 if (Test-Path -LiteralPath $framesDir) { Remove-Item -LiteralPath $framesDir -Recurse -Force }
@@ -302,6 +306,9 @@ if (-not $KeepIntermediate) {
     Remove-Item -LiteralPath $framesDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $resultsJson -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $sceneLog -Force -ErrorAction SilentlyContinue
+    # Si la carpeta de trabajo fue auto-generada (unica por $PID), borrarla entera
+    # para no dejar basura acumulada en %TEMP%.
+    if ($autoWorkDir) { Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host ""
