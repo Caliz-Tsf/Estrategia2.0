@@ -7,6 +7,10 @@
 .mcp.json
 *.local.json
 
+# Cookies de sesion para yt-dlp (tokens de YouTube) — nunca commitear
+scripts/.secrets/
+*cookies*.txt
+
 # Herramientas que generan artefactos locales
 .code-review-graph/
 .task-master/

@@ -67,7 +67,11 @@ param(
     [string]$Language,
     [int]$MaxSeconds = 0,
     [string]$WorkDir,
-    [switch]$KeepIntermediate
+    [switch]$KeepIntermediate,
+    # Cookies OPCIONALES (OFF por defecto). Activarlas hace que yt-dlp descarte
+    # los clientes android -> n-challenge (runtime JS). Solo ultimo recurso.
+    [string]$CookiesFile = '',
+    [string]$CookiesFromBrowser = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,6 +119,16 @@ $audioPath = $null
 if ($PSCmdlet.ParameterSetName -eq 'Url') {
     $sourceKind = 'youtube'
     $sourceUrl = $Url
+    # Reintentos + pausa entre requests para sobrevivir al rate-limiting
+    # ("Sign in to confirm you're not a bot") con lotes en paralelo. El cliente
+    # android (en cada llamada) evita el n-challenge. Cookies solo si se piden.
+    $ytBaseArgs = @('--retries', '10', '--extractor-retries', '5', '--sleep-requests', '1.5')
+    if ($CookiesFile -and (Test-Path -LiteralPath $CookiesFile)) {
+        $ytBaseArgs += @('--cookies', $CookiesFile)
+        Write-Ok "Cookies: archivo $CookiesFile"
+    } elseif ($CookiesFromBrowser) {
+        $ytBaseArgs += @('--cookies-from-browser', $CookiesFromBrowser)
+    }
     Write-Step "Leyendo metadatos con yt-dlp..."
     # id|title|duration  (separador | improbable en estos campos)
     # player_client=default,android: 'default' expone los streams de AUDIO adaptativo
@@ -122,7 +136,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Url') {
     # itag 18 (mp4 360p progresivo) que YouTube sirve TRUNCADO. 'android' queda de fallback
     # porque a veces salta el chequeo anti-bot "Sign in to confirm you're not a bot".
     # (Las cookies de Chrome/Edge no se pueden leer: cifrado app-bound v127+, issue 10927.)
-    $meta = & yt-dlp --extractor-args 'youtube:player_client=default,android' --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
+    $meta = & yt-dlp @ytBaseArgs --extractor-args 'youtube:player_client=android_vr,android,ios,default' --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
     if ($LASTEXITCODE -ne 0 -or -not $meta) {
         Write-Bad "yt-dlp no pudo leer el video: $meta"
         exit 1
@@ -144,7 +158,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Url') {
     # mejor stream de audio adaptativo primero (itag 140 m4a 130k / 251 opus). Eso evita el
     # itag 18 progresivo que en videos viejos llega truncado. 140 e 18 quedan de fallback.
     # -x extrae el audio a mp3 (basta para Whisper).
-    $ytArgs = @('--extractor-args', 'youtube:player_client=default,android', '-f', 'bestaudio/140/18/best',
+    $ytArgs = $ytBaseArgs + @('--extractor-args', 'youtube:player_client=android_vr,android,ios,default', '-f', 'bestaudio/140/18/best',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '--no-warnings', '-o', $audioPath, $Url)
     if ($MaxSeconds -gt 0) {

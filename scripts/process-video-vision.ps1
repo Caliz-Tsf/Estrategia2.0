@@ -71,7 +71,13 @@ param(
     [int]$MaxFrames = 20,
     [int]$MaxSeconds = 0,
     [string]$WorkDir,
-    [switch]$KeepIntermediate
+    [switch]$KeepIntermediate,
+    # Cookies OPCIONALES (OFF por defecto). OJO: activar cookies hace que yt-dlp
+    # descarte los clientes android y caiga a web/tv -> exige el "n-challenge"
+    # (runtime JS / Deno). El anti-bloqueo real es el cliente android + reintentos
+    # (ver $ytBaseArgs abajo). Solo usar cookies como ultimo recurso.
+    [string]$CookiesFile = '',
+    [string]$CookiesFromBrowser = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -128,9 +134,25 @@ function Get-Slug([string]$text) {
     return $s
 }
 
+# Args anti-bloqueo de YouTube, se anteponen a CADA llamada de yt-dlp. Clave:
+# forzar clientes android (evitan el "n-challenge" que exige runtime JS y que NO
+# soporta cookies). Reintentos + pausa entre requests para sobrevivir al
+# rate-limiting ("Sign in to confirm you're not a bot") con lotes en paralelo.
+$ytBaseArgs = @(
+    '--extractor-args', 'youtube:player_client=android_vr,android,ios',
+    '--retries', '10', '--extractor-retries', '5', '--sleep-requests', '1.5'
+)
+# Cookies SOLO si se piden explicitamente (rompen el cliente android -> n-challenge).
+if ($CookiesFile -and (Test-Path -LiteralPath $CookiesFile)) {
+    $ytBaseArgs += @('--cookies', $CookiesFile)
+    Write-Ok "Cookies: archivo $CookiesFile"
+} elseif ($CookiesFromBrowser) {
+    $ytBaseArgs += @('--cookies-from-browser', $CookiesFromBrowser)
+}
+
 # --- 1. Metadatos ---
 Write-Step "Leyendo metadatos con yt-dlp..."
-$meta = & yt-dlp --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
+$meta = & yt-dlp @ytBaseArgs --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
 if ($LASTEXITCODE -ne 0 -or -not $meta) {
     Write-Bad "yt-dlp no pudo leer el video: $meta"
     exit 1
@@ -146,7 +168,7 @@ $slug = Get-Slug $title
 $videoPath = Join-Path $WorkDir "$slug.mp4"
 # 137=1080p primero: frames mas nitidos para que NVIDIA NIM lea texto en pantalla
 # (parametros, codigo, valores). Cae a 720p/480p/360p y por ultimo al 18 progresivo.
-$ytArgs = @('-f', '137/136/135/134/18/best',
+$ytArgs = $ytBaseArgs + @('-f', '137/136/135/134/18/best',
             '--no-warnings', '-o', $videoPath, $Url)
 if ($MaxSeconds -gt 0) {
     $ytArgs = @('--download-sections', "*0-$MaxSeconds") + $ytArgs

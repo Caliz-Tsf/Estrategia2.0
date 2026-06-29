@@ -78,7 +78,12 @@ param(
     [int]$MaxSeconds = 0,
     [string]$PlaylistItems = '',
     [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente',
-    [switch]$Vision
+    [switch]$Vision,
+    # Cookies OPCIONALES (OFF por defecto). Activarlas rompe el cliente android
+    # (-> n-challenge). El anti-bloqueo real es cliente android + reintentos.
+    # Si se pasan, se usan en flat-playlist y se propagan a cada proceso hijo.
+    [string]$CookiesFile = '',
+    [string]$CookiesFromBrowser = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,7 +121,19 @@ Write-Step "Destino: $destDir"
 
 # --- 1. Resolver la lista de IDs de video (sin descargar) ---
 Write-Step "Resolviendo lista de videos con yt-dlp (--flat-playlist)..."
-$ytArgs = @('--flat-playlist', '--no-warnings', '--print', '%(id)s')
+# Args anti-bloqueo (cliente android evita el n-challenge; reintentos + pausa
+# sobreviven al rate-limiting). Cookies solo si se piden explicitamente.
+$ytBaseArgs = @(
+    '--extractor-args', 'youtube:player_client=android_vr,android,ios',
+    '--retries', '10', '--extractor-retries', '5', '--sleep-requests', '1.5'
+)
+if ($CookiesFile -and (Test-Path -LiteralPath $CookiesFile)) {
+    $ytBaseArgs += @('--cookies', $CookiesFile)
+    Write-Ok "Cookies: archivo $CookiesFile"
+} elseif ($CookiesFromBrowser) {
+    $ytBaseArgs += @('--cookies-from-browser', $CookiesFromBrowser)
+}
+$ytArgs = $ytBaseArgs + @('--flat-playlist', '--no-warnings', '--print', '%(id)s')
 if ($PlaylistItems) {
     # Lote explicito (ej. "6-10"): prioridad sobre -MaxVideos.
     $ytArgs = @('--playlist-items', $PlaylistItems) + $ytArgs
@@ -150,6 +167,8 @@ foreach ($vid in $ids) {
         '-SubFolder', $subFolder,
         '-VaultRoot', $VaultRoot
     )
+    if ($CookiesFile)        { $argList += @('-CookiesFile', $CookiesFile) }
+    if ($CookiesFromBrowser) { $argList += @('-CookiesFromBrowser', $CookiesFromBrowser) }
     if ($Vision) {
         if ($MaxSeconds -gt 0) { $argList += @('-MaxSeconds', "$MaxSeconds") }
     } else {
