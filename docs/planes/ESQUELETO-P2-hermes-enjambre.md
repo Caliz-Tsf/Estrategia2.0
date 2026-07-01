@@ -195,6 +195,50 @@ Cuando la síntesis (⑨) marca una entrada **accionable**, se envía **notifica
 
 ---
 
+## §2.10 — Límite máximo de agentes: roster (≈ilimitado) vs concurrencia (tope DURO = 3)
+
+> **Origen (S074, 2026-06-30):** pregunta del usuario — *"¿cuántos agentes máximo puede tener el enjambre en Hermes?"*. Respuesta aterrizada contra **`~/.hermes/config.yaml`** (no de memoria). La clave: **"máximo de agentes" son DOS preguntas distintas** y solo una tiene tope duro.
+
+### §2.10.1 — Dos ejes que no se confunden
+
+- **Eje ROSTER (cuántos agentes puedo *definir*) → ≈ ilimitado.** Cada agente es solo un `profile/` + `skill/` + entrada en `swarm.yaml`. **Hoy hay 2** (`mentor-no-soy-liquidez`, `mentor-ict`). Definir 10 no cuesta runtime — cuesta **mantenimiento y grounding** (regla §0.6: un mentor sin curso bajado no existe). El límite aquí es de *disciplina*, no técnico.
+- **Eje CONCURRENCIA (cuántos corren *a la vez*) → tope DURO = 3.** Lo impone Hermes, no el diseño. Citado a `config.yaml`:
+
+| Setting (`config.yaml`) | Valor | Qué acota |
+|---|---|---|
+| `delegation.max_concurrent_children` | **3** | **Máx. agentes en paralelo por ola del orquestador.** ← cuello de botella real |
+| `delegation.max_spawn_depth` | **1** | Jerarquía **plana**: orquestador (nivel 0) → agentes (nivel 1). Sin sub-enjambres. |
+| `delegation.child_timeout_seconds` | **600** | 10 min por agente o se mata (acota debates colgados). |
+| `delegation.max_iterations` | **50** | Tope de iteraciones del orquestador. |
+| `kanban.auto_decompose_per_tick` | **3** | El kanban solo abre **3 tareas-hijas por tick**. |
+| `kanban.dispatch_interval_seconds` | **60** | Un tick cada 60 s (ritmo de las olas vía kanban). |
+| `cron.max_parallel_jobs` | `null` | Sin cap explícito de crons → el Vigía corre serializado (no compite con el debate). |
+
+### §2.10.2 — El cuello de botella NO es la cuota, es la concurrencia
+
+- **La cuota NIM (40 req/min, regla §0.5/§2.9.3) NO es el límite.** Una ola de 3 agentes en ronda 1+2 ≈ **6–12 llamadas** repartidas en el minuto; incluso 2–3 olas seguidas caben de sobra en 40/min. El que ata es `max_concurrent_children: 3`.
+- **Encaje exacto con `max_spawn_depth: 1`:** *1 orquestador + 3 agentes planos por ola*. La config ya dibuja la forma del debate.
+
+### §2.10.3 — Diseño adoptado: **debate en OLAS DE 3**
+
+Consecuencia directa del tope. **No se convoca a todos los mentores a la vez** — se debate por olas:
+
+1. **Vigía/Router queda APARTE** (no cuenta en las 3): es un **cron**, no un *child* del orquestador, y es el único que toca TV (regla §0.3). No compite por los 3 slots.
+2. **Ola = hasta 3 agentes** que el orquestador lanza en paralelo (`broadcast` del Swarm → 3 children). Hacen ronda 1/2 y comentan en la tarea del Kanban.
+3. **Si el roster > 3**, van en **olas sucesivas** (tick de 60 s, `auto_decompose_per_tick: 3`); el **Supervisor de Confluencia** consolida los votos de todas las olas al final (determinista, no recalcula §4.8 — regla §0.8).
+
+**Composición sugerida de la ola del piloto (§6):** `mentor-ict` + `mentor-no-soy-liquidez` + `esceptico` = **1 sola ola de 3**. El roster del piloto (2 mentores reales, regla §0.12) cabe entero en una ola → cero esperas. Al sumar E1–E6 y más mentores, se agrupan en **olas temáticas** (p. ej. ola "estructura" = E1+E2+escéptico; ola "liquidez" = E5+mentor+escéptico).
+
+### §2.10.4 — Decisión: mantener el tope en 3 para el piloto (y por qué NO subirlo aún)
+
+- **Técnico:** 3 es el default actual y es estable. Subir `max_concurrent_children` a 5–6 sería viable **por cuota** (NIM aguanta), pero arriesga estabilidad del gateway y choca con `child_timeout_seconds: 600` si las olas se solapan. Regla §0.12 (piloto mínimo primero) → no tocar.
+- **De diseño (el argumento fuerte):** más agentes simultáneos **NO mejora la calidad del debate** — la empeora. N agentes a la vez con doctrina compartida = **más eco** (espejismo de consenso, §3). El límite de 3 es **saludable**: fuerza debate enfocado (2 proponentes + 1 Escéptico con modelo distinto) y deja la consolidación al Supervisor. El valor está en la discrepancia, no en el número.
+- **Cuándo subirlo (gate `⏳ [impl]`):** solo si el roster operativo crece tanto que las olas sucesivas introducen latencia inaceptable para el copiloto en vivo, **y** la medición de RPD/estabilidad NIM lo respalda. Subir como mucho a **5** y re-medir. Nunca por "tener más voces".
+
+> **Resumen de una línea:** *roster = el que quieras (con curso); concurrencia = 3 por ola, debate en olas, Vigía aparte. El tope de 3 es feature, no bug (anti-eco §3).* La **sala-espejo** que haga visible cada ola (WhatsApp/Discord) está **diferida** a su sesión — ver memoria `enjambre-sala-debate-discord-vs-whatsapp`.
+
+---
+
 ## §3 — Roster del enjambre (4 familias) y cómo se instancian
 
 De `MODULO-MENTORES-WORKFLOW.md §Roster` + `PLAN-modulo-mentores-swarm.md §C`. La **plantilla concreta** de cada agente está en `PLANTILLA-agente-mentor.md`.
@@ -214,6 +258,48 @@ De `MODULO-MENTORES-WORKFLOW.md §Roster` + `PLAN-modulo-mentores-swarm.md §C`.
 - **Norms (qué puede):** dominio (en su `SKILL.md`) + **riesgo GLOBAL en código** (regla §0.10) + validador determinista en el Orchestrator.
 
 > **Espejismo de consenso (lectura honesta, riesgo #1).** Los mentores SMC coinciden porque comparten el mismo libro de jugadas → fuentes **correlacionadas, no confirmaciones independientes**. Que N agentes voten igual **no** sube la probabilidad. **El valor del panel está en la DISCREPANCIA:** dos hipótesis distintas se backtestean por separado; la coincidencia dispara *investigar*, el IS/OOS **decide**. Por eso el **Escéptico** corre un **modelo distinto** del proponente y es **independiente** (no juzga su propia señal).
+
+---
+
+## §3.1 — Filosofía del roster + roster completo + regla de lanzamiento (decisiones S074)
+
+> **Origen (S074, 2026-06-30):** el usuario fijó la **filosofía del enjambre**, ascendió Wyckoff a agente, definió Chart Fanatic como multi-estrategia y estableció la **regla de lanzamiento**. Estas decisiones **mandan** sobre el roster genérico de §3.
+
+### §3.1.1 — Filosofía: confluencia entre variantes + diversidad + selección darwiniana
+
+- **No se busca consenso, se busca CONFLUENCIA.** Cada mentor aplica SMC/SMC-ICT **a su manera**; donde **coinciden las variantes** = confluencia fuerte. El parecido entre mentores SMC no es ruido a eliminar — es justo la señal que se mide.
+- **NO solo SMC → diversidad real.** Se suman agentes de **otras estrategias** (Wyckoff, Chart Fanatic…) que **apoyan o NO apoyan** la decisión. Son el contrapeso que evita la cámara de eco SMC (refina §3, "espejismo de consenso": la diversidad no-SMC es la fuente *independiente* que sí sube probabilidad).
+- **Selección darwiniana `[ADR-007]`.** El **track-record/score por agente** (§2.6) decide quién se queda. El agente que no aporta a las decisiones **se saca**. Los tres mecanismos anti-eco = diversidad no-SMC + Escéptico (§3) + poda por score.
+
+### §3.1.2 — Familia NUEVA: "Diversidad / otras estrategias" (no-SMC)
+
+Se añade a las 4 familias de §3. Votan **apoyo/no-apoyo** con su propia lente, sujetos a poda por score:
+- **Wyckoff** — **asciende de referencia (§5 #12) a AGENTE propio**. Conceptos propios: acumulación/distribución, **rango vs tendencia**, springs/upthrust, contexto de mercado. Aporte específico: decir *"el mercado está en rango / en movimiento"* → clave para decidir **entradas swing** y si conviene entrar. Se construye **sin bajar curso de YouTube** (teoría canónica + repo `YoungCan-Wang/WyckoffTradingAgent`).
+- **Chart Fanatic** (`@chart-fanatics`) — canal de **entrevistas a varios traders**. NO es una sola voz: es **AGENTE multi-estrategia** que habla de **distintas estrategias** en la discusión (cantera de diversidad). Requiere procesar entrevistas (más trabajo que Wyckoff).
+- **Mind Math Money** (`@MindMathMoney`) · **CallistoFX** (`@callistofx`) — `⏳ por clasificar` (revisar canal antes de asignar familia SMC vs diversidad).
+
+### §3.1.3 — Roster completo candidato (universo cerrado, ~24)
+
+| Familia | Agentes | Estado |
+|---|---|---|
+| **Mentores SMC** | ICT ✅ · NSL ✅ · Profittrading · TJ Trading · Fede Esses | 2 listos; 3 con `COMANDOS-*` listos, falta bajar curso→ficha→skill→profile |
+| **Diversidad / otras estrategias** | Wyckoff · Chart Fanatic · (MMM, CallistoFX `⏳ clasificar`) | construir todos |
+| **Estrategia/EA** (ideas, no doctrina) | Boxxocode | pipeline visión parcial; falta ficha |
+| **Expertos-concepto** (vs Pine, sin curso) | E1 Estructura · E2 OB · E3 FVG · E4 P/D&OTE · E5 Liquidez · E6 Tiempo&Sesiones | construir (6), anclados a `reglas-smc-ict.md` |
+| **Funcionales** (contexto externo) | Noticias(→gate) · Order Flow · Tendencias-MTF/Macro | construir (3), **dependen de fuentes/MCPs aún no montados** |
+| **Control** | Vigía/Router · Supervisor de Confluencia · Orchestrator · Entrenador · Escéptico | construir (5), chicos, sin curso |
+
+### §3.1.4 — Regla de LANZAMIENTO (decisión dura del usuario, S074)
+
+> **NO invierte la regla §0.12 — la matiza en dos fases:**
+> - **PRUEBAS (incremental, sigue válido):** se pueden construir y probar piezas sueltas (piloto §6, chat 1:1 con cada agente, medir cuota/ruido). Aquí el piloto mínimo de 2 mentores del §6 sigue vigente **para probar**.
+> - **LANZAMIENTO operativo del enjambre (revisar TV + workflow completo + optimizar la discusión/toma de decisiones):** **sí o sí TODOS los agentes del roster deben estar listos** (ficha + skill + profile + todo lo estipulado en el plan) **y probados 1:1**. El swarm no se enciende en modo operativo con un subset — porque el objetivo de esa fase es **evaluar y optimizar la DISCUSIÓN completa** (cómo mejora la conversación, cómo se optimiza para que tomen decisiones), y eso exige el panel entero.
+
+### §3.1.5 — Decisiones ABIERTAS (`⏳ [impl]`, no fijadas en S074)
+
+1. **Alcance exacto de "todos"** para la 1ª instancia: (nivel 1) solo opinión+control ~13 · (nivel 2, recomendado) opinión+Expertos E1–E6+control ~19, Funcionales después por depender de datos externos · (nivel 3) el plan completo ~24. **Pendiente de decisión del usuario.**
+2. **Clasificar** Mind Math Money y CallistoFX (revisar canal → familia SMC vs diversidad).
+3. **Cuáles mentores "sí o sí"** vs opcionales dentro del roster.
 
 ---
 
@@ -261,7 +347,7 @@ De `MODULO-MENTORES-WORKFLOW.md §Roster` + `PLAN-modulo-mentores-swarm.md §C`.
 | 9 | **CallMeBot** (API, no repo) | Notificador copiloto | **Adoptar AHORA** (elevado de Fase 4-5) | §2.8 | **Canal de entrega del copiloto** (push Telegram/WhatsApp). Decisión del usuario S033 → ya no se difiere. **Solo la alerta, nada sensible** (publica a un tercero). |
 | 10 | **`chopratejas/headroom`** | Compresión de contexto | **Diferir** | Solo si topan límites | Hermes ya comprime (`compression.enabled`). Reconsiderar solo si los agentes topan límites leyendo knowledge crudo. No es palanca para el flujo Pine/Claude Code. |
 | 11 | **MT5 MCPs** (`ariadng/...`, `Qoyyuum/...`) | Laboratorio MT5 | **Diferir a Fase 4** | Fase 4 | Solo-lectura para laboratorio; la escritura la hace el EA nativo. No instalar ahora. |
-| 12 | **`YoungCan-Wang/WyckoffTradingAgent`** | Estructura/movimiento de mercado | **Adoptar como referencia** (no software) | Diferir | Lógica Wyckoff precio-volumen (acumulación/distribución) ≈ Power of 3 / MMXM (P1 Ruta C). Referencia para el experto de Estructura (E1) y los modelos de entrada del motor EA. Cruzar su lógica vs nuestra definición; no copiar sin verificar (cero invención). |
+| 12 | **`YoungCan-Wang/WyckoffTradingAgent`** | Diversidad / movimiento de mercado | **Adoptar como AGENTE propio (S074)** | 1ª instancia | **Ascendido de referencia a agente (§3.1.2).** Conceptos Wyckoff propios (acumulación/distribución, rango vs tendencia, springs/upthrust) → opina si el mercado está en rango o en movimiento; aporta a entradas swing. Se construye sin curso YouTube (teoría canónica + este repo). No copiar sin verificar contra TV (cero invención). |
 | 13 | **`6551Team/opennews-mcp`** | Funcional Noticias + **gate determinista** | **Probar (alta)** | Tras piloto §6 | 84+ fuentes + impact-scoring/trading-signal + streaming. **Candidato a la fuente del gate de noticias** que ADR-005 dejó como **"TBD"**. Verificar: cobertura de calendario macro FX (NFP, etc.), latencia, que el veto sea **binario/determinista** (no un LLM decidiendo). |
 | 14 | **`LLMQuant/data-mcp`** | Funcional Macro/Tendencias-MTF | **Probar** | Tras piloto §6 | "Knowledge harness for AI-native finance": macro indicators, news, datos. Da contexto a los Funcionales (ya flagueado en `BRIEFING-v2 §6`). Evaluar vs `opennews-mcp`; no apilar dos fuentes de lo mismo. |
 
@@ -284,6 +370,8 @@ De `BRIEFING-v2 §8`. **No construir el roster completo de golpe** (regla §0.12
 6. **Deuda V1 / higiene:** retirar `hermes-proxy.mjs` (OpenRouter, obsoleto con Gemini nativo); archivar skills V1 (`consult-mentor`, `mentor-extract-profile`, `mentor-transcribe`) sin borrar (backup).
 
 **Gate de cada fase:** cuota medida + ruido aceptable + 0 colisiones TV + greenlight humano operativo. **MT5 = Fase 4** (no antes). **Lo que se puede pilotar YA:** todo lo de los pasos 1–5 (es Hermes, no Pine/EA).
+
+> **⚠️ Regla de LANZAMIENTO (S074, §3.1.4):** los pasos 1–6 de arriba son **para PROBAR piezas** (incremental, sigue válido). Pero el **arranque operativo del enjambre** (revisar TV + workflow completo + optimizar la discusión/toma de decisiones) exige **sí o sí TODOS los agentes del roster completo (§3.1.3) listos y probados 1:1**. No se lanza en modo operativo con un subset.
 
 ---
 
