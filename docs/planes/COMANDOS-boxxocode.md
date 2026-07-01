@@ -39,9 +39,9 @@
 |---|---|---:|---|---|
 | **Custom Indicators EA Builder** | indicadores propios para EAs | 13 | `boxxocode-indicators` | alta (corta) |
 | **Advance Money Management** | gestion de riesgo/dinero en EA | 100 | `boxxocode-moneymgmt` | media |
-| **Advance Code fxDreema** | logica/codigo avanzado de EAs | 87 | `boxxocode-code` | media |
+| **Advance Code fxDreema** | logica/codigo avanzado de EAs | 89 | `boxxocode-code` | media |
 | **RobotTrade Courses fxDreema** | cursos de bots de trading | 100 | `boxxocode-robottrade` | media |
-| **AI trading bot** | bots con IA | 76 | `boxxocode-aibot` | baja |
+| **AI trading bot** | bots con IA | 79 | `boxxocode-aibot` | baja |
 | ~~Backtest Trading Strategy EA-MT5~~ | descartada -- backtest de 1 estrategia, no patron | ~~40~~ | `boxxocode-backtest` | descartada |
 
 > Primero **Custom Indicators (13, 3 lotes)** -- la mas chica, gate de calidad. Si las notas
@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMTltvle0shVPj2J5hueqQwx" -Mentor "boxxocode moneymgmt" -Vision -PlaylistItems "96-100"
 ```
 
-## 3. Advance Code fxDreema (87 -> 18 lotes)
+## 3. Advance Code fxDreema (89 -> 18 lotes)
 URL: <https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa>
 ```powershell
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa" -Mentor "boxxocode code" -Vision -PlaylistItems "1-5"
@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa" -Mentor "boxxocode code" -Vision -PlaylistItems "71-75"
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa" -Mentor "boxxocode code" -Vision -PlaylistItems "76-80"
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa" -Mentor "boxxocode code" -Vision -PlaylistItems "81-85"
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa" -Mentor "boxxocode code" -Vision -PlaylistItems "86-87"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQSXqTMA9elkOCM2-nEvuFa" -Mentor "boxxocode code" -Vision -PlaylistItems "86-89"
 ```
 
 ## 4. RobotTrade Courses fxDreema (100 -> 20 lotes)
@@ -130,7 +130,7 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMS-P4uC4fiIYu8eoH58fj7K" -Mentor "boxxocode robottrade" -Vision -PlaylistItems "96-100"
 ```
 
-## 5. AI trading bot (76 -> 16 lotes)
+## 5. AI trading bot (79 -> 16 lotes)
 URL: <https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_>
 ```powershell
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_" -Mentor "boxxocode aibot" -Vision -PlaylistItems "1-5"
@@ -148,7 +148,7 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_" -Mentor "boxxocode aibot" -Vision -PlaylistItems "61-65"
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_" -Mentor "boxxocode aibot" -Vision -PlaylistItems "66-70"
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_" -Mentor "boxxocode aibot" -Vision -PlaylistItems "71-75"
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_" -Mentor "boxxocode aibot" -Vision -PlaylistItems "76"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLtefuVjyVOMQsYYjOuu996HcmY-dCg5P_" -Mentor "boxxocode aibot" -Vision -PlaylistItems "76-79"
 ```
 
 ---
