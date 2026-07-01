@@ -183,15 +183,17 @@ if ($CookiesFile -and (Test-Path -LiteralPath $CookiesFile)) {
 
 # --- 1. Metadatos ---
 Write-Step "Leyendo metadatos con yt-dlp..."
-$meta = & yt-dlp @ytBaseArgs --no-warnings --skip-download --print "%(id)s|%(title)s|%(duration)s" $Url 2>&1
+$meta = & yt-dlp @ytBaseArgs --no-warnings --skip-download --print "%(id)s|%(duration)s|%(title)s" $Url 2>&1
 if ($LASTEXITCODE -ne 0 -or -not $meta) {
     Write-Bad "yt-dlp no pudo leer el video: $meta"
     exit 1
 }
+# Orden id|duration|title (no title|duration): el titulo puede contener "|" y
+# rompe el parseo si va antes que duration (duration/id nunca traen ese caracter).
 $parts = ($meta | Select-Object -Last 1) -split '\|', 3
 $vid = $parts[0]
-$title = if ($parts.Count -ge 2 -and $parts[1]) { $parts[1] } else { $vid }
-$durationSec = if ($parts.Count -ge 3) { $parts[2] } else { '' }
+$durationSec = if ($parts.Count -ge 2) { $parts[1] } else { '' }
+$title = if ($parts.Count -ge 3 -and $parts[2]) { $parts[2] } else { $vid }
 Write-Ok "Video: $title ($vid) | dur=$durationSec s"
 $slug = Get-Slug $title
 
