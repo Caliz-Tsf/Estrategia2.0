@@ -16,6 +16,24 @@
 > UNA estrategia/EA particular (resultados de cuenta, no metodo generalizable), no aporta
 > patron reusable. Se deja documentada al final por si cambia el criterio, pero NO se corre.
 
+## Pipeline mejorado (A/B S075) -- ya es el DEFAULT, los comandos de abajo no cambian
+> El A/B del Modulo 2 (video `BEStJddJjhM`) mostro que la DETECCION DE ESCENA
+> submuestreaba: en un tutorial de 61 min daba 2 frames en la fase de PREPARACION
+> (0-35 min) y amontonaba 10 en la edicion final. Cambios adoptados:
+>
+> 1. **Muestreo UNIFORME** (`-UniformSample`, default en `process-channel.ps1 -Vision`):
+>    extrae `-MaxFrames` (default **40**) frames equiespaciados en todo el video
+>    (intervalo = duracion/MaxFrames). Cubre por igual preparacion y ejecucion.
+> 2. **Prompt NVIDIA endurecido + fallback**: pide texto verbatim entre comillas y
+>    "no se lee" en vez de adivinar (menos relleno/alucinacion); si el modelo rechaza
+>    un frame (tipico en capturas de ChatGPT -> falso positivo de copyright), reintenta
+>    con un prompt neutro. Verificado 0/5 rechazos en frames reales.
+> 3. **`-Provider nvidia|gemini`**: NVIDIA es el motor de barrido (free, 40 req/min, escala).
+>    Gemini 2.5 (`gemini_vision_describe.py`) queda como spot-check puntual -- su free tier
+>    (~10 RPM / cupo diario) se agota con UN solo video de 40 frames, NO sirve para volumen.
+>
+> Overrides opcionales: `-MaxFrames N`, `-Provider gemini`, `-SceneDetect` (modo viejo).
+
 ## Clasificacion del canal (no hay "curso madre" unico -- es un toolbox)
 | Playlist | Rol | Videos | Slug / carpeta | Prioridad |
 |---|---|---:|---|---|

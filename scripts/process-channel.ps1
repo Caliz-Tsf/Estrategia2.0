@@ -79,6 +79,12 @@ param(
     [string]$PlaylistItems = '',
     [string]$VaultRoot = 'D:\obsidian\boveda MENTE\Mente',
     [switch]$Vision,
+    # Vision: frames por video (muestreo uniforme) y proveedor de vision.
+    [int]$MaxFrames = 40,
+    [ValidateSet('nvidia', 'gemini')]
+    [string]$Provider = 'nvidia',
+    # Volver a la deteccion de escena antigua (no recomendado; submuestrea tutoriales).
+    [switch]$SceneDetect,
     # Cookies OPCIONALES (OFF por defecto). Activarlas rompe el cliente android
     # (-> n-challenge). El anti-bloqueo real es cliente android + reintentos.
     # Si se pasan, se usan en flat-playlist y se propagan a cada proceso hijo.
@@ -170,6 +176,8 @@ foreach ($vid in $ids) {
     if ($CookiesFile)        { $argList += @('-CookiesFile', $CookiesFile) }
     if ($CookiesFromBrowser) { $argList += @('-CookiesFromBrowser', $CookiesFromBrowser) }
     if ($Vision) {
+        $argList += @('-MaxFrames', "$MaxFrames", '-Provider', $Provider)
+        if (-not $SceneDetect) { $argList += '-UniformSample' }
         if ($MaxSeconds -gt 0) { $argList += @('-MaxSeconds', "$MaxSeconds") }
     } else {
         $argList += @('-Model', $Model, '-Language', $Language)

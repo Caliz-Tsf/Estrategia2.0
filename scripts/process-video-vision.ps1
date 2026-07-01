@@ -69,6 +69,14 @@ param(
     [int]$FallbackIntervalSec = 15,
     [int]$MinScenes = 3,
     [int]$MaxFrames = 20,
+    # Proveedor de vision: nvidia (llama-3.2-90b-vision, default) | gemini (2.5).
+    [ValidateSet('nvidia', 'gemini')]
+    [string]$Provider = 'nvidia',
+    [string]$GeminiModel = 'gemini-2.5-flash',
+    # Muestreo UNIFORME: ignora la deteccion de escena y extrae MaxFrames frames
+    # equiespaciados en todo el video (intervalo = duracion/MaxFrames). Cubre por
+    # igual la fase de preparacion y la de ejecucion; recomendado para tutoriales.
+    [switch]$UniformSample,
     [int]$MaxSeconds = 0,
     [string]$WorkDir,
     [switch]$KeepIntermediate,
@@ -93,24 +101,47 @@ foreach ($t in @('yt-dlp', 'ffmpeg', 'ffprobe', 'python')) {
         exit 1
     }
 }
-$describeScript = Join-Path $PSScriptRoot 'nvidia_vision_describe.py'
+$describeName = if ($Provider -eq 'gemini') { 'gemini_vision_describe.py' } else { 'nvidia_vision_describe.py' }
+$describeScript = Join-Path $PSScriptRoot $describeName
 if (-not (Test-Path -LiteralPath $describeScript)) {
-    Write-Bad "No existe scripts/nvidia_vision_describe.py."
+    Write-Bad "No existe scripts/$describeName."
     exit 1
 }
+$modelLabel = if ($Provider -eq 'gemini') { $GeminiModel } else { 'meta/llama-3.2-90b-vision-instruct' }
 
-# --- 0b. Resolver NVIDIA_API_KEY ---
-$apiKey = $env:NVIDIA_API_KEY
-if (-not $apiKey) {
-    $envFile = Join-Path $env:USERPROFILE '.hermes\.env'
-    if (Test-Path -LiteralPath $envFile) {
-        $line = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^NVIDIA_API_KEY=' } | Select-Object -First 1
-        if ($line) { $apiKey = $line -replace '^NVIDIA_API_KEY=', '' }
+# --- 0b. Resolver API key segun proveedor ---
+if ($Provider -eq 'gemini') {
+    $apiKey = $env:GEMINI_API_KEY
+    if (-not $apiKey) { $apiKey = $env:GOOGLE_API_KEY }
+    if (-not $apiKey) {
+        # Fallback: leer google.api_key del bloque providers de ~/.hermes/config.yaml
+        $cfg = Join-Path $env:USERPROFILE '.hermes\config.yaml'
+        if (Test-Path -LiteralPath $cfg) {
+            $inGoogle = $false
+            foreach ($ln in Get-Content -LiteralPath $cfg) {
+                if ($ln -match '^\s{2}google:\s*$') { $inGoogle = $true; continue }
+                if ($inGoogle -and $ln -match '^\s{2}\S') { $inGoogle = $false }
+                if ($inGoogle -and $ln -match '^\s+api_key:\s*(.+)$') { $apiKey = $Matches[1].Trim(); break }
+            }
+        }
     }
-}
-if (-not $apiKey) {
-    Write-Bad "No se encontro NVIDIA_API_KEY (ni en entorno ni en ~/.hermes/.env)."
-    exit 1
+    if (-not $apiKey) {
+        Write-Bad "No se encontro GEMINI_API_KEY/GOOGLE_API_KEY ni google.api_key en config.yaml."
+        exit 1
+    }
+} else {
+    $apiKey = $env:NVIDIA_API_KEY
+    if (-not $apiKey) {
+        $envFile = Join-Path $env:USERPROFILE '.hermes\.env'
+        if (Test-Path -LiteralPath $envFile) {
+            $line = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^NVIDIA_API_KEY=' } | Select-Object -First 1
+            if ($line) { $apiKey = $line -replace '^NVIDIA_API_KEY=', '' }
+        }
+    }
+    if (-not $apiKey) {
+        Write-Bad "No se encontro NVIDIA_API_KEY (ni en entorno ni en ~/.hermes/.env)."
+        exit 1
+    }
 }
 
 # WorkDir UNICO por proceso ($PID): evita que dos lotes en paralelo (dos
@@ -183,21 +214,34 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $videoPath)) {
 }
 Write-Ok "Video: $videoPath"
 
-# --- 3. Extraer frames por cambio de escena ---
-# NOTA: se usa Start-Process (redirige stderr a nivel de SO) en vez de
-# "ffmpeg ... 2> archivo" -- con $ErrorActionPreference='Stop', PowerShell 5.1
-# convierte cada linea de stderr de ffmpeg (banner de version, logs normales)
-# en un NativeCommandError fatal aunque ffmpeg no haya fallado.
-Write-Step "Detectando cambios de escena (umbral=$SceneThreshold)..."
+# --- 3. Extraer frames ---
+# Modo UNIFORME: se salta la deteccion de escena y fuerza el muestreo equiespaciado
+# de abajo (intervalo derivado de la duracion real del video).
+# NOTA: en el modo por-escena se usa Start-Process (redirige stderr a nivel de SO)
+# en vez de "ffmpeg ... 2> archivo" -- con $ErrorActionPreference='Stop', PowerShell
+# 5.1 convierte cada linea de stderr de ffmpeg en un NativeCommandError fatal aunque
+# ffmpeg no haya fallado.
 $sceneLog = Join-Path $WorkDir 'scene.log'
-$framePattern = Join-Path $framesDir 'frame_%03d.jpg'
-$ffArgsScene = @('-i', $videoPath, '-vf', "select='gt(scene,$SceneThreshold)',showinfo", '-vsync', 'vfr', $framePattern, '-y')
-$proc = Start-Process -FilePath 'ffmpeg' -ArgumentList $ffArgsScene -NoNewWindow -Wait -RedirectStandardError $sceneLog -PassThru
-if ($proc.ExitCode -ne 0) {
-    Write-Bad "ffmpeg fallo en la deteccion de escena (exit $($proc.ExitCode)). Ver $sceneLog"
-    exit 1
+if ($UniformSample) {
+    $dur = [double]$durationSec
+    if (-not $dur -or $dur -le 0) { $dur = 60 }
+    if ($MaxSeconds -gt 0 -and $MaxSeconds -lt $dur) { $dur = $MaxSeconds }
+    $FallbackIntervalSec = [Math]::Max(1, [int]([Math]::Floor(($dur - 2) / [Math]::Max(1, $MaxFrames))))
+    $MinScenes = [int]::MaxValue   # fuerza la rama de muestreo equiespaciado
+    $frameFiles = @()              # sin frames de escena -> cae al else de abajo
+    Write-Step "Muestreo uniforme: $MaxFrames frames cada ~$FallbackIntervalSec s (dur=$([int]$dur)s)..."
 }
-$frameFiles = Get-ChildItem -LiteralPath $framesDir -Filter 'frame_*.jpg' | Sort-Object Name
+else {
+    Write-Step "Detectando cambios de escena (umbral=$SceneThreshold)..."
+    $framePattern = Join-Path $framesDir 'frame_%03d.jpg'
+    $ffArgsScene = @('-i', $videoPath, '-vf', "select='gt(scene,$SceneThreshold)',showinfo", '-vsync', 'vfr', $framePattern, '-y')
+    $proc = Start-Process -FilePath 'ffmpeg' -ArgumentList $ffArgsScene -NoNewWindow -Wait -RedirectStandardError $sceneLog -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Bad "ffmpeg fallo en la deteccion de escena (exit $($proc.ExitCode)). Ver $sceneLog"
+        exit 1
+    }
+    $frameFiles = Get-ChildItem -LiteralPath $framesDir -Filter 'frame_*.jpg' | Sort-Object Name
+}
 
 $timestamps = @()
 if ($frameFiles.Count -ge $MinScenes) {
@@ -268,9 +312,13 @@ $utf8NoBomTs = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText((Join-Path $framesDir 'frames_timestamps.txt'), ($tsLines -join "`n"), $utf8NoBomTs)
 
 # --- 4. Describir frames via NVIDIA NIM ---
-Write-Step "Describiendo $($frameFiles.Count) frames via NVIDIA NIM (puede tardar)..."
+Write-Step "Describiendo $($frameFiles.Count) frames via $Provider ($modelLabel) (puede tardar)..."
 $resultsJson = Join-Path $WorkDir 'descriptions.json'
-& python $describeScript $framesDir $apiKey $resultsJson
+if ($Provider -eq 'gemini') {
+    & python $describeScript $framesDir $apiKey $resultsJson $GeminiModel
+} else {
+    & python $describeScript $framesDir $apiKey $resultsJson
+}
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $resultsJson)) {
     Write-Bad "Fallo la descripcion de frames via NVIDIA NIM."
     exit 1
@@ -302,7 +350,7 @@ $md = @"
 title: "$titleEsc"
 source: $Url
 fuente_tipo: youtube-vision
-modelo_vision: meta/llama-3.2-90b-vision-instruct
+modelo_vision: $modelLabel
 duracion_seg: $durationSec
 frames_descritos: $($descriptions.Count)
 procesado: $nowIso
@@ -312,7 +360,7 @@ tags: [teoria-smc, vision, boxxocode]
 # $title (descripcion visual)
 
 > Fuente: $Url
-> Frames descritos con NVIDIA NIM ($($descriptions.Count) frames) el $nowIso.
+> Frames descritos con $Provider / $modelLabel ($($descriptions.Count) frames) el $nowIso.
 > Pipeline visual (sin audio) -- canal mudo.
 
 $body

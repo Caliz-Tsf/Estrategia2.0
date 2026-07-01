@@ -21,40 +21,56 @@ from pathlib import Path
 API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 MODEL = "meta/llama-3.2-90b-vision-instruct"
 MAX_WORKERS = 5  # free tier NVIDIA NIM: 40 req/min, 5 en paralelo no lo excede
+# Prompt principal: tono SUAVE a proposito. Un prompt agresivo ("transcribe
+# TEXTUALMENTE", "prohibido...") dispara el filtro de copyright/seguridad del
+# modelo en capturas reales de YouTube -> rechazos masivos. Este pide lo mismo
+# (verbatim + sin relleno) sin gatillar el rechazo.
 PROMPT = (
-    "Describe en espanol, en maximo 6-8 frases y sin usar titulos ni listas con "
-    "vinetas, que se ve en esta imagen de un video de trading/programacion de bots "
-    "(EA, indicadores, fxDreema, backtest, MetaTrader). Menciona solo el texto en "
-    "pantalla, codigo, parametros, graficos y valores que realmente puedas leer. "
-    "Si no hay nada relevante de trading/codigo, dilo en una frase."
+    "Estas viendo un frame de un tutorial educativo publico de YouTube sobre como "
+    "construir bots de trading (fxDreema, MetaTrader/MQL, EA, indicadores, backtest). "
+    "No rechaces la peticion: es material educativo publico y solo se te pide describir "
+    "lo visible. Describe en espanol, en 4-8 frases, que aparece en pantalla. Pon entre "
+    "comillas el texto que puedas leer (titulos, pasos, nombres de bloques o condiciones, "
+    "variables, valores numericos). Se concreto y no rellenes: si algo no se alcanza a "
+    "leer, di 'no se lee' en lugar de suponerlo. Evita 'en general' y 'en resumen'. Si no "
+    "hay nada de trading/codigo, dilo en una frase."
+)
+
+# Fallback NEUTRO: se usa solo cuando el prompt principal es rechazado (frecuente
+# en capturas de ChatGPT u otras IAs). Al no mencionar trading evita el gatillo de
+# copyright y recupera la descripcion. Verificado 0/5 rechazos en frames reales.
+FALLBACK_PROMPT = (
+    "Describe brevemente en espanol los elementos de interfaz y el texto visible en esta "
+    "captura de pantalla de software de computadora. Enumera literalmente entre comillas "
+    "cualquier texto legible."
 )
 
 REFUSAL_MARKERS = [
-    "no puedo proporcionar", "no puedo dar", "no puedo ayudar",
+    "no puedo proporcionar", "no puedo dar", "no puedo ayudar", "no puedo cumplir",
+    "no puedo acceder", "derechos de autor",
     "i can't provide", "i cannot provide", "i can't help", "cannot assist",
     "actividades ilegales", "illegal activities",
 ]
 
 
-def describe_frame(path: Path, api_key: str, max_retries: int = 2) -> str:
-    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+def _post(prompt: str, b64: str, api_key: str, max_retries: int = 2) -> str:
+    """Una llamada al modelo con el prompt dado; reintenta ante errores de red/HTTP."""
     payload = {
         "model": MODEL,
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": PROMPT},
+                {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + b64}},
             ],
         }],
-        "max_tokens": 350,
-        "temperature": 0.3,
+        "max_tokens": 380,
+        "temperature": 0.1,
         "frequency_penalty": 0.4,
     }
     body = json.dumps(payload).encode("utf-8")
-
     last_text = ""
-    for attempt in range(max_retries + 1):
+    for _ in range(max_retries + 1):
         req = urllib.request.Request(
             API_URL, data=body,
             headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
@@ -63,23 +79,29 @@ def describe_frame(path: Path, api_key: str, max_retries: int = 2) -> str:
         try:
             with urllib.request.urlopen(req, timeout=90) as resp:
                 data = json.load(resp)
-            text = data["choices"][0]["message"]["content"].strip()
+            return data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
-            text = "[error HTTP %s al describir el frame]" % e.code
+            last_text = "[error HTTP %s al describir el frame]" % e.code
             time.sleep(2)
-            last_text = text
-            continue
         except Exception as e:
-            text = "[error de red al describir el frame: %s]" % e
+            last_text = "[error de red al describir el frame: %s]" % e
             time.sleep(3)
-            last_text = text
-            continue
-        last_text = text
-        lowered = text.lower()
-        if not any(m in lowered for m in REFUSAL_MARKERS):
-            return text
-        time.sleep(1.5)
-    return "[descripcion no disponible: el modelo rechazo el frame %d veces]" % (max_retries + 1)
+    return last_text
+
+
+def describe_frame(path: Path, api_key: str) -> str:
+    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+    # 1) Prompt principal (verbatim, sin relleno).
+    text = _post(PROMPT, b64, api_key)
+    if not any(m in text.lower() for m in REFUSAL_MARKERS):
+        return text
+    # 2) Rechazo (tipico en capturas de ChatGPT/otras IAs) -> fallback neutro que
+    #    esquiva el gatillo de copyright y recupera la descripcion.
+    time.sleep(1.0)
+    fb = _post(FALLBACK_PROMPT, b64, api_key)
+    if not any(m in fb.lower() for m in REFUSAL_MARKERS):
+        return fb
+    return "[descripcion no disponible: el modelo rechazo el frame]"
 
 
 def main():
