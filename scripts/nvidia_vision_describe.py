@@ -24,7 +24,9 @@ MAX_WORKERS = 5  # free tier NVIDIA NIM: 40 req/min, 5 en paralelo no lo excede
 # Prompt principal: tono SUAVE a proposito. Un prompt agresivo ("transcribe
 # TEXTUALMENTE", "prohibido...") dispara el filtro de copyright/seguridad del
 # modelo en capturas reales de YouTube -> rechazos masivos. Este pide lo mismo
-# (verbatim + sin relleno) sin gatillar el rechazo.
+# (verbatim + sin relleno) sin gatillar el rechazo. La lista suave anti-relleno
+# ('probablemente'/'parece'/'sugiere') y el "no repitas" se piden como peticion
+# normal, no como marco de prohibiciones (eso reactivaria el filtro).
 PROMPT = (
     "Estas viendo un frame de un tutorial educativo publico de YouTube sobre como "
     "construir bots de trading (fxDreema, MetaTrader/MQL, EA, indicadores, backtest). "
@@ -32,8 +34,11 @@ PROMPT = (
     "lo visible. Describe en espanol, en 4-8 frases, que aparece en pantalla. Pon entre "
     "comillas el texto que puedas leer (titulos, pasos, nombres de bloques o condiciones, "
     "variables, valores numericos). Se concreto y no rellenes: si algo no se alcanza a "
-    "leer, di 'no se lee' en lugar de suponerlo. Evita 'en general' y 'en resumen'. Si no "
-    "hay nada de trading/codigo, dilo en una frase."
+    "leer, di 'no se lee' en lugar de suponerlo. No especules: evita 'probablemente', "
+    "'parece', 'sugiere' y 'en general'/'en resumen'. No repitas la misma frase ni "
+    "describas dos veces el mismo elemento. Termina en cuanto describas lo visible; no "
+    "cierres con un parrafo de resumen. Si no hay nada de trading/codigo, dilo en una "
+    "frase."
 )
 
 # Fallback NEUTRO: se usa solo cuando el prompt principal es rechazado (frecuente
@@ -66,7 +71,12 @@ def _post(prompt: str, b64: str, api_key: str, max_retries: int = 2) -> str:
         }],
         "max_tokens": 380,
         "temperature": 0.1,
-        "frequency_penalty": 0.4,
+        # Anti-repeticion: en frames casi estaticos (misma pantalla 1-2 frames) el
+        # modelo repetia frases enteras. frequency_penalty penaliza tokens muy usados;
+        # presence_penalty penaliza reintroducir cualquier token ya presente -> juntos
+        # cortan el bucle sin subir la temperatura (que sacrificaria la lectura exacta).
+        "frequency_penalty": 0.6,
+        "presence_penalty": 0.3,
     }
     body = json.dumps(payload).encode("utf-8")
     last_text = ""
