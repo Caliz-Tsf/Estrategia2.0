@@ -2755,6 +2755,156 @@ if barstate.islast and array.size(SMC_zones) > 0
 
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
+// === L0 · FONDO TEMPORAL [Eje2 · Paso 5 · ESQUELETO-FABLE §3/§F9/§6.3] ================================
+// Contexto de TIEMPO (Kill Zones, macros, RTH/ETH). Regla "un solo fondo de area" (§6.3): la KZ se rinde
+// como RIBBON (tira delgada arriba, SOLO la sesion EN CURSO = ancla §2.3) en vez del bgcolor full-height
+// que solapaba el grid gris-azul (L1) -> resuelve el choque grid vs Kill Zones (checklist §10-4). El
+// bgcolor tenue de sesion queda SOLO en Estudio+; macros = Estudio+; RTH/ETH = solo Todo (§F9). Asi en
+// Operacion NO hay dos fills de area grande a la vez. Ribbon anclado sobre el maximo reciente (no tapa
+// precio), alto ~0.35xATR. Numeros CONGELADOS (Fase 3 · ADR-002).
+float kzRibTop = ta.highest(high, 100) + nz(chartState.atr14) * 0.6
+float kzRibBot = kzRibTop - nz(chartState.atr14) * 0.35
+var box   kzRibbon    = na
+var label kzRibbonLbl = na
+if i_showKZ and barstate.islast
+    box.delete(kzRibbon)
+    label.delete(kzRibbonLbl)
+    kzRibbon    := na
+    kzRibbonLbl := na
+    if curKZ != KZ_NONE and not na(kzActiveStart) and not na(chartState.atr14)
+        color  kzc = curKZ == KZ_LONDON ? COL_KZ_LON : curKZ == KZ_NY ? COL_KZ_NY : COL_KZ_ASIA
+        string kzn = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY" : "Asia"
+        kzRibbon    := box.new(kzActiveStart, kzRibTop, time, kzRibBot, xloc = xloc.bar_time, bgcolor = color.new(kzc, 25), border_color = color.new(kzc, 25), border_width = 1)
+        kzRibbonLbl := label.new(kzActiveStart, kzRibTop, kzn, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(kzc, 20), textcolor = color.white, size = size.tiny)
+// bgcolor de sesion: SOLO Estudio+ (ultra-tenue >=92 transp), solo la KZ activa (§F9). En Operacion no hay fondo.
+bgcolor(i_showKZ and f_famOK(FAM_EST) and curKZ != KZ_NONE ? (curKZ == KZ_LONDON ? color.new(COL_KZ_LON, 93) : curKZ == KZ_NY ? color.new(COL_KZ_NY, 93) : color.new(COL_KZ_ASIA, 93)) : na, title = "Kill Zone activa (Estudio+)")
+// Macros intradia (§F9): sombreado SOLO Estudio+. Gris = NY Lunch (kind 3, filtro), purpura = macros de impulso.
+bgcolor(i_showMacros and f_famOK(FAM_EST) and curMacroActive ? color.new(curMacroKind == 3 ? color.gray : color.purple, 92) : na, title = "Macro activa (Estudio+)")
+// RTH/ETH (§F9): sombreado de ETH SOLO en modo Todo (contexto de sesion acotada; en FX i_rthEnable off = siempre RTH).
+bgcolor(i_rthEnable and f_famOK(FAM_TODO) and not curIsRTH ? color.new(color.gray, 94) : na, title = "ETH (Todo)")
+
+// === L1 · MARCO DE PRECIO [Eje2 · Paso 5b · ESQUELETO-FABLE §3] =====================================
+// Contexto de PRECIO (OTE/GP, Premium/Discount, Gradient grid). LINEAS/cajas fib, SIN fill de area
+// grande (§6.3) -> se dibuja PRIMERO (detras de zonas L2 y estructura L3). Reubicado aqui en Paso 5b
+// (antes se dibujaba al final = encima de todo; corrige la inversion grid-sobre-zonas). Ver §3/§7.4.
+// f_drawOTE: caja de la zona fib OTE/GP [T22 · §2.5] (solo Visual). GP (Golden Pocket, 50-61.8%) en
+// DORADO; OTE (61.8-79%, mas profunda) en AMBAR mas oscuro -> ambos distintos del OB/FVG. Origen = barra
+// del origen de la pierna; se extiende a la derecha hasta la barra actual. Transparencia por estado; la
+// mitigada se atenua, la invalidada (pierna superseded o retroceso roto) no se dibuja.
+f_drawOTE(SMC_Zone z) =>
+    bool isGP = z.kind == KIND_GP
+    col = isGP ? COL_OTE_GP : COL_OTE
+    int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
+    color bg = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(col, transp)
+    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = bg, border_color = color.new(col, 50), border_width = 1, xloc = xloc.bar_index)
+
+// En la ultima barra limpia y repinta las cajas OTE/GP vivas (KIND_GP/KIND_OTE, no invalidadas).
+var array<box>   SMC_oteBoxes  = array.new<box>()
+var array<label> SMC_oteLabels = array.new<label>()
+if i_showOTE and barstate.islast
+    for b in SMC_oteBoxes
+        box.delete(b)
+    for lb in SMC_oteLabels
+        label.delete(lb)
+    array.clear(SMC_oteBoxes)
+    array.clear(SMC_oteLabels)
+    if array.size(SMC_zones) > 0
+        for i = 0 to array.size(SMC_zones) - 1
+            SMC_Zone z = array.get(SMC_zones, i)
+            if (z.kind == KIND_GP or z.kind == KIND_OTE) and z.state != ZS_INVALID and f_densOK(z.strength, false)
+                array.push(SMC_oteBoxes, f_drawOTE(z))
+                color oteCol = z.kind == KIND_GP ? COL_OTE_GP : COL_OTE
+                string oteTxt = z.kind == KIND_GP ? "GP" : "OTE"
+                array.push(SMC_oteLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, oteTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = oteCol, size = size.small, xloc = xloc.bar_index))
+
+// f_drawPDLine: una linea de nivel del dealing range [T07] (solo Visual). Como LuxAlgo
+// (drawTrailingExtremes :715-732): cada linea se ancla en SU PROPIO extremo via tiempo —
+// premium en trailing.topTime (la barra del strong high), discount en trailing.bottomTime
+// (la del strong low), no en un ancla compartida (eso hacia "volar" la linea). Dibuja con
+// xloc.bar_time hasta la barra actual. Menos ruido que cajas (pref. usuario, Sesion-021).
+f_drawPDLine(int leftTime, float level, color col, string lineStyle) =>
+    line.new(leftTime, level, time, level, xloc = xloc.bar_time, color = col, style = lineStyle, width = 1)
+
+// En la ultima barra limpia y repinta las 3 lineas P/D + las etiquetas. Premium = linea
+// solida roja en trailing.top desde la barra del high (trailing.topTime, cf. LuxAlgo
+// lastTopTime :725); Discount = linea solida verde en trailing.bottom desde la barra del
+// low (trailing.bottomTime, cf. :730); Equilibrium = punteada gris en el 50% desde el
+// extremo mas antiguo. La banda [45%,55%] (i_pdEqBand) ya no se dibuja: solo alimenta la
+// clasificacion del panel (#31). Sin cajas -> sin ruido.
+var array<line>  SMC_pdLines  = array.new<line>()
+var array<label> SMC_pdLabels = array.new<label>()
+if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
+    for l in SMC_pdLines
+        line.delete(l)
+    for lb in SMC_pdLabels
+        label.delete(lb)
+    array.clear(SMC_pdLines)
+    array.clear(SMC_pdLabels)
+    float eqLvl    = (trailing.top + trailing.bottom) / 2.0
+    int   topLeft  = nz(trailing.topTime, time)
+    int   botLeft  = nz(trailing.bottomTime, time)
+    int   eqLeft   = topLeft < botLeft ? topLeft : botLeft
+    array.push(SMC_pdLines, f_drawPDLine(topLeft, trailing.top,    color.new(COL_PREM, 0),  line.style_solid))
+    array.push(SMC_pdLines, f_drawPDLine(eqLeft,  eqLvl,           color.new(COL_GHOST, 20), line.style_dotted))
+    array.push(SMC_pdLines, f_drawPDLine(botLeft, trailing.bottom, color.new(COL_DISC, 0),  line.style_solid))
+    // Tarjetas P/D/EQ a la DERECHA de la vela (style_label_left) y 2 velas de margen (bar_index + 2),
+    // como las de BSL/SSL (pref. usuario): siguen el precio pero por el lado derecho, sin quedar pegadas.
+    array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.top,    "Premium "  + str.tostring(trailing.top, format.mintick),    style = label.style_label_left, color = color.new(COL_PREM, 80),  textcolor = COL_PREM,  size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(COL_GHOST, 80), textcolor = COL_GHOST, size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_left, color = color.new(COL_DISC, 80), textcolor = COL_DISC, size = size.small))
+
+// --- Gradient Levels: grid PRIMARIO seleccionado + ghosts [§5.16 · T41] (Visual-only) ---
+// Dibuja el grid del rango-fuente PRIMARIO elegido por f_selectGradientSource (P1 dealing range o P2
+// suspension diario) en GRIS-AZUL de familia marco (§5.2, COL_FRAME_Q; P1/P2 se distinguen por el
+// sufijo "s" del label). Quadrants solidos, eighths punteados. Cuando la fuente es
+// P1 se saltan 0/0.5/1 (ya los dibuja el bloque P/D Discount/EQ/Premium -> no duplicar tinta);
+// para P2 se dibujan todos (el rango suspension no lo cubre P/D). Ademas dibuja los grids GHOST
+// archivados (rango-fuente previo, solo quadrants, gris muy tenue, hasta i_gradPersistDays). Los
+// mini-grids P3 de gaps NO se dibujan (son filtro de T43). Toggle i_showGradient.
+// GRID SIN FILL (§6.3 · Paso 5): el marco de PRECIO posee el eje via LINEAS (line.new width=1), nunca
+// fill de area grande -> el ribbon KZ (L0) posee el eje de TIEMPO. Un solo fondo de area por modo. Verificado.
+var array<line>  SMC_gradLines  = array.new<line>()
+var array<label> SMC_gradLabels = array.new<label>()
+if i_showGradient and barstate.islast
+    for l in SMC_gradLines
+        line.delete(l)
+    for lb in SMC_gradLabels
+        label.delete(lb)
+    array.clear(SMC_gradLines)
+    array.clear(SMC_gradLabels)
+    // Ghosts (rango-fuente previo) primero, debajo: solo quadrants, gris muy tenue, sin etiqueta.
+    if array.size(SMC_gradGhosts) > 0
+        for ghi = 0 to array.size(SMC_gradGhosts) - 1
+            SMC_GradientGrid gg = array.get(SMC_gradGhosts, ghi)
+            if array.size(gg.levels) > 0
+                for gj = 0 to array.size(gg.levels) - 1
+                    if array.get(gg.isQuadrant, gj)
+                        array.push(SMC_gradLines, line.new(time - 172800000, array.get(gg.levels, gj), time, array.get(gg.levels, gj), xloc = xloc.bar_time, color = color.new(COL_GHOST, 88), style = line.style_dotted, width = 1))
+    // Grid PRIMARIO vigente.
+    if not na(gradSelTop) and not na(gradSelBot) and gradSelTop > gradSelBot and array.size(gradSelLevels) > 0
+        bool  selP2   = gradSelKind == GRAD_SRC_SUSPENSION
+        color baseCol = COL_FRAME_Q
+        int   gLeft   = selP2 ? time - 172800000 : math.min(nz(trailing.topTime, time), nz(trailing.bottomTime, time))
+        float gSpan   = gradSelTop - gradSelBot
+        for gi = 0 to array.size(gradSelLevels) - 1
+            float lvl  = array.get(gradSelLevels, gi)
+            bool  q    = array.get(gradSelQuad, gi)
+            float frac = (lvl - gradSelBot) / gSpan
+            bool  skip = (not selP2) and (frac <= 0.001 or frac >= 0.999 or math.abs(frac - 0.5) < 0.001)
+            if not skip
+                color  gcol   = q ? color.new(baseCol, 35) : color.new(baseCol, 70)
+                string gstyle = q ? line.style_solid : line.style_dotted
+                array.push(SMC_gradLines, line.new(gLeft, lvl, time, lvl, xloc = xloc.bar_time, color = gcol, style = gstyle, width = 1))
+                string src  = selP2 ? "s" : ""
+                string gtxt = q ? (math.abs(frac - 0.5) < 0.001 ? "CE" : frac < 0.5 ? "LQ" : "UQ") + src + " " + str.tostring(lvl, format.mintick) : str.tostring(math.round(frac * 8)) + "/8"
+                array.push(SMC_gradLabels, label.new(bar_index + 2, lvl, gtxt, style = label.style_label_left, color = color.new(baseCol, 90), textcolor = baseCol, size = size.tiny))
+
+// === L2 ZONAS + L3 LIQUIDEZ/ESTRUCTURA [Eje2 · Paso 5b · ESQUELETO-FABLE §3] =========================
+// A partir de aqui: estructura/swings/EQHL/pools/sweeps/eventos (L3) y cajas OB/FVG/Breaker/... (L2).
+// El marco L1 (arriba) y el fondo L0 ya se dibujaron -> quedan detras. NOTA (follow-up, no bloquea el
+// gate #4): el orden interno L3-antes-de-L2 (estructura dibujada antes que las cajas de zona) se conserva
+// del layout previo; §3 pide L3 al frente de L2. Los fills de zona son translucidos (82/92) -> la
+// estructura trasluce; el swap fino L2<->L3 se difiere a una pasada con validacion visual (TV).
 // f_drawSwing: etiqueta flotante HH/HL/LH/LL en la vela del pivote. Estructura
 // alcista (HH/HL) en verde-azulado, bajista (LH/LL) en rojo. style_label_down
 // sobre swing highs (texto colgando bajo el techo), style_label_up bajo lows.
@@ -3443,146 +3593,6 @@ if i_showFVG and barstate.islast
                     float ce = (z.top + z.bottom) / 2.0
                     color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                     array.push(SMC_fvgCELines, line.new(z.barIdx - 1, ce, bar_index, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_index))
-
-// f_drawOTE: caja de la zona fib OTE/GP [T22 · §2.5] (solo Visual). GP (Golden Pocket, 50-61.8%) en
-// DORADO; OTE (61.8-79%, mas profunda) en AMBAR mas oscuro -> ambos distintos del OB/FVG. Origen = barra
-// del origen de la pierna; se extiende a la derecha hasta la barra actual. Transparencia por estado; la
-// mitigada se atenua, la invalidada (pierna superseded o retroceso roto) no se dibuja.
-f_drawOTE(SMC_Zone z) =>
-    bool isGP = z.kind == KIND_GP
-    col = isGP ? COL_OTE_GP : COL_OTE
-    int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    color bg = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(col, transp)
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = bg, border_color = color.new(col, 50), border_width = 1, xloc = xloc.bar_index)
-
-// En la ultima barra limpia y repinta las cajas OTE/GP vivas (KIND_GP/KIND_OTE, no invalidadas).
-var array<box>   SMC_oteBoxes  = array.new<box>()
-var array<label> SMC_oteLabels = array.new<label>()
-if i_showOTE and barstate.islast
-    for b in SMC_oteBoxes
-        box.delete(b)
-    for lb in SMC_oteLabels
-        label.delete(lb)
-    array.clear(SMC_oteBoxes)
-    array.clear(SMC_oteLabels)
-    if array.size(SMC_zones) > 0
-        for i = 0 to array.size(SMC_zones) - 1
-            SMC_Zone z = array.get(SMC_zones, i)
-            if (z.kind == KIND_GP or z.kind == KIND_OTE) and z.state != ZS_INVALID and f_densOK(z.strength, false)
-                array.push(SMC_oteBoxes, f_drawOTE(z))
-                color oteCol = z.kind == KIND_GP ? COL_OTE_GP : COL_OTE
-                string oteTxt = z.kind == KIND_GP ? "GP" : "OTE"
-                array.push(SMC_oteLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, oteTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = oteCol, size = size.small, xloc = xloc.bar_index))
-
-// f_drawPDLine: una linea de nivel del dealing range [T07] (solo Visual). Como LuxAlgo
-// (drawTrailingExtremes :715-732): cada linea se ancla en SU PROPIO extremo via tiempo —
-// premium en trailing.topTime (la barra del strong high), discount en trailing.bottomTime
-// (la del strong low), no en un ancla compartida (eso hacia "volar" la linea). Dibuja con
-// xloc.bar_time hasta la barra actual. Menos ruido que cajas (pref. usuario, Sesion-021).
-f_drawPDLine(int leftTime, float level, color col, string lineStyle) =>
-    line.new(leftTime, level, time, level, xloc = xloc.bar_time, color = col, style = lineStyle, width = 1)
-
-// En la ultima barra limpia y repinta las 3 lineas P/D + las etiquetas. Premium = linea
-// solida roja en trailing.top desde la barra del high (trailing.topTime, cf. LuxAlgo
-// lastTopTime :725); Discount = linea solida verde en trailing.bottom desde la barra del
-// low (trailing.bottomTime, cf. :730); Equilibrium = punteada gris en el 50% desde el
-// extremo mas antiguo. La banda [45%,55%] (i_pdEqBand) ya no se dibuja: solo alimenta la
-// clasificacion del panel (#31). Sin cajas -> sin ruido.
-var array<line>  SMC_pdLines  = array.new<line>()
-var array<label> SMC_pdLabels = array.new<label>()
-if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
-    for l in SMC_pdLines
-        line.delete(l)
-    for lb in SMC_pdLabels
-        label.delete(lb)
-    array.clear(SMC_pdLines)
-    array.clear(SMC_pdLabels)
-    float eqLvl    = (trailing.top + trailing.bottom) / 2.0
-    int   topLeft  = nz(trailing.topTime, time)
-    int   botLeft  = nz(trailing.bottomTime, time)
-    int   eqLeft   = topLeft < botLeft ? topLeft : botLeft
-    array.push(SMC_pdLines, f_drawPDLine(topLeft, trailing.top,    color.new(COL_PREM, 0),  line.style_solid))
-    array.push(SMC_pdLines, f_drawPDLine(eqLeft,  eqLvl,           color.new(COL_GHOST, 20), line.style_dotted))
-    array.push(SMC_pdLines, f_drawPDLine(botLeft, trailing.bottom, color.new(COL_DISC, 0),  line.style_solid))
-    // Tarjetas P/D/EQ a la DERECHA de la vela (style_label_left) y 2 velas de margen (bar_index + 2),
-    // como las de BSL/SSL (pref. usuario): siguen el precio pero por el lado derecho, sin quedar pegadas.
-    array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.top,    "Premium "  + str.tostring(trailing.top, format.mintick),    style = label.style_label_left, color = color.new(COL_PREM, 80),  textcolor = COL_PREM,  size = size.small))
-    array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(COL_GHOST, 80), textcolor = COL_GHOST, size = size.small))
-    array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_left, color = color.new(COL_DISC, 80), textcolor = COL_DISC, size = size.small))
-
-// --- Gradient Levels: grid PRIMARIO seleccionado + ghosts [§5.16 · T41] (Visual-only) ---
-// Dibuja el grid del rango-fuente PRIMARIO elegido por f_selectGradientSource (P1 dealing range o P2
-// suspension diario) en GRIS-AZUL de familia marco (§5.2, COL_FRAME_Q; P1/P2 se distinguen por el
-// sufijo "s" del label). Quadrants solidos, eighths punteados. Cuando la fuente es
-// P1 se saltan 0/0.5/1 (ya los dibuja el bloque P/D Discount/EQ/Premium -> no duplicar tinta);
-// para P2 se dibujan todos (el rango suspension no lo cubre P/D). Ademas dibuja los grids GHOST
-// archivados (rango-fuente previo, solo quadrants, gris muy tenue, hasta i_gradPersistDays). Los
-// mini-grids P3 de gaps NO se dibujan (son filtro de T43). Toggle i_showGradient.
-// GRID SIN FILL (§6.3 · Paso 5): el marco de PRECIO posee el eje via LINEAS (line.new width=1), nunca
-// fill de area grande -> el ribbon KZ (L0) posee el eje de TIEMPO. Un solo fondo de area por modo. Verificado.
-var array<line>  SMC_gradLines  = array.new<line>()
-var array<label> SMC_gradLabels = array.new<label>()
-if i_showGradient and barstate.islast
-    for l in SMC_gradLines
-        line.delete(l)
-    for lb in SMC_gradLabels
-        label.delete(lb)
-    array.clear(SMC_gradLines)
-    array.clear(SMC_gradLabels)
-    // Ghosts (rango-fuente previo) primero, debajo: solo quadrants, gris muy tenue, sin etiqueta.
-    if array.size(SMC_gradGhosts) > 0
-        for ghi = 0 to array.size(SMC_gradGhosts) - 1
-            SMC_GradientGrid gg = array.get(SMC_gradGhosts, ghi)
-            if array.size(gg.levels) > 0
-                for gj = 0 to array.size(gg.levels) - 1
-                    if array.get(gg.isQuadrant, gj)
-                        array.push(SMC_gradLines, line.new(time - 172800000, array.get(gg.levels, gj), time, array.get(gg.levels, gj), xloc = xloc.bar_time, color = color.new(COL_GHOST, 88), style = line.style_dotted, width = 1))
-    // Grid PRIMARIO vigente.
-    if not na(gradSelTop) and not na(gradSelBot) and gradSelTop > gradSelBot and array.size(gradSelLevels) > 0
-        bool  selP2   = gradSelKind == GRAD_SRC_SUSPENSION
-        color baseCol = COL_FRAME_Q
-        int   gLeft   = selP2 ? time - 172800000 : math.min(nz(trailing.topTime, time), nz(trailing.bottomTime, time))
-        float gSpan   = gradSelTop - gradSelBot
-        for gi = 0 to array.size(gradSelLevels) - 1
-            float lvl  = array.get(gradSelLevels, gi)
-            bool  q    = array.get(gradSelQuad, gi)
-            float frac = (lvl - gradSelBot) / gSpan
-            bool  skip = (not selP2) and (frac <= 0.001 or frac >= 0.999 or math.abs(frac - 0.5) < 0.001)
-            if not skip
-                color  gcol   = q ? color.new(baseCol, 35) : color.new(baseCol, 70)
-                string gstyle = q ? line.style_solid : line.style_dotted
-                array.push(SMC_gradLines, line.new(gLeft, lvl, time, lvl, xloc = xloc.bar_time, color = gcol, style = gstyle, width = 1))
-                string src  = selP2 ? "s" : ""
-                string gtxt = q ? (math.abs(frac - 0.5) < 0.001 ? "CE" : frac < 0.5 ? "LQ" : "UQ") + src + " " + str.tostring(lvl, format.mintick) : str.tostring(math.round(frac * 8)) + "/8"
-                array.push(SMC_gradLabels, label.new(bar_index + 2, lvl, gtxt, style = label.style_label_left, color = color.new(baseCol, 90), textcolor = baseCol, size = size.tiny))
-
-// === L0 · FONDO TEMPORAL [Eje2 · Paso 5 · ESQUELETO-FABLE §3/§F9/§6.3] ================================
-// Contexto de TIEMPO (Kill Zones, macros, RTH/ETH). Regla "un solo fondo de area" (§6.3): la KZ se rinde
-// como RIBBON (tira delgada arriba, SOLO la sesion EN CURSO = ancla §2.3) en vez del bgcolor full-height
-// que solapaba el grid gris-azul (L1) -> resuelve el choque grid vs Kill Zones (checklist §10-4). El
-// bgcolor tenue de sesion queda SOLO en Estudio+; macros = Estudio+; RTH/ETH = solo Todo (§F9). Asi en
-// Operacion NO hay dos fills de area grande a la vez. Ribbon anclado sobre el maximo reciente (no tapa
-// precio), alto ~0.35xATR. Numeros CONGELADOS (Fase 3 · ADR-002).
-float kzRibTop = ta.highest(high, 100) + nz(chartState.atr14) * 0.6
-float kzRibBot = kzRibTop - nz(chartState.atr14) * 0.35
-var box   kzRibbon    = na
-var label kzRibbonLbl = na
-if i_showKZ and barstate.islast
-    box.delete(kzRibbon)
-    label.delete(kzRibbonLbl)
-    kzRibbon    := na
-    kzRibbonLbl := na
-    if curKZ != KZ_NONE and not na(kzActiveStart) and not na(chartState.atr14)
-        color  kzc = curKZ == KZ_LONDON ? COL_KZ_LON : curKZ == KZ_NY ? COL_KZ_NY : COL_KZ_ASIA
-        string kzn = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY" : "Asia"
-        kzRibbon    := box.new(kzActiveStart, kzRibTop, time, kzRibBot, xloc = xloc.bar_time, bgcolor = color.new(kzc, 25), border_color = color.new(kzc, 25), border_width = 1)
-        kzRibbonLbl := label.new(kzActiveStart, kzRibTop, kzn, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(kzc, 20), textcolor = color.white, size = size.tiny)
-// bgcolor de sesion: SOLO Estudio+ (ultra-tenue >=92 transp), solo la KZ activa (§F9). En Operacion no hay fondo.
-bgcolor(i_showKZ and f_famOK(FAM_EST) and curKZ != KZ_NONE ? (curKZ == KZ_LONDON ? color.new(COL_KZ_LON, 93) : curKZ == KZ_NY ? color.new(COL_KZ_NY, 93) : color.new(COL_KZ_ASIA, 93)) : na, title = "Kill Zone activa (Estudio+)")
-// Macros intradia (§F9): sombreado SOLO Estudio+. Gris = NY Lunch (kind 3, filtro), purpura = macros de impulso.
-bgcolor(i_showMacros and f_famOK(FAM_EST) and curMacroActive ? color.new(curMacroKind == 3 ? color.gray : color.purple, 92) : na, title = "Macro activa (Estudio+)")
-// RTH/ETH (§F9): sombreado de ETH SOLO en modo Todo (contexto de sesion acotada; en FX i_rthEnable off = siempre RTH).
-bgcolor(i_rthEnable and f_famOK(FAM_TODO) and not curIsRTH ? color.new(color.gray, 94) : na, title = "ETH (Todo)")
 
 // --- Mapa MTF: niveles heredados de HTF en cascada [T13a · ESQUELETO-P3 §2.5] (Visual-only) ---
 // Dibujo DIFERENCIADO: lineas P/D del HTF punteadas + tenues con prefijo de TF, para no
