@@ -2793,9 +2793,10 @@ f_drawStructure(int pivotTime, int pivotBarIdx, float level, int breakTime, int 
     int midIdx = math.round((pivotBarIdx + breakBarIdx) / 2.0)
     label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = isMaj ? size.normal : isInt ? size.tiny : size.small)
 
-if i_showSwings and newSwingHigh
+// Matriz §8.2 (§F1): swings HH/HL/LH/LL = ruido en Operacion -> solo Estudio+ (f_famOK FAM_EST).
+if i_showSwings and f_famOK(FAM_EST) and newSwingHigh
     f_drawSwing(bar_index - i_swingLen, swingHigh, swingHighKind)
-if i_showSwings and newSwingLow
+if i_showSwings and f_famOK(FAM_EST) and newSwingLow
     f_drawSwing(bar_index - i_swingLen, swingLow, swingLowKind)
 
 // [T12] El MSS ya NO es una capa fucsia aparte: si el CHoCH swing es MSS, la propia
@@ -2806,7 +2807,7 @@ if i_showStruct and not na(evStructSwing)
     int originIdx = up ? structSwing.highBarIdx : structSwing.lowBarIdx
     int originT   = up ? structSwing.highTime  : structSwing.lowTime
     f_drawStructure(originT, originIdx, evStructSwing.price, evStructSwing.barTime, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, SC_SWING, i_showMSS and not na(evMSS))
-if i_showInternal and not na(evStructInt)
+if i_showInternal and f_famOK(FAM_EST) and not na(evStructInt)                                              // estructura interna = Estudio+ (§F1)
     bool up = evStructInt.dir == DIR_BULL
     int originIdx = up ? structInternal.highBarIdx : structInternal.lowBarIdx
     int originT   = up ? structInternal.highTime  : structInternal.lowTime
@@ -2863,7 +2864,7 @@ if i_showPools and barstate.islast
     if array.size(SMC_pools) > 0
         for i = 0 to array.size(SMC_pools) - 1
             SMC_Pool p = array.get(SMC_pools, i)
-            if p.touches >= i_minTouches and (not p.swept or i_showSwept)
+            if p.touches >= i_minTouches and (not p.swept or (i_showSwept and f_famOK(FAM_EST)))              // pools barridos = Estudio+ (§F8)
                 bool isBSL = p.dir == DIR_BULL
                 color col = isBSL ? COL_BSL : COL_SSL
                 array.push(SMC_poolLines, f_drawPools(p))
