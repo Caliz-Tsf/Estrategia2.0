@@ -237,22 +237,71 @@ type SMC_FBreak
     float  level
     int    breakDir       // +1 close rompio ARRIBA del nivel / -1 close rompio ABAJO
     int    barIdx
-f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
+// --- Motor de fuerza (strength 0-1) [Eje2 · ADR-014 · HANDOFF §5.2/5.3] ---
+// Calidad intrinseca 0-1 por marca (propiedad de DETECCION: la leen los DOS consumidores
+// -> jerarquia visual F1 + scoring F3). PURAS, al cierre, reusan atr14 (nunca recalcular
+// intra-vela, §5.5). Pesos por primitivo = candidatos CONGELADOS hasta Fase 3 (ADR-002);
+// la FORMA (suma ponderada + quantizacion 0/1/2) se fija aqui, los NUMEROS entran por
+// IS/OOS. Cada tipo aporta solo los primitivos que su UDT porta (zona: rango/state/dist/
+// alineacion + bonus refinamiento; evento: rango/cuerpo/sweep/alineacion; §5.2). No se
+// renormaliza: strength es senal RELATIVA y los umbrales 0.33/0.66 tambien son candidatos.
+f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
+    float s = 0.0
+    if atr14 > 0
+        s += 0.30 * math.min((z.top - z.bottom) / atr14 / 3.0, 1.0)                                       // rango x ATR
+        float fresh = z.state == ZS_ACTIVE ? 1.0 : z.state == ZS_PARTIAL ? 0.5 : 0.0
+        s += 0.20 * fresh                                                                                 // frescura / state
+        float distAtr = (curPrice > z.top ? curPrice - z.top : curPrice < z.bottom ? z.bottom - curPrice : 0.0) / atr14
+        s += 0.10 * (1.0 - math.min(distAtr / 2.0, 1.0))                                                  // cercania al nivel
+        s += 0.10 * (biasDir == 0 ? 0.5 : z.dir == biasDir ? 1.0 : 0.0)                                   // alineacion con bias
+        if z.trueFvg or z.propulsion or z.gradedFvg
+            s += 0.10                                                                                     // refinamiento [FIX P-05]
+    math.min(s, 1.0)
+
+f_eventStrength(SMC_Event e, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
+    float s = 0.0
+    s += 0.40 * math.min(rangeAtr / 3.0, 1.0)                                                            // rango x ATR / displacement
+    s += 0.20 * math.max(math.min((bodyPct - 0.5) / 0.5, 1.0), 0.0)                                      // cuerpo %
+    s += 0.20 * (hadSweep ? 1.0 : 0.0)                                                                   // sweep previo
+    s += 0.20 * (biasDir == 0 or e.dir == 0 ? 0.5 : e.dir == biasDir ? 1.0 : 0.0)                        // alineacion
+    math.min(s, 1.0)
+
+f_swingStrength(SMC_Swing sw, int biasDir) =>
+    float role  = (sw.kind == KIND_HH or sw.kind == KIND_LL) ? 1.0 : 0.6                                 // extremo estructural vs pullback
+    float fresh = sw.swept ? 0.0 : 1.0                                                                   // no-roto
+    int   swDir = (sw.kind == KIND_HH or sw.kind == KIND_HL) ? DIR_BULL : DIR_BEAR
+    float align = biasDir == 0 ? 0.5 : swDir == biasDir ? 1.0 : 0.0
+    math.min(0.5 * role + 0.3 * fresh + 0.2 * align, 1.0)
+
+f_poolStrength(SMC_Pool p, float curPrice, float atr14) =>
+    float s = 0.5 * math.min(p.touches / 3.0, 1.0) + 0.3 * (p.swept ? 0.0 : 1.0)                         // toques + no-barrido
+    if atr14 > 0
+        s += 0.2 * (1.0 - math.min(math.abs(curPrice - p.level) / atr14 / 2.0, 1.0))                     // cercania
+    math.min(s, 1.0)
+
+f_strengthLevel(float s) =>
+    s >= 0.66 ? 2 : s >= 0.33 ? 1 : 0                                                                    // 2=alta / 1=media / 0=baja (§5.3)
+
+f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN, float curPrice, float atr14, int biasDir) =>
+    z.strength := f_zoneStrength(z, curPrice, atr14, biasDir)
     array.push(a, z)
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
-f_pushEvent(array<SMC_Event> a, SMC_Event e, int maxN) =>
+f_pushEvent(array<SMC_Event> a, SMC_Event e, int maxN, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
+    e.strength := f_eventStrength(e, rangeAtr, bodyPct, hadSweep, biasDir)
     array.push(a, e)
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
-f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN) =>
+f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN, int biasDir) =>
+    s.strength := f_swingStrength(s, biasDir)
     array.push(a, s)
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
-f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
+f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN, float curPrice, float atr14) =>
+    p.strength := f_poolStrength(p, curPrice, atr14)
     array.push(a, p)
     if array.size(a) > maxN
         array.shift(a)
@@ -1637,13 +1686,13 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
             int obOrigin = ev.dir == DIR_BULL ? structTf.highBarIdx : structTf.lowBarIdx
             SMC_Zone obZone = f_detectOB(ev, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, obHighVolFactor, KIND_OB)
             if not na(obZone)
-                f_pushZone(zonesTf, obZone, MAX_ZONES)
+                f_pushZone(zonesTf, obZone, MAX_ZONES, close, atr14, st.bias)
         // FVG: barTime = vela MEDIA (time[1] = barIdx-1, el desplazamiento que crea el gap, igual
         // que el dibujo nativo f_drawFVG) -> el transporte MTF ancla la caja exacta vela-a-vela en el
         // LTF sin quedar "corrida" una barra a la derecha (pref. usuario S042). [T13c]
         SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time[1], fvgThreshold * atr14, KIND_FVG)
         if not na(fvgZone)
-            f_pushZone(zonesTf, fvgZone, MAX_ZONES)
+            f_pushZone(zonesTf, fvgZone, MAX_ZONES, close, atr14, st.bias)
         SMC_Event evEqH = na
         SMC_Event evEqL = na
         if not na(eqPH)
@@ -1737,6 +1786,25 @@ var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 var array<SMC_Event> SMC_sweeps = array.new<SMC_Event>()
 
+// Snapshot consolidado del bias del TF propio [T04]. Declarado AQUI (antes de los swings) para que
+// su bias -var, persistente- alimente la fuerza de swings/eventos ya en esta vela (usa el valor
+// consolidado de la vela previa; se re-consolida mas abajo con f_updateTFState). Detalle §1.3/§1.4.
+var SMC_TFState chartState = SMC_TFState.new()
+
+// --- Insumos de fuerza (strength) para los sitios de creacion [Eje2 · ADR-014 · HANDOFF §5.2] ---
+// evRangeAtr/evBodyPct = rango y cuerpo de la vela CONFIRMADA actual (la mayoria de eventos se
+// detecta en su propia vela; sAtr14 propio porque el atr14 global se declara mas abajo). sweptRecently
+// = hubo un sweep en las ultimas velas ANTES de esta (SMC_sweeps aun trae el estado hasta la vela
+// previa, se repuebla mas abajo) -> "sweep previo" (§5.2). biasDir se pasa como chartState.bias en
+// cada sitio (valor vigente en ese punto). Insumos baratos, al cierre (anti-repaint).
+float sAtr14        = ta.atr(14)
+float evRangeAtr    = sAtr14 > 0 ? (high - low) / sAtr14 : 0.0
+float evBodyPct     = (high - low) > 0 ? math.abs(close - open) / (high - low) : 0.0
+bool  sweptRecently = false
+if array.size(SMC_sweeps) > 0
+    SMC_Event lastSw = array.get(SMC_sweeps, array.size(SMC_sweeps) - 1)
+    sweptRecently := (bar_index - lastSw.barIdx) <= 3
+
 // --- Swings [T02] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_swings
 // para el scoring (Sprint 2.1). Guard barstate.isconfirmed = anti-repaint [§1.1].
@@ -1745,10 +1813,10 @@ newSwingHigh = barstate.isconfirmed and not na(swingHigh)
 newSwingLow  = barstate.isconfirmed and not na(swingLow)
 if newSwingHigh
     int k = f_classifySwing(true, swingHigh, SMC_swings)
-    f_pushSwing(SMC_swings, SMC_Swing.new(swingHigh, bar_index - i_swingLen, time[i_swingLen], k, false), MAX_SWINGS)
+    f_pushSwing(SMC_swings, SMC_Swing.new(swingHigh, bar_index - i_swingLen, time[i_swingLen], k, false), MAX_SWINGS, chartState.bias)
 if newSwingLow
     int k = f_classifySwing(false, swingLow, SMC_swings)
-    f_pushSwing(SMC_swings, SMC_Swing.new(swingLow, bar_index - i_swingLen, time[i_swingLen], k, false), MAX_SWINGS)
+    f_pushSwing(SMC_swings, SMC_Swing.new(swingLow, bar_index - i_swingLen, time[i_swingLen], k, false), MAX_SWINGS, chartState.bias)
 
 // --- Estructura BOS/CHoCH [T03] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_events y
@@ -1764,10 +1832,9 @@ var SMC_Structure structInternal = SMC_Structure.new()
 var SMC_Structure structMajor = SMC_Structure.new()
 var array<SMC_Event> SMC_eventsMajor = array.new<SMC_Event>()
 
-// Snapshot consolidado del bias del TF propio [T04]. Se alimenta SOLO del evento de
-// escala swing -> el bias mayor; lo que el MTF exporta [Sprint 1.4] y el scoring lee
-// [Sprint 2.1]. structInternal queda fuera (no voltea el bias, §1.4).
-var SMC_TFState chartState = SMC_TFState.new()
+// (chartState declarado mas arriba, antes de los swings, para alimentar la fuerza [Eje2]. Se
+// alimenta SOLO del evento de escala swing -> el bias mayor; lo que el MTF exporta [Sprint 1.4] y
+// el scoring lee [Sprint 2.1]. structInternal queda fuera, no voltea el bias, §1.4.)
 
 // Dealing range Premium/Discount [T07]: trailing extremes anclados al ultimo swing de
 // ESCALA P/D (opcion A, ver docs/decisiones-pd-rango.md). Estado del consumidor (el TYPE
@@ -1827,9 +1894,9 @@ if barstate.isconfirmed
     bool okIntLow  = structInternal.lowLevel  != structSwing.lowLevel
     evStructInt   := f_detectStructure(structInternal, bar_index, time, okIntHigh, okIntLow)
     if not na(evStructSwing)
-        f_pushEvent(SMC_events, evStructSwing, MAX_EVENTS)
+        f_pushEvent(SMC_events, evStructSwing, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     if not na(evStructInt)
-        f_pushEvent(SMC_events, evStructInt, MAX_EVENTS)
+        f_pushEvent(SMC_events, evStructInt, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     // Consolidar el bias del TF tras la posible ruptura swing de esta barra [T04].
     f_updateTFState(chartState, evStructSwing)
 
@@ -1840,7 +1907,7 @@ SMC_Event evStructMajor = na
 if barstate.isconfirmed
     evStructMajor := f_detectStructure(structMajor, bar_index, time, true, true)
     if not na(evStructMajor)
-        f_pushEvent(SMC_eventsMajor, evStructMajor, MAX_EVENTS)
+        f_pushEvent(SMC_eventsMajor, evStructMajor, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Order Blocks [T05] ---
 // Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra
@@ -1942,14 +2009,14 @@ if barstate.isconfirmed
                 array.push(SMC_newBreakers, iz)
     if array.size(SMC_newBreakers) > 0
         for i = 0 to array.size(SMC_newBreakers) - 1
-            f_pushZone(SMC_zones, array.get(SMC_newBreakers, i), MAX_ZONES)
+            f_pushZone(SMC_zones, array.get(SMC_newBreakers, i), MAX_ZONES, close, atr14, chartState.bias)
     if not na(evStructSwing)
         int obOrigin = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
             // Propulsion [T34 · §5.8]: ¿anidado en un OB vivo previo mismo-sentido? -> OB de continuacion.
             obZone.propulsion := f_isPropulsion(obZone, SMC_zones, i_propOverlap)
-            f_pushZone(SMC_zones, obZone, MAX_ZONES)
+            f_pushZone(SMC_zones, obZone, MAX_ZONES, close, atr14, chartState.bias)
     // --- Mitigation Block [§2.8 #24] ---
     // Mismo wiring que Visual pero SIN dibujo. Ultima vela contraria antes de un impulso que rompe
     // estructura INTERNA, SIN sweep previo (si hubo sweep -> contexto breaker/OB). Reusa f_detectOB sobre
@@ -1960,12 +2027,12 @@ if barstate.isconfirmed
         if mbNoSweep
             SMC_Zone mbZone = f_detectOB(evStructInt, mbOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_MITIGATION)
             if not na(mbZone)
-                f_pushZone(SMC_zones, mbZone, MAX_ZONES)
+                f_pushZone(SMC_zones, mbZone, MAX_ZONES, close, atr14, chartState.bias)
     // --- Vacuum Block [T33 · §5.7] ---
     // Gap grande de apertura -> zona-vacio iman de retorno (mismo wiring que Visual, sin dibujo).
     SMC_Zone vacZone = f_detectVacuumBlock(open, close[1], atr14, i_vacuumFactor, bar_index, time)
     if not na(vacZone)
-        f_pushZone(SMC_zones, vacZone, MAX_ZONES)
+        f_pushZone(SMC_zones, vacZone, MAX_ZONES, close, atr14, chartState.bias)
     // --- Fair Value Gaps [T06] ---
     // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_zones
     // para el scoring (Sprint 2.1). FVG de 3 velas sobre el TF propio, confirmado al
@@ -1992,9 +2059,9 @@ if barstate.isconfirmed
         fvgZone.gradedFvg := fvgGraded
         // BPR [T28 · §5.3]: solape con FVG vivo de dir opuesto reciente -> zona balanceada (sin dibujo).
         SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
-        f_pushZone(SMC_zones, fvgZone, MAX_ZONES)
+        f_pushZone(SMC_zones, fvgZone, MAX_ZONES, close, atr14, chartState.bias)
         if not na(bprZone)
-            f_pushZone(SMC_zones, bprZone, MAX_ZONES)
+            f_pushZone(SMC_zones, bprZone, MAX_ZONES, close, atr14, chartState.bias)
     // --- OTE / Golden Pocket [T22 · §2.5] ---
     // Mismo wiring que Visual pero SIN dibujo. Sobre un BOS: expira GP/OTE de la pierna anterior y crea
     // las nuevas (rango estructural [lowLevel, highLevel]); el ciclo de vida lo gestiona el loop de
@@ -2008,9 +2075,9 @@ if barstate.isconfirmed
         int oteOrigin = evStructSwing.dir == DIR_BULL ? structSwing.lowBarIdx : structSwing.highBarIdx
         [gpZone, oteZone] = f_detectOTE(evStructSwing, structSwing.highLevel, structSwing.lowLevel, oteOrigin, time, i_oteR1, i_oteR2, i_oteR3)
         if not na(gpZone)
-            f_pushZone(SMC_zones, gpZone, MAX_ZONES)
+            f_pushZone(SMC_zones, gpZone, MAX_ZONES, close, atr14, chartState.bias)
         if not na(oteZone)
-            f_pushZone(SMC_zones, oteZone, MAX_ZONES)
+            f_pushZone(SMC_zones, oteZone, MAX_ZONES, close, atr14, chartState.bias)
 
 // --- MSS — Market Structure Shift [T12] ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_eventsMSS para
@@ -2022,7 +2089,7 @@ SMC_Event evMSS = na
 if barstate.isconfirmed and not na(evStructSwing)
     evMSS := f_detectMSS(evStructSwing, open, high, low, close, atr14, i_mssDispFactor, i_mssBodyPct)
     if not na(evMSS)
-        f_pushEvent(SMC_eventsMSS, evMSS, MAX_EVENTS)
+        f_pushEvent(SMC_eventsMSS, evMSS, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Displacement [§4.1] · T16 ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_displacements para
@@ -2034,7 +2101,7 @@ if barstate.isconfirmed
     bool priorContraction = (high[1] - low[1]) < atr14 and (high[2] - low[2]) < atr14 and (high[3] - low[3]) < atr14
     evDisp := f_detectDisplacement(open, high, low, close, atr14, i_dispFactor, i_dispBodyPct, i_dispContraction, priorContraction, bar_index, time)
     if not na(evDisp)
-        f_pushEvent(SMC_displacements, evDisp, MAX_EVENTS)
+        f_pushEvent(SMC_displacements, evDisp, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- IDM — Inducement [§3.6] · T17 ---
 // Identico al wiring de Visual pero sin dibujo: la Strategy solo pobla SMC_idm para el scoring
@@ -2044,7 +2111,7 @@ SMC_Event evIDM = na
 if barstate.isconfirmed
     evIDM := f_detectIDM(structInternal.lowLevel, structInternal.highLevel, low, high, close, bar_index, time)
     if not na(evIDM)
-        f_pushEvent(SMC_idm, evIDM, MAX_EVENTS)
+        f_pushEvent(SMC_idm, evIDM, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Immediate Rebalance [§5.4] · T29 ---
 // Mismo wiring que Visual (sin dibujo). Vela de impulso rebalanceada por la siguiente -> SMC_ir.
@@ -2053,7 +2120,7 @@ SMC_Event evIR = na
 if barstate.isconfirmed
     evIR := f_detectImmediateRebalance(open[1], high[1], low[1], close[1], close, atr14, i_irFactor, i_irBodyPct, bar_index - 1, time[1])
     if not na(evIR)
-        f_pushEvent(SMC_ir, evIR, MAX_EVENTS)
+        f_pushEvent(SMC_ir, evIR, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Volume Imbalance [§5.5] · T31 ---
 // Mismo wiring que Visual (sin dibujo). Array dedicado SMC_vi (micro, no satura SMC_zones); ciclo via
@@ -2065,7 +2132,7 @@ if barstate.isconfirmed
             f_updateZoneMitigation(array.get(SMC_vi, i), i_obMitClose)
     SMC_Zone viZone = f_detectVolumeImbalance(open, high, low, close[1], high[1], low[1], atr14, i_viThreshold, bar_index, time)
     if not na(viZone)
-        f_pushZone(SMC_vi, viZone, MAX_ZONES)
+        f_pushZone(SMC_vi, viZone, MAX_ZONES, close, atr14, chartState.bias)
 
 // --- Gaps de apertura NWOG/NDOG/NYMO + Breakaway [§5.10] · T30 ---
 // Mismo wiring que Visual (sin dibujo). Niveles persistentes + Breakaway (KIND_BAG) para el scoring.
@@ -2088,7 +2155,7 @@ if barstate.isconfirmed
         ndogT   := time
         [ogMeas, ogDir] = f_classifyOpenGap(open, close[1], atr14, i_gapMin)
         if ogMeas and ((ogDir == DIR_BULL and close > open) or (ogDir == DIR_BEAR and close < open))
-            f_pushEvent(SMC_bag, SMC_Event.new(open, ogDir, bar_index, time, "", KIND_BAG), MAX_EVENTS)
+            f_pushEvent(SMC_bag, SMC_Event.new(open, ogDir, bar_index, time, "", KIND_BAG), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     if ogNYMid
         nymoLvl := open
         nymoT   := time
@@ -2104,7 +2171,7 @@ SMC_Event evCISD = na
 if barstate.isconfirmed
     evCISD := f_detectCISD(open, close, cisdRunDir, cisdRunOrig, cisdRunLen, i_cisdMinRun, bar_index, time)
     if not na(evCISD)
-        f_pushEvent(SMC_cisd, evCISD, MAX_EVENTS)
+        f_pushEvent(SMC_cisd, evCISD, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     int cisdCol = close > open ? 1 : close < open ? -1 : 0
     if cisdCol == cisdRunDir and cisdCol != 0
         cisdRunLen += 1
@@ -2123,7 +2190,7 @@ if barstate.isconfirmed
     currentIpr := f_detectIPR(SMC_zones, bar_index, time, i_iprWindow, i_iprMinGaps)
     int curIprDir = na(currentIpr) ? 0 : currentIpr.dir
     if curIprDir != 0 and curIprDir != lastIprDir
-        f_pushZone(SMC_ipr, currentIpr, MAX_ZONES)
+        f_pushZone(SMC_ipr, currentIpr, MAX_ZONES, close, atr14, chartState.bias)
     lastIprDir := curIprDir
 
 // --- Inside Day [§5.12] · T37 ---
@@ -2135,7 +2202,7 @@ SMC_Event evInsideDay = na
 if barstate.isconfirmed and ogNewDay
     evInsideDay := f_detectInsideDay(id_h1, id_l1, id_h2, id_l2, bar_index, time)
     if not na(evInsideDay)
-        f_pushEvent(SMC_insideDays, evInsideDay, MAX_EVENTS)
+        f_pushEvent(SMC_insideDays, evInsideDay, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Impulsive / Corrective [§4.4] · T25 ---
 // Mismo wiring que Visual pero SIN dibujo: la Strategy solo pobla SMC_legs para el scoring (clasificador
@@ -2153,7 +2220,7 @@ if barstate.isconfirmed
             int   legDir = not na(evMSS) ? evMSS.dir : evStructSwing.dir
             float legPx  = not na(evMSS) ? evMSS.price : evStructSwing.price
             evLeg := SMC_Event.new(legPx, legDir, bar_index, time, "", legKind)
-            f_pushEvent(SMC_legs, evLeg, MAX_EVENTS)
+            f_pushEvent(SMC_legs, evLeg, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
         legHadDisp := false
 
 // --- Equal Highs / Equal Lows [T08] ---
@@ -2171,12 +2238,12 @@ SMC_Event evEqLow  = na
 if barstate.isconfirmed and not na(eqPivotHigh)
     evEqHigh := f_detectEQHL(true, eqPivotHigh, bar_index - i_eqlLength, time[i_eqlLength], prevEqHigh, i_eqThreshold * atr14)
     if not na(evEqHigh)
-        f_pushEvent(SMC_eqhl, evEqHigh, MAX_EVENTS)
+        f_pushEvent(SMC_eqhl, evEqHigh, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     prevEqHigh := eqPivotHigh
 if barstate.isconfirmed and not na(eqPivotLow)
     evEqLow := f_detectEQHL(false, eqPivotLow, bar_index - i_eqlLength, time[i_eqlLength], prevEqLow, i_eqThreshold * atr14)
     if not na(evEqLow)
-        f_pushEvent(SMC_eqhl, evEqLow, MAX_EVENTS)
+        f_pushEvent(SMC_eqhl, evEqLow, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     prevEqLow := eqPivotLow
 
 // --- Pools de liquidez: persistentes con ciclo de vida [T09b] + sweep [T10] ---
@@ -2201,10 +2268,17 @@ if barstate.isconfirmed
     if not na(evSweep)
         // Refina el sweep en su subtipo Spring/Raid [T24 · §3.7]. rangeLow = discount del dealing range.
         evSweep.kind := f_classifySweep(SMC_pools, evSweep.price, evSweep.dir, evSweep.barIdx, chartState.pdLow, i_raidTouches, i_poolTol * atr14)
-        f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS)
+        f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
         evSweepAlert := evSweep
         lastSweepBar := bar_index
     f_prunePools(SMC_pools, MAX_POOLS)
+    // Fuerza de pools: son DINAMICOS (touches/swept/cercania cambian por f_upsertPool) -> se refresca
+    // al cierre en vez de fijarse en un unico sitio de creacion [Eje2 · ADR-014 · §5.5]. Guard de tamano
+    // por la semantica de 'for 0 to size-1' de Pine (con size=0 iteraria a -1).
+    if array.size(SMC_pools) > 0
+        for pi = 0 to array.size(SMC_pools) - 1
+            SMC_Pool pStr = array.get(SMC_pools, pi)
+            pStr.strength := f_poolStrength(pStr, close, atr14)
 
 // --- False Breakout [§3.7 #14] · T24 ---
 // Mismo wiring que Visual pero SIN dibujo. CIERRE mas alla de un nivel de pool que REVIERTE en <= i_fbBars
@@ -2218,7 +2292,7 @@ if barstate.isconfirmed
             SMC_FBreak fb = array.get(SMC_fbreaks, i)
             int fbRes = f_detectFalseBreak(fb, close, bar_index, i_fbBars)
             if fbRes == 1
-                f_pushEvent(SMC_fbreakEvents, SMC_Event.new(fb.level, fb.breakDir > 0 ? DIR_BEAR : DIR_BULL, bar_index, time, "", KIND_FALSEBREAK), MAX_EVENTS)
+                f_pushEvent(SMC_fbreakEvents, SMC_Event.new(fb.level, fb.breakDir > 0 ? DIR_BEAR : DIR_BULL, bar_index, time, "", KIND_FALSEBREAK), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
                 array.remove(SMC_fbreaks, i)
             else if fbRes == -1
                 array.remove(SMC_fbreaks, i)
@@ -2288,7 +2362,7 @@ if barstate.isconfirmed
     if i_smtEnable
         evSMT := f_detectSMT(newSwingHigh, smtChSHcur, smtChSHprev, newSwingLow, smtChSLcur, smtChSLprev, smtCoSHcur, smtCoSHprev, smtCoSLcur, smtCoSLprev, i_smtInverse, bar_index, time)
         if not na(evSMT)
-            f_pushEvent(SMC_smt, evSMT, MAX_EVENTS)
+            f_pushEvent(SMC_smt, evSMT, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Judas Swing [§3.5] · T18 ---
 // Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_judas para el scoring, Sprint
@@ -2307,7 +2381,7 @@ if barstate.isconfirmed
     judasPendLevel := jLvl
     evJudas := jEv
     if not na(evJudas)
-        f_pushEvent(SMC_judas, evJudas, MAX_EVENTS)
+        f_pushEvent(SMC_judas, evJudas, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Rejection [§2.7] · T20 ---
 // Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_rejections para el scoring,
@@ -2325,7 +2399,7 @@ if barstate.isconfirmed
     bool rejNearHigh = f_wickNearLevel(high, SMC_zones, SMC_pools, SMC_eqhl, chartState.pdHigh, chartState.pdLow, chartState.pdMid, emaFast, emaMid, emaSlow, rejTol)
     evRej := f_detectRejection(open, high, low, close, i_rejWickFactor, rejNearLow, rejNearHigh, bar_index, time)
     if not na(evRej)
-        f_pushEvent(SMC_rejections, evRej, MAX_EVENTS)
+        f_pushEvent(SMC_rejections, evRej, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // --- Flip [§2.8] · T21 ---
 // Mismo wiring que Visual pero SIN dibujo (la Strategy solo pobla SMC_flipEvents para el scoring,
@@ -2342,7 +2416,7 @@ if barstate.isconfirmed
             f_updateFlip(f, high, low, close)
             if f.state == LF_FLIPPED
                 evFlip := SMC_Event.new(f.level, f.breakDir > 0 ? DIR_BULL : DIR_BEAR, bar_index, time, "", KIND_FLIP)
-                f_pushEvent(SMC_flipEvents, evFlip, MAX_EVENTS)
+                f_pushEvent(SMC_flipEvents, evFlip, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
                 array.remove(SMC_flips, i)
             else if f.state == LF_INVALID
                 array.remove(SMC_flips, i)
@@ -2392,20 +2466,20 @@ if barstate.isconfirmed
     [es37, es38, es39, es40, es41, es42] = f_emaState(close, emaFast, emaMid, emaSlow, emaRecentCrossDir, emaBounceDir)
     emaAggr := es37 + es38 + es39 + es40 + es41 + es42
     if emaBounceDir != 0
-        f_pushEvent(SMC_emaBounces, SMC_Event.new(emaBounceDir > 0 ? low : high, emaBounceDir, bar_index, time, "", KIND_EMABOUNCE), MAX_EVENTS)
+        f_pushEvent(SMC_emaBounces, SMC_Event.new(emaBounceDir > 0 ? low : high, emaBounceDir, bar_index, time, "", KIND_EMABOUNCE), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     int xc2050  = f_emaCrossDir(emaFast, emaFast[1], emaMid,  emaMid[1])
     int xc50200 = f_emaCrossDir(emaMid,  emaMid[1],  emaSlow, emaSlow[1])
     int xc20200 = f_emaCrossDir(emaFast, emaFast[1], emaSlow, emaSlow[1])
     if xc2050 != 0
-        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaMid,  xc2050,  bar_index, time, "20x50",  KIND_EMACROSS), MAX_EVENTS)
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaMid,  xc2050,  bar_index, time, "20x50",  KIND_EMACROSS), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     if xc50200 != 0
-        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc50200, bar_index, time, "50x200", KIND_EMACROSS), MAX_EVENTS)
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc50200, bar_index, time, "50x200", KIND_EMACROSS), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     if xc20200 != 0
-        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc20200, bar_index, time, "20x200", KIND_EMACROSS), MAX_EVENTS)
+        f_pushEvent(SMC_emaCrosses, SMC_Event.new(emaSlow, xc20200, bar_index, time, "20x200", KIND_EMACROSS), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
     int stackNow  = (emaFast > emaSlow and emaMid > emaSlow) ? 1 : (emaFast < emaSlow and emaMid < emaSlow) ? -1 : 0
     int stackPrev = (emaFast[1] > emaSlow[1] and emaMid[1] > emaSlow[1]) ? 1 : (emaFast[1] < emaSlow[1] and emaMid[1] < emaSlow[1]) ? -1 : 0
     if stackNow != 0 and stackNow != stackPrev
-        f_pushEvent(SMC_emaStacks, SMC_Event.new(emaSlow, stackNow, bar_index, time, "", KIND_EMASTACK), MAX_EVENTS)
+        f_pushEvent(SMC_emaStacks, SMC_Event.new(emaSlow, stackNow, bar_index, time, "", KIND_EMASTACK), MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO

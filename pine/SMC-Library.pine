@@ -192,25 +192,74 @@ export type SMC_FBreak
 
 // --- Helpers de arrays acotados [reglas-dev §1.6] ---
 // Tras cada push, si se supera el limite se descarta el mas antiguo (FIFO).
-export f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN) =>
+// --- Motor de fuerza (strength 0-1) [Eje2 · ADR-014 · HANDOFF §5.2/5.3] ---
+// Calidad intrinseca 0-1 por marca (propiedad de DETECCION: la leen los DOS consumidores
+// -> jerarquia visual F1 + scoring F3). PURAS, al cierre, reusan atr14 (nunca recalcular
+// intra-vela, §5.5). Pesos por primitivo = candidatos CONGELADOS hasta Fase 3 (ADR-002);
+// la FORMA (suma ponderada + quantizacion 0/1/2) se fija aqui, los NUMEROS entran por
+// IS/OOS. Cada tipo aporta solo los primitivos que su UDT porta (zona: rango/state/dist/
+// alineacion + bonus refinamiento; evento: rango/cuerpo/sweep/alineacion; §5.2). No se
+// renormaliza: strength es senal RELATIVA y los umbrales 0.33/0.66 tambien son candidatos.
+export f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
+    float s = 0.0
+    if atr14 > 0
+        s += 0.30 * math.min((z.top - z.bottom) / atr14 / 3.0, 1.0)                                       // rango x ATR
+        float fresh = z.state == ZS_ACTIVE ? 1.0 : z.state == ZS_PARTIAL ? 0.5 : 0.0
+        s += 0.20 * fresh                                                                                 // frescura / state
+        float distAtr = (curPrice > z.top ? curPrice - z.top : curPrice < z.bottom ? z.bottom - curPrice : 0.0) / atr14
+        s += 0.10 * (1.0 - math.min(distAtr / 2.0, 1.0))                                                  // cercania al nivel
+        s += 0.10 * (biasDir == 0 ? 0.5 : z.dir == biasDir ? 1.0 : 0.0)                                   // alineacion con bias
+        if z.trueFvg or z.propulsion or z.gradedFvg
+            s += 0.10                                                                                     // refinamiento [FIX P-05]
+    math.min(s, 1.0)
+
+export f_eventStrength(SMC_Event e, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
+    float s = 0.0
+    s += 0.40 * math.min(rangeAtr / 3.0, 1.0)                                                            // rango x ATR / displacement
+    s += 0.20 * math.max(math.min((bodyPct - 0.5) / 0.5, 1.0), 0.0)                                      // cuerpo %
+    s += 0.20 * (hadSweep ? 1.0 : 0.0)                                                                   // sweep previo
+    s += 0.20 * (biasDir == 0 or e.dir == 0 ? 0.5 : e.dir == biasDir ? 1.0 : 0.0)                        // alineacion
+    math.min(s, 1.0)
+
+export f_swingStrength(SMC_Swing sw, int biasDir) =>
+    float role  = (sw.kind == KIND_HH or sw.kind == KIND_LL) ? 1.0 : 0.6                                 // extremo estructural vs pullback
+    float fresh = sw.swept ? 0.0 : 1.0                                                                   // no-roto
+    int   swDir = (sw.kind == KIND_HH or sw.kind == KIND_HL) ? DIR_BULL : DIR_BEAR
+    float align = biasDir == 0 ? 0.5 : swDir == biasDir ? 1.0 : 0.0
+    math.min(0.5 * role + 0.3 * fresh + 0.2 * align, 1.0)
+
+export f_poolStrength(SMC_Pool p, float curPrice, float atr14) =>
+    float s = 0.5 * math.min(p.touches / 3.0, 1.0) + 0.3 * (p.swept ? 0.0 : 1.0)                         // toques + no-barrido
+    if atr14 > 0
+        s += 0.2 * (1.0 - math.min(math.abs(curPrice - p.level) / atr14 / 2.0, 1.0))                     // cercania
+    math.min(s, 1.0)
+
+export f_strengthLevel(float s) =>
+    s >= 0.66 ? 2 : s >= 0.33 ? 1 : 0                                                                    // 2=alta / 1=media / 0=baja (§5.3)
+
+export f_pushZone(array<SMC_Zone> a, SMC_Zone z, int maxN, float curPrice, float atr14, int biasDir) =>
+    z.strength := f_zoneStrength(z, curPrice, atr14, biasDir)
     array.push(a, z)
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
 
-export f_pushEvent(array<SMC_Event> a, SMC_Event e, int maxN) =>
+export f_pushEvent(array<SMC_Event> a, SMC_Event e, int maxN, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
+    e.strength := f_eventStrength(e, rangeAtr, bodyPct, hadSweep, biasDir)
     array.push(a, e)
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
 
-export f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN) =>
+export f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN, int biasDir) =>
+    s.strength := f_swingStrength(s, biasDir)
     array.push(a, s)
     if array.size(a) > maxN
         array.shift(a)
     array.size(a)
 
-export f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN) =>
+export f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN, float curPrice, float atr14) =>
+    p.strength := f_poolStrength(p, curPrice, atr14)
     array.push(a, p)
     if array.size(a) > maxN
         array.shift(a)
@@ -1443,13 +1492,13 @@ export f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct
             int obOrigin = ev.dir == DIR_BULL ? structTf.highBarIdx : structTf.lowBarIdx
             SMC_Zone obZone = f_detectOB(ev, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, obHighVolFactor, KIND_OB)
             if not na(obZone)
-                f_pushZone(zonesTf, obZone, MAX_ZONES)
+                f_pushZone(zonesTf, obZone, MAX_ZONES, close, atr14, st.bias)
         // FVG: barTime = vela MEDIA (time[1] = barIdx-1, el desplazamiento que crea el gap, igual
         // que el dibujo nativo f_drawFVG) -> el transporte MTF ancla la caja exacta vela-a-vela en el
         // LTF sin quedar "corrida" una barra a la derecha (pref. usuario S042). [T13c]
         SMC_Zone fvgZone = f_detectFVG(high, low, high[2], low[2], bar_index, time[1], fvgThreshold * atr14, KIND_FVG)
         if not na(fvgZone)
-            f_pushZone(zonesTf, fvgZone, MAX_ZONES)
+            f_pushZone(zonesTf, fvgZone, MAX_ZONES, close, atr14, st.bias)
         SMC_Event evEqH = na
         SMC_Event evEqL = na
         if not na(eqPH)
