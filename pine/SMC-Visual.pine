@@ -102,6 +102,9 @@ i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, max
 i_showGradient = input.bool(true,  "Mostrar Gradient Levels (grid del rango §5.16)", group = GRP_GRAD)
 i_gradEighths  = input.bool(true,  "Incluir eighths (0.125/0.375/0.625/0.875)", group = GRP_GRAD)
 i_gradTol      = input.float(0.12, "Tolerancia toca-nivel (x ATR14) §5.18 (T42/T43)", minval = 0.0, step = 0.01, group = GRP_GRAD)
+i_gradStaleBars    = input.int(150, "P2 suspension: dealing range 'stale' (velas) §5.16", minval = 10, group = GRP_GRAD)
+i_gradBodyLookback = input.int(5,   "Desempate cuerpos-vs-nivel (velas) §5.16", minval = 1, maxval = 50, group = GRP_GRAD)
+i_gradPersistDays  = input.int(5,   "Ghost/persistencia grids (cuota) §5.16", minval = 0, maxval = 20, group = GRP_GRAD)
 i_showEQHL     = input.bool(true,  "Mostrar Equal Highs/Lows",         group = GRP_EQHL)
 i_eqThreshold  = input.float(0.1,  "Umbral igualdad (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_EQHL)
 i_eqlLength    = input.int(3,      "Barras confirmacion EQH/EQL", minval = 1, group = GRP_EQHL)
@@ -1255,6 +1258,38 @@ f_gradientConfluenceBonus(int nSobreQuadrant, float gradMultMax, float k) =>
         bonus := (gradMultMax - 1.0) * (1.0 - math.exp(-k * nSobreQuadrant))
     bonus
 
+// f_selectGradientSource: politica de rango-fuente (regla §5.16). P1 (dealing range) es la
+// fuente por defecto; P2 (suspension diario) la desafia SOLO cuando P1 es "stale" (swing
+// origen a mas de gradStaleBars velas) y entonces gana el desempate cuerpos-vs-nivel
+// (f_bodyRespectsLevel: mas cuerpos recostados sobre su grid). P3 (opening gaps) NO se
+// selecciona aqui: corre en paralelo en el consumidor (alimenta T43). Recibe los niveles YA
+// calculados de cada candidato (levels1/levels2) para no recomputar ni destructurar. Devuelve
+// [top, bottom, srcKind] del ganador; el consumidor ya tiene sus niveles. PURA -> golden test.
+f_selectGradientSource(float top1, float bottom1, array<float> levels1, float top2, float bottom2, array<float> levels2, bool p1Stale, array<float> recentOpens, array<float> recentCloses, float tol) =>
+    bool  v1 = not na(top1) and not na(bottom1) and top1 > bottom1
+    bool  v2 = not na(top2) and not na(bottom2) and top2 > bottom2
+    float rt = na
+    float rb = na
+    int   rk = GRAD_SRC_PD
+    if v1 and v2
+        bool useP2 = false
+        if p1Stale
+            int c1 = f_bodyRespectsLevel(recentOpens, recentCloses, levels1, tol)
+            int c2 = f_bodyRespectsLevel(recentOpens, recentCloses, levels2, tol)
+            useP2 := c2 > c1
+        rt := useP2 ? top2 : top1
+        rb := useP2 ? bottom2 : bottom1
+        rk := useP2 ? GRAD_SRC_SUSPENSION : GRAD_SRC_PD
+    else if v1
+        rt := top1
+        rb := bottom1
+        rk := GRAD_SRC_PD
+    else if v2
+        rt := top2
+        rb := bottom2
+        rk := GRAD_SRC_SUSPENSION
+    [rt, rb, rk]
+
 // --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
 // f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
 // getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del
@@ -1899,6 +1934,64 @@ var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
 float atr14      = ta.atr(14)
 var int lastSweepBar = na  // ultima barra con sweep -> gate del Mitigation Block (§2.8: "sin sweep previo")
+// --- Gradient Levels: rango-fuente P1/P2/P3 + seleccion + ghost [reglas-smc-ict §5.16 · T41] ---
+// P1 = dealing range (trailing). P2 = suspension diario = highest/lowest del ULTIMO dia D1
+// CONFIRMADO (request.security high[1]/low[1], lookahead_off -> anti-repaint, TF-agnostico).
+// P3 = gaps de apertura measurables (mini-rango [close_prev, open]) que corren en PARALELO
+// (alimentan T43; NO reemplazan a P1/P2). f_selectGradientSource elige el grid PRIMARIO (P1 por
+// defecto; P2 si P1 stale y gana el desempate cuerpos-vs-nivel). Ghost: al RE-FIJARSE el
+// rango-fuente primario (nuevo swing dominante / nueva frontera de dia) se archiva el grid previo
+// hasta i_gradPersistDays. Bloque de wiring de consumidor (usa inputs/request.security) -> FUERA
+// del LIBRARY CORE byte-identico.
+[gradSusTop, gradSusBot] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_off)
+bool gradNewDay = ta.change(time("D")) != 0
+var array<SMC_GradientGrid> SMC_gapGrids   = array.new<SMC_GradientGrid>()
+var array<SMC_GradientGrid> SMC_gradGhosts = array.new<SMC_GradientGrid>()
+var float gradSelTop  = na
+var float gradSelBot  = na
+var int   gradSelKind = GRAD_SRC_PD
+var array<float> gradSelLevels = array.new<float>()
+var array<bool>  gradSelQuad   = array.new<bool>()
+var int   gradPrevKind   = na
+var int   gradPrevPdAnch = na
+if barstate.isconfirmed
+    // P3: nuevo gap de apertura measurable -> nuevo mini-grid en paralelo (cuota i_gradPersistDays)
+    if gradNewDay
+        bool gpMeas = not na(atr14) and math.abs(open - close[1]) >= i_gapMin * atr14
+        if gpMeas
+            float gpTop = math.max(close[1], open)
+            float gpBot = math.min(close[1], open)
+            [gpLv, gpQ] = f_computeGradientLevels(gpTop, gpBot, i_gradEighths)
+            if array.size(gpLv) > 0
+                array.push(SMC_gapGrids, SMC_GradientGrid.new(gpTop, gpBot, GRAD_SRC_OPENGAP, time, bar_index, gpLv, gpQ, 0))
+                while array.size(SMC_gapGrids) > i_gradPersistDays
+                    array.shift(SMC_gapGrids)
+    // Seleccion del grid PRIMARIO (P1 vs P2, §5.16)
+    bool gradP1Stale = not na(trailing.barIdx) and (bar_index - trailing.barIdx) > i_gradStaleBars
+    [gradP1Lv, gradP1Q] = f_computeGradientLevels(trailing.top, trailing.bottom, i_gradEighths)
+    [gradP2Lv, gradP2Q] = f_computeGradientLevels(gradSusTop, gradSusBot, i_gradEighths)
+    array<float> gradRecentO = array.new<float>()
+    array<float> gradRecentC = array.new<float>()
+    for gb = 1 to i_gradBodyLookback
+        array.push(gradRecentO, open[gb])
+        array.push(gradRecentC, close[gb])
+    [gradSTop, gradSBot, gradSKind] = f_selectGradientSource(trailing.top, trailing.bottom, gradP1Lv, gradSusTop, gradSusBot, gradP2Lv, gradP1Stale, gradRecentO, gradRecentC, i_gradTol * atr14)
+    // Ghost: archivar el grid PRIMARIO previo SOLO cuando el rango-fuente se RE-FIJA (no en cada
+    // expansion intrabar del trailing) -> cambio de fuente, nuevo swing dominante (barIdx) o nuevo dia.
+    bool gradSrcRefixed = (not na(gradSelTop)) and ((gradSKind != gradPrevKind) or (gradSKind == GRAD_SRC_PD and trailing.barIdx != gradPrevPdAnch) or (gradSKind == GRAD_SRC_SUSPENSION and gradNewDay))
+    if gradSrcRefixed and i_gradPersistDays > 0 and array.size(gradSelLevels) > 0
+        array.push(SMC_gradGhosts, SMC_GradientGrid.new(gradSelTop, gradSelBot, gradSelKind, na, na, array.copy(gradSelLevels), array.copy(gradSelQuad), 1))
+        while array.size(SMC_gradGhosts) > i_gradPersistDays
+            array.shift(SMC_gradGhosts)
+    // Winner sin recomputar (reusa los levels/quad de la fuente elegida)
+    bool gradSelIsP2 = gradSKind == GRAD_SRC_SUSPENSION
+    gradSelTop    := gradSTop
+    gradSelBot    := gradSBot
+    gradSelKind   := gradSKind
+    gradSelLevels := gradSelIsP2 ? gradP2Lv : gradP1Lv
+    gradSelQuad   := gradSelIsP2 ? gradP2Q  : gradP1Q
+    gradPrevKind   := gradSKind
+    gradPrevPdAnch := trailing.barIdx
 if barstate.isconfirmed
     array.push(obBufHigh, high)
     array.push(obBufLow,  low)
@@ -1970,12 +2063,18 @@ if barstate.isconfirmed
         // sigue en la familia FVG (mitigacion/dibujo); eleva su peso en el scoring (Fase 3).
         SMC_Event fvgMidDisp = f_detectDisplacement(open[1], high[1], low[1], close[1], atr14, i_dispFactor, i_dispBodyPct, false, false, bar_index - 1, time[1])
         fvgZone.trueFvg := not na(fvgMidDisp)
-        // FVG valido [T43 · §5.18]: el CE del FVG toca un gradient level del grid (§5.16) sobre el
-        // dealing range vigente (fuente P1). Flag gradedFvg (refina #18/#20, no zona nueva) -> eleva
-        // strength en la capa de discriminacion. includeEighths=true (admite cualquier punto del grid).
-        // Anti-repaint: mismo instante de confirmacion del FVG.
-        [gLvls, gQuad] = f_computeGradientLevels(trailing.top, trailing.bottom, true)
-        fvgZone.gradedFvg := array.size(gQuad) > 0 and f_nearGradientLevel((fvgZone.top + fvgZone.bottom) / 2.0, gLvls, i_gradTol * atr14)
+        // FVG valido [T43 · §5.18]: el CE del FVG toca un gradient level. Fuente = grid PRIMARIO
+        // seleccionado por f_selectGradientSource (P1/P2, §5.16) O cualquier mini-grid P3 de gap de
+        // apertura reciente (corren en PARALELO). Flag gradedFvg (refina #18/#20, no zona nueva) ->
+        // eleva strength en la capa de discriminacion. Anti-repaint: mismo instante de confirmacion.
+        float fvgCE = (fvgZone.top + fvgZone.bottom) / 2.0
+        bool fvgGraded = array.size(gradSelLevels) > 0 and f_nearGradientLevel(fvgCE, gradSelLevels, i_gradTol * atr14)
+        if not fvgGraded and array.size(SMC_gapGrids) > 0
+            for gi = 0 to array.size(SMC_gapGrids) - 1
+                if f_nearGradientLevel(fvgCE, array.get(SMC_gapGrids, gi).levels, i_gradTol * atr14)
+                    fvgGraded := true
+                    break
+        fvgZone.gradedFvg := fvgGraded
         // BPR [T28 · §5.3]: ¿este FVG nuevo se solapa con un FVG vivo de dir OPUESTO reciente? -> zona de
         // precio balanceado. Se busca ANTES de empujar el FVG (compara contra los previos en SMC_zones).
         SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
@@ -3228,34 +3327,48 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
     array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(color.gray, 80),  textcolor = color.gray,  size = size.small))
     array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_left, color = color.new(color.green, 80), textcolor = color.green, size = size.small))
 
-// --- Gradient Levels: grid del dealing range [§5.16 · T41] (Visual-only) ---
-// Grid sobre el rango-fuente P1 (dealing range Premium/Discount = trailing.top/bottom).
-// Quadrants (0.25/0.75) linea solida azul tenue; eighths punteada mas tenue. Los niveles
-// 0/0.5/1 ya los dibuja el bloque P/D (Discount/EQ/Premium) -> aqui se saltan (no duplicar
-// tinta). Toggle i_showGradient; eighths on/off con i_gradEighths.
+// --- Gradient Levels: grid PRIMARIO seleccionado + ghosts [§5.16 · T41] (Visual-only) ---
+// Dibuja el grid del rango-fuente PRIMARIO elegido por f_selectGradientSource: P1 dealing range
+// (azul) o P2 suspension diario (teal). Quadrants solidos, eighths punteados. Cuando la fuente es
+// P1 se saltan 0/0.5/1 (ya los dibuja el bloque P/D Discount/EQ/Premium -> no duplicar tinta);
+// para P2 se dibujan todos (el rango suspension no lo cubre P/D). Ademas dibuja los grids GHOST
+// archivados (rango-fuente previo, solo quadrants, gris muy tenue, hasta i_gradPersistDays). Los
+// mini-grids P3 de gaps NO se dibujan (son filtro de T43). Toggle i_showGradient.
 var array<line>  SMC_gradLines  = array.new<line>()
 var array<label> SMC_gradLabels = array.new<label>()
-if i_showGradient and barstate.islast and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
+if i_showGradient and barstate.islast
     for l in SMC_gradLines
         line.delete(l)
     for lb in SMC_gradLabels
         label.delete(lb)
     array.clear(SMC_gradLines)
     array.clear(SMC_gradLabels)
-    [gLevels, gIsQuad] = f_computeGradientLevels(trailing.top, trailing.bottom, i_gradEighths)
-    int gLeft = math.min(nz(trailing.topTime, time), nz(trailing.bottomTime, time))
-    if array.size(gLevels) > 0
-        for gi = 0 to array.size(gLevels) - 1
-            float lvl  = array.get(gLevels, gi)
-            bool  q    = array.get(gIsQuad, gi)
-            float frac = (lvl - trailing.bottom) / (trailing.top - trailing.bottom)
-            bool  skip = frac <= 0.001 or frac >= 0.999 or math.abs(frac - 0.5) < 0.001
+    // Ghosts (rango-fuente previo) primero, debajo: solo quadrants, gris muy tenue, sin etiqueta.
+    if array.size(SMC_gradGhosts) > 0
+        for ghi = 0 to array.size(SMC_gradGhosts) - 1
+            SMC_GradientGrid gg = array.get(SMC_gradGhosts, ghi)
+            if array.size(gg.levels) > 0
+                for gj = 0 to array.size(gg.levels) - 1
+                    if array.get(gg.isQuadrant, gj)
+                        array.push(SMC_gradLines, line.new(time - 172800000, array.get(gg.levels, gj), time, array.get(gg.levels, gj), xloc = xloc.bar_time, color = color.new(color.gray, 88), style = line.style_dotted, width = 1))
+    // Grid PRIMARIO vigente.
+    if not na(gradSelTop) and not na(gradSelBot) and gradSelTop > gradSelBot and array.size(gradSelLevels) > 0
+        bool  selP2   = gradSelKind == GRAD_SRC_SUSPENSION
+        color baseCol = selP2 ? color.teal : color.blue
+        int   gLeft   = selP2 ? time - 172800000 : math.min(nz(trailing.topTime, time), nz(trailing.bottomTime, time))
+        float gSpan   = gradSelTop - gradSelBot
+        for gi = 0 to array.size(gradSelLevels) - 1
+            float lvl  = array.get(gradSelLevels, gi)
+            bool  q    = array.get(gradSelQuad, gi)
+            float frac = (lvl - gradSelBot) / gSpan
+            bool  skip = (not selP2) and (frac <= 0.001 or frac >= 0.999 or math.abs(frac - 0.5) < 0.001)
             if not skip
-                color  gcol   = q ? color.new(color.blue, 35) : color.new(color.blue, 70)
+                color  gcol   = q ? color.new(baseCol, 35) : color.new(baseCol, 70)
                 string gstyle = q ? line.style_solid : line.style_dotted
                 array.push(SMC_gradLines, line.new(gLeft, lvl, time, lvl, xloc = xloc.bar_time, color = gcol, style = gstyle, width = 1))
-                string gtxt = q ? (frac < 0.5 ? "LQ " : "UQ ") + str.tostring(lvl, format.mintick) : str.tostring(math.round(frac * 8)) + "/8"
-                array.push(SMC_gradLabels, label.new(bar_index + 2, lvl, gtxt, style = label.style_label_left, color = color.new(color.blue, 90), textcolor = color.blue, size = size.tiny))
+                string src  = selP2 ? "s" : ""
+                string gtxt = q ? (math.abs(frac - 0.5) < 0.001 ? "CE" : frac < 0.5 ? "LQ" : "UQ") + src + " " + str.tostring(lvl, format.mintick) : str.tostring(math.round(frac * 8)) + "/8"
+                array.push(SMC_gradLabels, label.new(bar_index + 2, lvl, gtxt, style = label.style_label_left, color = color.new(baseCol, 90), textcolor = baseCol, size = size.tiny))
 
 // Kill Zone activa: sombreado de fondo (T11). London azul / NY AM naranja / Tokyo violeta. Solo informa
 // la sesion institucional activa (§3.4 · ADR-001); NO marca entradas ni bloquea (eso es el scoring #34).

@@ -28,6 +28,10 @@ i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño FVG (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_gradTol      = input.float(0.12, "Gradient: tolerancia FVG-valido (x ATR14) §5.18", minval = 0.0, step = 0.01, group = GRP_FVG)
+i_gradEighths      = input.bool(true, "Gradient: incluir eighths §5.16", group = GRP_FVG)
+i_gradStaleBars    = input.int(150, "Gradient: dealing range 'stale' (velas, P2) §5.16", minval = 10, group = GRP_FVG)
+i_gradBodyLookback = input.int(5,   "Gradient: desempate cuerpos-vs-nivel (velas) §5.16", minval = 1, maxval = 50, group = GRP_FVG)
+i_gradPersistDays  = input.int(5,   "Gradient: persistencia grids P3 (cuota) §5.16", minval = 0, maxval = 20, group = GRP_FVG)
 i_pdSwingLen  = input.int(50, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
 i_pdEqBand    = input.float(5.0, "Banda equilibrium P/D (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_SCORE)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
@@ -1183,6 +1187,38 @@ f_gradientConfluenceBonus(int nSobreQuadrant, float gradMultMax, float k) =>
         bonus := (gradMultMax - 1.0) * (1.0 - math.exp(-k * nSobreQuadrant))
     bonus
 
+// f_selectGradientSource: politica de rango-fuente (regla §5.16). P1 (dealing range) es la
+// fuente por defecto; P2 (suspension diario) la desafia SOLO cuando P1 es "stale" (swing
+// origen a mas de gradStaleBars velas) y entonces gana el desempate cuerpos-vs-nivel
+// (f_bodyRespectsLevel: mas cuerpos recostados sobre su grid). P3 (opening gaps) NO se
+// selecciona aqui: corre en paralelo en el consumidor (alimenta T43). Recibe los niveles YA
+// calculados de cada candidato (levels1/levels2) para no recomputar ni destructurar. Devuelve
+// [top, bottom, srcKind] del ganador; el consumidor ya tiene sus niveles. PURA -> golden test.
+f_selectGradientSource(float top1, float bottom1, array<float> levels1, float top2, float bottom2, array<float> levels2, bool p1Stale, array<float> recentOpens, array<float> recentCloses, float tol) =>
+    bool  v1 = not na(top1) and not na(bottom1) and top1 > bottom1
+    bool  v2 = not na(top2) and not na(bottom2) and top2 > bottom2
+    float rt = na
+    float rb = na
+    int   rk = GRAD_SRC_PD
+    if v1 and v2
+        bool useP2 = false
+        if p1Stale
+            int c1 = f_bodyRespectsLevel(recentOpens, recentCloses, levels1, tol)
+            int c2 = f_bodyRespectsLevel(recentOpens, recentCloses, levels2, tol)
+            useP2 := c2 > c1
+        rt := useP2 ? top2 : top1
+        rb := useP2 ? bottom2 : bottom1
+        rk := useP2 ? GRAD_SRC_SUSPENSION : GRAD_SRC_PD
+    else if v1
+        rt := top1
+        rb := bottom1
+        rk := GRAD_SRC_PD
+    else if v2
+        rt := top2
+        rb := bottom2
+        rk := GRAD_SRC_SUSPENSION
+    [rt, rb, rk]
+
 // --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
 // f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
 // getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del
@@ -1819,6 +1855,59 @@ var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
 float atr14      = ta.atr(14)
 var int lastSweepBar = na  // ultima barra con sweep -> gate del Mitigation Block (§2.8: "sin sweep previo")
+// --- Gradient Levels: rango-fuente P1/P2/P3 + seleccion [reglas-smc-ict §5.16 · T41] ---
+// Paridad con Visual (mismo insumo para gradedFvg): P1 = dealing range (trailing); P2 = suspension
+// diario (highest/lowest del ULTIMO dia D1 CONFIRMADO via request.security, lookahead_off ->
+// anti-repaint); P3 = gaps de apertura measurables (mini-rango en paralelo, alimentan T43).
+// f_selectGradientSource elige el grid PRIMARIO (P1 por defecto; P2 si stale y gana el desempate
+// cuerpos-vs-nivel). Se mantiene el estado ghost (para paridad de calculo) aunque Strategy NO dibuja.
+// Wiring de consumidor (usa inputs/request.security) -> FUERA del LIBRARY CORE byte-identico.
+[gradSusTop, gradSusBot] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_off)
+bool gradNewDay = ta.change(time("D")) != 0
+var array<SMC_GradientGrid> SMC_gapGrids   = array.new<SMC_GradientGrid>()
+var array<SMC_GradientGrid> SMC_gradGhosts = array.new<SMC_GradientGrid>()
+var float gradSelTop  = na
+var float gradSelBot  = na
+var int   gradSelKind = GRAD_SRC_PD
+var array<float> gradSelLevels = array.new<float>()
+var array<bool>  gradSelQuad   = array.new<bool>()
+var int   gradPrevKind   = na
+var int   gradPrevPdAnch = na
+if barstate.isconfirmed
+    // P3: nuevo gap de apertura measurable -> nuevo mini-grid en paralelo (cuota i_gradPersistDays)
+    if gradNewDay
+        bool gpMeas = not na(atr14) and math.abs(open - close[1]) >= i_gapMin * atr14
+        if gpMeas
+            float gpTop = math.max(close[1], open)
+            float gpBot = math.min(close[1], open)
+            [gpLv, gpQ] = f_computeGradientLevels(gpTop, gpBot, i_gradEighths)
+            if array.size(gpLv) > 0
+                array.push(SMC_gapGrids, SMC_GradientGrid.new(gpTop, gpBot, GRAD_SRC_OPENGAP, time, bar_index, gpLv, gpQ, 0))
+                while array.size(SMC_gapGrids) > i_gradPersistDays
+                    array.shift(SMC_gapGrids)
+    // Seleccion del grid PRIMARIO (P1 vs P2, §5.16)
+    bool gradP1Stale = not na(trailing.barIdx) and (bar_index - trailing.barIdx) > i_gradStaleBars
+    [gradP1Lv, gradP1Q] = f_computeGradientLevels(trailing.top, trailing.bottom, i_gradEighths)
+    [gradP2Lv, gradP2Q] = f_computeGradientLevels(gradSusTop, gradSusBot, i_gradEighths)
+    array<float> gradRecentO = array.new<float>()
+    array<float> gradRecentC = array.new<float>()
+    for gb = 1 to i_gradBodyLookback
+        array.push(gradRecentO, open[gb])
+        array.push(gradRecentC, close[gb])
+    [gradSTop, gradSBot, gradSKind] = f_selectGradientSource(trailing.top, trailing.bottom, gradP1Lv, gradSusTop, gradSusBot, gradP2Lv, gradP1Stale, gradRecentO, gradRecentC, i_gradTol * atr14)
+    bool gradSrcRefixed = (not na(gradSelTop)) and ((gradSKind != gradPrevKind) or (gradSKind == GRAD_SRC_PD and trailing.barIdx != gradPrevPdAnch) or (gradSKind == GRAD_SRC_SUSPENSION and gradNewDay))
+    if gradSrcRefixed and i_gradPersistDays > 0 and array.size(gradSelLevels) > 0
+        array.push(SMC_gradGhosts, SMC_GradientGrid.new(gradSelTop, gradSelBot, gradSelKind, na, na, array.copy(gradSelLevels), array.copy(gradSelQuad), 1))
+        while array.size(SMC_gradGhosts) > i_gradPersistDays
+            array.shift(SMC_gradGhosts)
+    bool gradSelIsP2 = gradSKind == GRAD_SRC_SUSPENSION
+    gradSelTop    := gradSTop
+    gradSelBot    := gradSBot
+    gradSelKind   := gradSKind
+    gradSelLevels := gradSelIsP2 ? gradP2Lv : gradP1Lv
+    gradSelQuad   := gradSelIsP2 ? gradP2Q  : gradP1Q
+    gradPrevKind   := gradSKind
+    gradPrevPdAnch := trailing.barIdx
 if barstate.isconfirmed
     array.push(obBufHigh, high)
     array.push(obBufLow,  low)
@@ -1885,11 +1974,18 @@ if barstate.isconfirmed
         // el FVG (refina #18/#20), eleva su peso en el scoring. Mismo wiring que Visual (sin dibujo).
         SMC_Event fvgMidDisp = f_detectDisplacement(open[1], high[1], low[1], close[1], atr14, i_dispFactor, i_dispBodyPct, false, false, bar_index - 1, time[1])
         fvgZone.trueFvg := not na(fvgMidDisp)
-        // FVG valido [T43 · §5.18]: el CE del FVG toca un gradient level del grid (§5.16) sobre el
-        // dealing range vigente (fuente P1). Flag gradedFvg (refina #18/#20, no zona nueva; mismo
-        // wiring que Visual, sin dibujo). includeEighths=true (admite cualquier punto del grid).
-        [gLvls, gQuad] = f_computeGradientLevels(trailing.top, trailing.bottom, true)
-        fvgZone.gradedFvg := array.size(gQuad) > 0 and f_nearGradientLevel((fvgZone.top + fvgZone.bottom) / 2.0, gLvls, i_gradTol * atr14)
+        // FVG valido [T43 · §5.18]: el CE del FVG toca un gradient level. Fuente = grid PRIMARIO
+        // seleccionado por f_selectGradientSource (P1/P2, §5.16) O cualquier mini-grid P3 de gap de
+        // apertura reciente (paralelo). Flag gradedFvg (refina #18/#20, no zona nueva; mismo wiring
+        // que Visual, sin dibujo). Anti-repaint: mismo instante de confirmacion del FVG.
+        float fvgCE = (fvgZone.top + fvgZone.bottom) / 2.0
+        bool fvgGraded = array.size(gradSelLevels) > 0 and f_nearGradientLevel(fvgCE, gradSelLevels, i_gradTol * atr14)
+        if not fvgGraded and array.size(SMC_gapGrids) > 0
+            for gi = 0 to array.size(SMC_gapGrids) - 1
+                if f_nearGradientLevel(fvgCE, array.get(SMC_gapGrids, gi).levels, i_gradTol * atr14)
+                    fvgGraded := true
+                    break
+        fvgZone.gradedFvg := fvgGraded
         // BPR [T28 · §5.3]: solape con FVG vivo de dir opuesto reciente -> zona balanceada (sin dibujo).
         SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)

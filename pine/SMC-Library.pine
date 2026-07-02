@@ -1025,6 +1025,38 @@ export f_gradientConfluenceBonus(int nSobreQuadrant, float gradMultMax, float k)
         bonus := (gradMultMax - 1.0) * (1.0 - math.exp(-k * nSobreQuadrant))
     bonus
 
+// f_selectGradientSource: politica de rango-fuente (regla §5.16). P1 (dealing range) es la
+// fuente por defecto; P2 (suspension diario) la desafia SOLO cuando P1 es "stale" (swing
+// origen a mas de gradStaleBars velas) y entonces gana el desempate cuerpos-vs-nivel
+// (f_bodyRespectsLevel: mas cuerpos recostados sobre su grid). P3 (opening gaps) NO se
+// selecciona aqui: corre en paralelo en el consumidor (alimenta T43). Recibe los niveles YA
+// calculados de cada candidato (levels1/levels2) para no recomputar ni destructurar. Devuelve
+// [top, bottom, srcKind] del ganador; el consumidor ya tiene sus niveles. PURA -> golden test.
+export f_selectGradientSource(float top1, float bottom1, array<float> levels1, float top2, float bottom2, array<float> levels2, bool p1Stale, array<float> recentOpens, array<float> recentCloses, float tol) =>
+    bool  v1 = not na(top1) and not na(bottom1) and top1 > bottom1
+    bool  v2 = not na(top2) and not na(bottom2) and top2 > bottom2
+    float rt = na
+    float rb = na
+    int   rk = GRAD_SRC_PD
+    if v1 and v2
+        bool useP2 = false
+        if p1Stale
+            int c1 = f_bodyRespectsLevel(recentOpens, recentCloses, levels1, tol)
+            int c2 = f_bodyRespectsLevel(recentOpens, recentCloses, levels2, tol)
+            useP2 := c2 > c1
+        rt := useP2 ? top2 : top1
+        rb := useP2 ? bottom2 : bottom1
+        rk := useP2 ? GRAD_SRC_SUSPENSION : GRAD_SRC_PD
+    else if v1
+        rt := top1
+        rb := bottom1
+        rk := GRAD_SRC_PD
+    else if v2
+        rt := top2
+        rb := bottom2
+        rk := GRAD_SRC_SUSPENSION
+    [rt, rb, rk]
+
 // --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
 // f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
 // getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del
