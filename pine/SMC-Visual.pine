@@ -2702,6 +2702,40 @@ f_visualLevel(int sLevel, bool isAnchor) =>
 // atajo por marca: true si la marca (con su strength y flag de ancla) debe dibujarse en el modo actual.
 f_densOK(float strength, bool isAnchor) =>
     f_visualLevel(f_strengthLevel(strength), isAnchor) >= densMin
+// score_render §2.5 (CONGELADO Fase 3): strength × f(cercania), f = 1 − min(distAtr/6, 0.8). La
+// cercania pondera pero NO anula una zona fuerte algo lejana. Llave de orden de anclas y del top-N.
+f_renderScore(float strength, float distAtr) =>
+    strength * (1.0 - math.min(distAtr / 6.0, 0.8))
+
+// --- Anclas estructurales §2.3 (Primarias SIEMPRE, independiente del strength) ---
+// "Zona activa mas cercana por lado": 1 arriba + 1 abajo del precio, la de mayor score_render, sobre
+// OB/FVG/Breaker activos (no mitigados/invalidados). Se precomputan los INDICES en SMC_zones; cada loop
+// de dibujo compara su i -> isAnchor -> f_visualLevel fuerza Primario (salta densMin, §2.2 paso 2). Las
+// anclas NO consumen el top-N de su familia (se reservan aparte). Tie-break: mayor score; a igualdad,
+// gana el primero hallado (orden de insercion ~ frescura). Guardado con barstate.islast (coste 1 pasada).
+int anchorHiIdx = -1
+int anchorLoIdx = -1
+if barstate.islast and array.size(SMC_zones) > 0
+    float aPx  = close
+    float aAtr = chartState.atr14
+    if not na(aAtr) and aAtr > 0
+        float hiScore = -1.0
+        float loScore = -1.0
+        for i = 0 to array.size(SMC_zones) - 1
+            SMC_Zone z = array.get(SMC_zones, i)
+            bool elig = (z.kind == KIND_OB or z.kind == KIND_FVG or z.kind == KIND_BREAKER) and z.state != ZS_INVALID and z.state != ZS_MITIGATED
+            if elig
+                bool above = z.bottom > aPx                                                                // zona por encima del precio
+                bool below = z.top < aPx                                                                   // zona por debajo (mutuamente exclusivas)
+                if above or below
+                    float dAtr = above ? (z.bottom - aPx) / aAtr : (aPx - z.top) / aAtr
+                    float sc   = f_renderScore(z.strength, dAtr)
+                    if above and sc > hiScore
+                        hiScore   := sc
+                        anchorHiIdx := i
+                    else if below and sc > loScore
+                        loScore   := sc
+                        anchorLoIdx := i
 
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
@@ -3153,7 +3187,7 @@ if i_showOB and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_OB and z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.kind == KIND_OB and z.state != ZS_INVALID and f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx)
                 array.push(SMC_obBoxes, f_drawOB(z))
                 // Nombre del OB (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
@@ -3185,7 +3219,7 @@ if i_showBreaker and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_BREAKER and z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.kind == KIND_BREAKER and z.state != ZS_INVALID and f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx)
                 array.push(SMC_brkBoxes, f_drawBreaker(z))
                 color brkCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
                 string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
@@ -3380,7 +3414,7 @@ if i_showFVG and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_FVG and z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.kind == KIND_FVG and z.state != ZS_INVALID and f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx)
                 array.push(SMC_fvgBoxes, f_drawFVG(z))
                 // Nombre del FVG (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
