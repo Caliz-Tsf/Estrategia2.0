@@ -1014,6 +1014,17 @@ export f_bodyRespectsLevel(array<float> recentOpens, array<float> recentCloses, 
                 count += 1
     count
 
+// f_gradientConfluenceBonus: T42 (#52) — multiplicador exponencial de confluencia sobre
+// quadrant (regla §5.17, ADR-013). NO suma al score: se aplica como factor (1+bonus) sobre
+// scoreDir_raw en Fase 2 (F2-T01). Forma creciente saturante: (gradMultMax-1)*(1-e^(-k*n));
+// n=0 -> 0 (neutro), n->inf -> gradMultMax-1 (tope). gradMultMax y k = calibracion Fase 3
+// (ADR-002). PURA -> golden test MQL5 directo. n<=0 o params invalidos -> 0.
+export f_gradientConfluenceBonus(int nSobreQuadrant, float gradMultMax, float k) =>
+    float bonus = 0.0
+    if nSobreQuadrant > 0 and gradMultMax > 1.0 and k > 0
+        bonus := (gradMultMax - 1.0) * (1.0 - math.exp(-k * nSobreQuadrant))
+    bonus
+
 // --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
 // f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
 // getCurrentStructure equalHighLow=true :419-448; v5->v6). Dos swings consecutivos del

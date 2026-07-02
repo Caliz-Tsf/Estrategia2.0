@@ -1015,12 +1015,12 @@ Devuelve `macroActiva` (bool) + identificador. Anti-repaint: por reloj (no repin
 **Definición cuantificada.** `⏳ forma exacta y tope a calibrar Fase 3 (ADR-002)` — mecanismo fijado:
 ```
 scoreDir_raw   = Σ(peso_i × activa_i)                        // arquitectura actual §4.8, SIN cambios
-gradientBonus  = f_gradientConfluenceBonus(nSobreQuadrant, gradMultMax)   // 0 .. (gradMultMax−1)
+gradientBonus  = f_gradientConfluenceBonus(nSobreQuadrant, gradMultMax, k)   // 0 .. (gradMultMax−1)
 scoreDir_final = scoreDir_raw × (1 + gradientBonus)
 ```
 - `nSobreQuadrant` = nº de confluencias de zona YA activas en `scoreDir_raw` (OB #17/#19, FVG #18/#20, pool #9) cuyo nivel cae dentro de `gradTol×ATR14` de un punto **isQuadrant=true** (0/0.25/0.5/0.75/1). Los **eighths NO** disparan el bonus (la doctrina lo liga a "quadrant level de la entereza del rango").
-- `f_gradientConfluenceBonus` = función **creciente saturante** (p.ej. `1 − exp(−k·n)` con tope `gradMultMax`); `n=0 → bonus=0`. Se fija `k` en Fase 3.
-- **Requiere ADR-013** antes del wiring real en `f_scoreConfluences` (Fase 2, F2-T01): cambia el contrato de puramente aditivo a aditivo+multiplicativo. En Fase 1 T42 solo entrega la **función pura** + esta spec.
+- `f_gradientConfluenceBonus(n, gradMultMax, k) = (gradMultMax − 1)·(1 − e^(−k·n))` — **creciente saturante**: `n=0 → bonus=0 → multiplicador=1` (neutro); `n→∞ → multiplicador→gradMultMax` (tope). `k` (velocidad de saturación) y `gradMultMax` (tope) se calibran en Fase 3.
+- **Requiere ADR-013** (aceptado, S080) antes del wiring real en `f_scoreConfluences` (Fase 2, F2-T01): cambia el contrato de puramente aditivo a aditivo+multiplicativo. En Fase 1 T42 solo entrega la **función pura** (ya en el CORE) + esta spec; **cero wiring al scoring**.
 
 **Parámetros default.**
 | Param | Default | Nota |
