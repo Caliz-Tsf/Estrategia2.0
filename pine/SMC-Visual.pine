@@ -2923,7 +2923,7 @@ if i_showDisp and barstate.islast
 // flecha (↑/↓). Se DESPLAZA ~3 barras a la DERECHA (idmOffMs) + style_label_left -> flota
 // despejado, no lo tapa la vela (igual que displacement y los pools).
 var array<label> SMC_idmLabels = array.new<label>()
-if i_showIDM and barstate.islast
+if i_showIDM and f_famOK(FAM_EST) and barstate.islast                                                       // IDM = Estudio+ (§F8)
     for lb in SMC_idmLabels
         label.delete(lb)
     array.clear(SMC_idmLabels)
@@ -2941,7 +2941,7 @@ if i_showIDM and barstate.islast
 // i_maxShowIR). NARANJA (familia imbalance, §5.2, COL_FVG). Anclado al 50% de la vela de impulso rebalanceada;
 // desplazado ~3 barras a la derecha (no tapa la vela). La flecha marca el dir del impulso.
 var array<label> SMC_irLabels = array.new<label>()
-if i_showIR and barstate.islast
+if i_showIR and f_famOK(FAM_EST) and barstate.islast                                                        // IR = Estudio+ (§F4)
     for lb in SMC_irLabels
         label.delete(lb)
     array.clear(SMC_irLabels)
@@ -2958,7 +2958,7 @@ if i_showIR and barstate.islast
 // Marcadores de CISD [T32 · §5.6]. Mismo patron repintado-en-islast (acotado a i_maxShowCISD). Cambio de
 // estado de entrega anclado al origen del run roto. Direccional teal/rojo (familia estructura, §5.2), flecha por dir.
 var array<label> SMC_cisdLabels = array.new<label>()
-if i_showCISD and barstate.islast
+if i_showCISD and f_famOK(FAM_EST) and barstate.islast                                                      // CISD = Estudio+ (§F1)
     for lb in SMC_cisdLabels
         label.delete(lb)
     array.clear(SMC_cisdLabels)
@@ -2993,7 +2993,7 @@ if i_smtEnable and barstate.islast
 // (↑/↓), anclado al nivel barrido (origen de la trampa) en la barra del displacement. Se DESPLAZA ~3
 // barras a la DERECHA (judasOffMs) + style_label_left -> flota despejado, no lo tapa la vela.
 var array<label> SMC_judasLabels = array.new<label>()
-if i_showJudas and barstate.islast
+if i_showJudas and f_famOK(FAM_EST) and barstate.islast                                                     // Judas = Estudio+ (§F8)
     for lb in SMC_judasLabels
         label.delete(lb)
     array.clear(SMC_judasLabels)
@@ -3012,7 +3012,7 @@ if i_showJudas and barstate.islast
 // VIOLETA (familia liquidez, §5.2). Anclado a la PUNTA de la mecha rechazada (low alcista / high bajista), apuntando hacia la vela (label_up
 // alcista debajo del low / label_down bajista sobre el high). La flecha del texto marca la direccion.
 var array<label> SMC_rejLabels = array.new<label>()
-if i_showRej and barstate.islast
+if i_showRej and f_famOK(FAM_EST) and barstate.islast                                                       // Rejections = Estudio+ (§F2)
     for lb in SMC_rejLabels
         label.delete(lb)
     array.clear(SMC_rejLabels)
@@ -3086,7 +3086,7 @@ if i_showEmaCross and barstate.islast
 // Marcadores de Stack Flip [T23 · §4.3]. Evento de cambio de regimen (20 y 50 cruzan la 200): seña
 // reforzada. Verde (alcista) / rojo (bajista), recuadro visible para distinguirlo del cruce de par.
 var array<label> SMC_emaStackLabels = array.new<label>()
-if i_showEmaStack and barstate.islast
+if i_showEmaStack and f_famOK(FAM_EST) and barstate.islast                                                  // Stack Flip EMA = Estudio+ (§F2)
     for lb in SMC_emaStackLabels
         label.delete(lb)
     array.clear(SMC_emaStackLabels)
@@ -3122,7 +3122,7 @@ if i_showFalseBreak and barstate.islast
 // CORR = retroceso contra-sesgo -> gris tenue. Anclado a la barra de la ruptura. Desplazado ~5 barras a
 // la derecha (legOffMs) + style_label_left -> no tapa la vela. Registra QUE/DONDE paso (pref. usuario).
 var array<label> SMC_legLabels = array.new<label>()
-if i_showLegs and barstate.islast
+if i_showLegs and f_famOK(FAM_EST) and barstate.islast                                                      // tramos IMP/CORR = Estudio+ (§F2)
     for lb in SMC_legLabels
         label.delete(lb)
     array.clear(SMC_legLabels)
