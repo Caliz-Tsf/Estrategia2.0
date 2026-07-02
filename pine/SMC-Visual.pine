@@ -2696,12 +2696,23 @@ int W_SEC       = 1                          // grosor linea Secundario
 string GRP_DENS = "Densidad visual (§8)"
 i_densidad = input.string("Todo", "Densidad", options = ["Operación", "Estudio", "Todo"], group = GRP_DENS, tooltip = "Operación = solo Primario (lo mas fuerte / anclas) · Estudio = + Secundario · Todo = todo (default)")
 int densMin = i_densidad == "Operación" ? 2 : i_densidad == "Estudio" ? 1 : 0
-// nivel visual 0/1/2 a partir del strength quantizado del CORE; ancla -> Primario forzado (§2.3).
-f_visualLevel(int sLevel, bool isAnchor) =>
-    isAnchor ? 2 : sLevel
-// atajo por marca: true si la marca (con su strength y flag de ancla) debe dibujarse en el modo actual.
+// --- Matriz modo×familia §8.2 (curacion por familia, ENCIMA del filtro strength) ---
+// modeIdx 0<1<2: mayor = mas laxo (habilita mas familias). Operacion = solo familias de DECISION
+// (OB/Breaker/FVG/IFVG/OTE + anclas); Estudio suma refinamientos (BPR/Mitigation/Vacuum); Todo suma
+// micro-conceptos (VI/IPR). Default "Todo" => todas visibles (no regresivo). Congelado hasta Fase 3.
+int modeIdx  = i_densidad == "Operación" ? 0 : i_densidad == "Estudio" ? 1 : 2
+int FAM_OP   = 0                                                                                           // Operacion+ (decision)
+int FAM_EST  = 1                                                                                           // Estudio+ (refinamientos)
+int FAM_TODO = 2                                                                                           // solo Todo (micro)
+f_famOK(int famMinMode) => modeIdx >= famMinMode
+// nivel visual 0/1/2 a partir del strength quantizado del CORE (§2.2). Orden: ancla -> Primario forzado
+// (§2.3); si no, el mayor entre el nivel por strength y el PISO MTF (§7.1-2: una heredada Primaria en su
+// TF origen entra con piso Secundario y nunca cae a Terciaria). mtfFloor=0 para marcas nativas del TF.
+f_visualLevel(int sLevel, bool isAnchor, int mtfFloor) =>
+    isAnchor ? 2 : math.max(sLevel, mtfFloor)
+// atajo por marca NATIVA (sin piso MTF): true si debe dibujarse en el modo actual.
 f_densOK(float strength, bool isAnchor) =>
-    f_visualLevel(f_strengthLevel(strength), isAnchor) >= densMin
+    f_visualLevel(f_strengthLevel(strength), isAnchor, 0) >= densMin
 // score_render §2.5 (CONGELADO Fase 3): strength × f(cercania), f = 1 − min(distAtr/6, 0.8). La
 // cercania pondera pero NO anula una zona fuerte algo lejana. Llave de orden de anclas y del top-N.
 f_renderScore(float strength, float distAtr) =>
@@ -3274,7 +3285,7 @@ if i_showBPR and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_BPR and z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.kind == KIND_BPR and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 array.push(SMC_bprBoxes, f_drawBPR(z))
                 array.push(SMC_bprLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "BPR", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_FVG, size = size.small, xloc = xloc.bar_index))
 
@@ -3291,7 +3302,7 @@ if i_showVI and barstate.islast
         int firstVI = math.max(0, nVI - i_maxShowVI)
         for i = firstVI to nVI - 1
             SMC_Zone z = array.get(SMC_vi, i)
-            if z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.state != ZS_INVALID and f_famOK(FAM_TODO) and f_densOK(z.strength, false)
                 color vcol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                 int vtransp = z.state == ZS_MITIGATED ? 92 : 82
                 array.push(SMC_viBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = color.new(vcol, vtransp), border_color = color.new(vcol, 60), border_width = 1, xloc = xloc.bar_index))
@@ -3348,7 +3359,7 @@ if i_showMB and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 array.push(SMC_mbBoxes, f_drawMB(z))
                 color mbCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
                 array.push(SMC_mbLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_index))
@@ -3367,7 +3378,7 @@ if i_showVacuum and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_densOK(z.strength, false)
+            if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 color vacc = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(COL_OB, 84)
                 array.push(SMC_vacBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = vacc, border_color = color.new(COL_OB, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index))
                 array.push(SMC_vacLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB, size = size.small, xloc = xloc.bar_index))
@@ -3379,7 +3390,7 @@ var label SMC_iprLbl = na
 if i_showIPR and barstate.islast
     box.delete(SMC_iprBox)
     label.delete(SMC_iprLbl)
-    if not na(currentIpr) and f_densOK(currentIpr.strength, false)
+    if not na(currentIpr) and f_famOK(FAM_TODO) and f_densOK(currentIpr.strength, false)
         color iprc = currentIpr.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
         SMC_iprBox := box.new(left = currentIpr.barIdx - i_iprWindow, top = currentIpr.top, right = bar_index, bottom = currentIpr.bottom, bgcolor = color.new(iprc, 95), border_color = color.new(iprc, 40), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
         SMC_iprLbl := label.new(bar_index, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, "IPR", style = label.style_label_left, color = color.new(iprc, 85), textcolor = iprc, size = size.tiny, xloc = xloc.bar_index)
