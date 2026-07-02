@@ -291,6 +291,12 @@ Integra los conceptos ICT que los cursos de mentores enseñan y el Pine aún no 
 **Ruta D (tiempo/sesión, extiende §3.4 Kill Zones):** 39. Macros intradía (NY Lunch / Opening Range / NY Lunch Hour — sub-ventanas de KZ) → 40. RTH vs ETH.
 **Anti-duplicados:** cruce completo en `ESQUELETO-P1 §2.1` — cero duplicados exactos; 5 guards de delineación obligatorios (CISD↔CHoCH/MSS, gaps↔Session Opens, familia gap entre sí, familia FVG↔§2.2 sin doble conteo P-05, colisión de nombre "Opening Range"). **Confluencias:** ~8–9 candidatas nuevas (#43–#51 tentativas, `ESQUELETO-P1 §5`); el número final y pesos se cierran en F2-T01 / Fase 3.
 
+**Sprint 1.7 — Gradient Levels (grading por quadrants/eighths)** `[NUEVO · Sesion-079/080 · detalle en docs/planes/ESQUELETO-P4-gradient-levels.md]`
+Familia derivada de la doctrina 2026 (grid del rango). Mismo pipeline de 7 etapas, regla antes de código (gate sprint16). Reglas `reglas-smc-ict.md §5B (§5.16–§5.19)`. Orden por palanca:
+41. **Gradient Levels — grid del rango** (`f_computeGradientLevels` + `f_gradientZone` + `f_nearGradientLevel` + `f_bodyRespectsLevel`) — *herramienta, NO confluencia (§0.9, como Std Dev); generaliza §2.3 P/D de 2 zonas a N puntos* → 43. **FVG válido por gradient** (`gradedFvg`, flag sobre §2.2, refina #18/#20, NO suma #) → 42. **Confluencia exponencial nivel∩quadrant** (`f_gradientConfluenceBonus`, candidata **#52** = **MULTIPLICADOR** del score, **ADR-013**; función pura en Fase 1, wiring a `f_scoreConfluences` en Fase 2/F2-T01).
+**Diferido (backlog):** 44. Grading de mecha REH/REL (`f_gradeWick`, herramienta opcional §5.19) — decisión usuario S080 = backlog explícito.
+**Estado S080:** T41 (núcleo+dibujo Visual) ✅, T43 (flag gradedFvg) ✅, T42 (ADR-013 + función pura, sin wiring) ✅ — compilan 0/0, core-sync OK, validados EURUSD H1. Rango-fuente P2 (suspension diario) / P3 (opening gaps) + `f_selectGradientSource` diferidos (P1=dealing range cubre el caso primario). **Confluencias:** solo #52 nueva (T42, multiplicador); T41/T43/T44 NO inflan el conteo.
+
 **Sprint 2.1 — Strategy:** scoring direccional + filtros duros + entrada/SL/TP/trailing + alert_message JSON
 **Sprint 2.2 — Calibración técnica:** verificar en Strategy Tester que ejecuta trades correctamente (sin pesos optimizados aún), registro y export CSV.
 

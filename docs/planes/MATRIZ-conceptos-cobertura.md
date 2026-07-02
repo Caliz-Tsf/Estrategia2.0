@@ -99,3 +99,15 @@ Lo que falta NO es todo "primitiva nueva de Pine". Se separa así:
 ## E. Pendiente de confirmar
 - Profittrading / TJ / Fedex: al analizar sus fichas, añadir a esta matriz los conceptos que aporten que no estén aquí (se espera que sean pocos y SMC-estándar).
 - El detalle por concepto (definición exacta del mentor) se rellena con la transcripción + ficha (campo 9).
+
+## F. Familia Gradient Levels `[Sesion-079/080 · ESQUELETO-P4]`
+Derivada de la doctrina 2026 (grid del rango por quadrants/eighths). Reglas `reglas-smc-ict.md §5B (§5.16–§5.19)`; plan `PINE-PLAN §7 Sprint 1.7`.
+
+| T | Concepto | Estado | Tipo de integración | Nota |
+|---|----------|--------|---------------------|------|
+| **T41** | Gradient Levels — grid del rango | ✅ S080 | **herramienta** (no confluencia, §0.9) | generaliza §2.3 P/D de 2 zonas a N puntos; `f_computeGradientLevels`/`f_gradientZone`/`f_nearGradientLevel`/`f_bodyRespectsLevel` |
+| **T42** | Confluencia exponencial nivel∩quadrant | ✅ S080 (pura; wiring Fase 2) | **confluencia #52 = MULTIPLICADOR** | ADR-013; `f_gradientConfluenceBonus`; `k`/`gradMultMax` calibran Fase 3 |
+| **T43** | FVG válido por gradient | ✅ S080 | **refina #18/#20** (flag `gradedFvg`) | no suma #; patrón True FVG |
+| **T44** | Grading de mecha REH/REL | ⏳ backlog (S080) | **herramienta opcional** | `f_gradeWick`; decisión usuario = backlog explícito |
+
+Rango-fuente P2 (suspension diario) / P3 (opening gaps) + `f_selectGradientSource` = diferidos (P1 = dealing range cubre el caso doctrinal primario).
