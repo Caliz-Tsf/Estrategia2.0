@@ -27,6 +27,7 @@ i_dispContraction = input.bool(true,  "Displacement: exigir contraccion previa (
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño FVG (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
+i_gradTol      = input.float(0.12, "Gradient: tolerancia FVG-valido (x ATR14) §5.18", minval = 0.0, step = 0.01, group = GRP_FVG)
 i_pdSwingLen  = input.int(50, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
 i_pdEqBand    = input.float(5.0, "Banda equilibrium P/D (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_SCORE)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
@@ -167,6 +168,7 @@ type SMC_Zone
     int    kind         = 0
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
     bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
+    bool   gradedFvg    = false   // [T43 §5.18] FVG que toca un gradient level del grid (§5.16)
 type SMC_Event
     float  price
     int    dir
@@ -1872,6 +1874,11 @@ if barstate.isconfirmed
         // el FVG (refina #18/#20), eleva su peso en el scoring. Mismo wiring que Visual (sin dibujo).
         SMC_Event fvgMidDisp = f_detectDisplacement(open[1], high[1], low[1], close[1], atr14, i_dispFactor, i_dispBodyPct, false, false, bar_index - 1, time[1])
         fvgZone.trueFvg := not na(fvgMidDisp)
+        // FVG valido [T43 · §5.18]: el CE del FVG toca un gradient level del grid (§5.16) sobre el
+        // dealing range vigente (fuente P1). Flag gradedFvg (refina #18/#20, no zona nueva; mismo
+        // wiring que Visual, sin dibujo). includeEighths=true (admite cualquier punto del grid).
+        [gLvls, gQuad] = f_computeGradientLevels(trailing.top, trailing.bottom, true)
+        fvgZone.gradedFvg := array.size(gQuad) > 0 and f_nearGradientLevel((fvgZone.top + fvgZone.bottom) / 2.0, gLvls, i_gradTol * atr14)
         // BPR [T28 · §5.3]: solape con FVG vivo de dir opuesto reciente -> zona balanceada (sin dibujo).
         SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
         f_pushZone(SMC_zones, fvgZone, MAX_ZONES)

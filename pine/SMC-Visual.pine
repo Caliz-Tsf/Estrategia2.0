@@ -101,6 +101,7 @@ i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, g
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
 i_showGradient = input.bool(true,  "Mostrar Gradient Levels (grid del rango §5.16)", group = GRP_GRAD)
 i_gradEighths  = input.bool(true,  "Incluir eighths (0.125/0.375/0.625/0.875)", group = GRP_GRAD)
+i_gradTol      = input.float(0.12, "Tolerancia toca-nivel (x ATR14) §5.18 (T42/T43)", minval = 0.0, step = 0.01, group = GRP_GRAD)
 i_showEQHL     = input.bool(true,  "Mostrar Equal Highs/Lows",         group = GRP_EQHL)
 i_eqThreshold  = input.float(0.1,  "Umbral igualdad (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_EQHL)
 i_eqlLength    = input.int(3,      "Barras confirmacion EQH/EQL", minval = 1, group = GRP_EQHL)
@@ -239,6 +240,7 @@ type SMC_Zone
     int    kind         = 0
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
     bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
+    bool   gradedFvg    = false   // [T43 §5.18] FVG que toca un gradient level del grid (§5.16)
 type SMC_Event
     float  price
     int    dir
@@ -1957,6 +1959,12 @@ if barstate.isconfirmed
         // sigue en la familia FVG (mitigacion/dibujo); eleva su peso en el scoring (Fase 3).
         SMC_Event fvgMidDisp = f_detectDisplacement(open[1], high[1], low[1], close[1], atr14, i_dispFactor, i_dispBodyPct, false, false, bar_index - 1, time[1])
         fvgZone.trueFvg := not na(fvgMidDisp)
+        // FVG valido [T43 · §5.18]: el CE del FVG toca un gradient level del grid (§5.16) sobre el
+        // dealing range vigente (fuente P1). Flag gradedFvg (refina #18/#20, no zona nueva) -> eleva
+        // strength en la capa de discriminacion. includeEighths=true (admite cualquier punto del grid).
+        // Anti-repaint: mismo instante de confirmacion del FVG.
+        [gLvls, gQuad] = f_computeGradientLevels(trailing.top, trailing.bottom, true)
+        fvgZone.gradedFvg := array.size(gQuad) > 0 and f_nearGradientLevel((fvgZone.top + fvgZone.bottom) / 2.0, gLvls, i_gradTol * atr14)
         // BPR [T28 · §5.3]: ¿este FVG nuevo se solapa con un FVG vivo de dir OPUESTO reciente? -> zona de
         // precio balanceado. Se busca ANTES de empujar el FVG (compara contra los previos en SMC_zones).
         SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
@@ -3136,7 +3144,7 @@ if i_showFVG and barstate.islast
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
                 color fvgCol = z.dir == DIR_BULL ? color.lime : color.orange
                 // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
-                string fvgTxt = z.trueFvg ? "T.FVG" : "FVG"
+                string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
                 array.push(SMC_fvgLabels, label.new(math.round((z.barIdx - 1 + bar_index) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
                 if i_showCE and z.state != ZS_MITIGATED
                     float ce = (z.top + z.bottom) / 2.0

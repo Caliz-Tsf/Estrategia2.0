@@ -112,6 +112,7 @@ export type SMC_Zone
     int    kind         = 0
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
     bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
+    bool   gradedFvg    = false   // [T43 §5.18] FVG que toca un gradient level del grid (§5.16)
 
 // Evento puntual (BOS, CHoCH, MSS, Sweep, Judas, Displacement, IDM, EMA cross/bounce...)
 export type SMC_Event
