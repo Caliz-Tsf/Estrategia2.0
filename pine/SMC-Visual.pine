@@ -2453,20 +2453,25 @@ bool kzInNYFirst     = kzProfile != SP_NONE and not na(time(timeframe.period, "0
 bool kzInTokyo       = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1100", "Asia/Tokyo"))
 bool kzInTokyoFirst  = kzProfile == SP_ASIA and not na(time(timeframe.period, "0900-1000", "Asia/Tokyo"))
 [curKZ, curKZFirst] = f_killZone(kzInLondon, kzInLondonFirst, kzInNY, kzInNYFirst, kzInTokyo, kzInTokyoFirst, kzProfile)
+// Ribbon KZ [Eje2 · Paso 5 · §F9/§6.3]: rastrea el INICIO de la sesion EN CURSO (transicion de sesion)
+// para dibujar una tira delgada arriba en la seccion L0 (reemplaza el bgcolor full-height que solapaba el
+// grid). Anti-repaint: solo barras confirmadas; na fuera de sesion.
+var int kzActiveStart = na
+if barstate.isconfirmed
+    kzActiveStart := curKZ == KZ_NONE ? na : (curKZ != curKZ[1] ? time : kzActiveStart)
 
 // --- Macros intradia [§5.14] · T39 ---
 // Minutos del dia en hora NY (DST automatico) -> f_macroActive. Refina #34 (peso); para el scoring
 // (Fase 2) y un sombreado tenue (bgcolor) cuando hay macro activa. No bloquea (ADR-001, el reloj informa).
 int  nyMinNow = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
 [curMacroActive, curMacroKind] = f_macroActive(nyMinNow)
-// Sombreado tenue: gris en NY Lunch (kind 3, baja actividad/filtro), purpura en los macros de impulso.
-bgcolor(i_showMacros and curMacroActive ? color.new(curMacroKind == 3 ? color.gray : color.purple, 92) : na)
+// Sombreado -> movido a la seccion L0 (fondo temporal), gateado a Estudio+ (Paso 5 · §F9). Aqui solo detecta.
 
 // --- RTH vs ETH [§5.15] · T40 ---
 // Tipo de sesion por perfil (reusa nyMinNow). En FX (i_rthEnable off) = siempre RTH (sin modulacion).
 // Sombrea ETH tenue cuando esta activo (instrumentos con sesion acotada). Para el scoring (#34 calidad).
 bool curIsRTH = f_sessionType(nyMinNow, i_rthStart, i_rthEnd, i_rthEnable)
-bgcolor(i_rthEnable and not curIsRTH ? color.new(color.gray, 94) : na)
+// Sombreado ETH -> movido a la seccion L0 (fondo temporal), gateado a modo Todo (Paso 5 · §F9). Aqui solo detecta.
 
 // --- SMT Divergence [§5.13 · ADR-011] · T38 ---
 // 2o request.security al par CORRELACIONADO (default GBPUSD positiva, ADR-011) -> sus ultimos 2 swings via
@@ -3513,6 +3518,8 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
 // para P2 se dibujan todos (el rango suspension no lo cubre P/D). Ademas dibuja los grids GHOST
 // archivados (rango-fuente previo, solo quadrants, gris muy tenue, hasta i_gradPersistDays). Los
 // mini-grids P3 de gaps NO se dibujan (son filtro de T43). Toggle i_showGradient.
+// GRID SIN FILL (§6.3 · Paso 5): el marco de PRECIO posee el eje via LINEAS (line.new width=1), nunca
+// fill de area grande -> el ribbon KZ (L0) posee el eje de TIEMPO. Un solo fondo de area por modo. Verificado.
 var array<line>  SMC_gradLines  = array.new<line>()
 var array<label> SMC_gradLabels = array.new<label>()
 if i_showGradient and barstate.islast
@@ -3549,9 +3556,33 @@ if i_showGradient and barstate.islast
                 string gtxt = q ? (math.abs(frac - 0.5) < 0.001 ? "CE" : frac < 0.5 ? "LQ" : "UQ") + src + " " + str.tostring(lvl, format.mintick) : str.tostring(math.round(frac * 8)) + "/8"
                 array.push(SMC_gradLabels, label.new(bar_index + 2, lvl, gtxt, style = label.style_label_left, color = color.new(baseCol, 90), textcolor = baseCol, size = size.tiny))
 
-// Kill Zone activa: sombreado de fondo (T11). Color por SESION (§5.2): London verde / NY rosa / Asia indigo. Solo informa
-// la sesion institucional activa (§3.4 · ADR-001); NO marca entradas ni bloquea (eso es el scoring #34).
-bgcolor(i_showKZ and curKZ != KZ_NONE ? (curKZ == KZ_LONDON ? color.new(COL_KZ_LON, 90) : curKZ == KZ_NY ? color.new(COL_KZ_NY, 90) : color.new(COL_KZ_ASIA, 90)) : na, title = "Kill Zone activa")
+// === L0 · FONDO TEMPORAL [Eje2 · Paso 5 · ESQUELETO-FABLE §3/§F9/§6.3] ================================
+// Contexto de TIEMPO (Kill Zones, macros, RTH/ETH). Regla "un solo fondo de area" (§6.3): la KZ se rinde
+// como RIBBON (tira delgada arriba, SOLO la sesion EN CURSO = ancla §2.3) en vez del bgcolor full-height
+// que solapaba el grid gris-azul (L1) -> resuelve el choque grid vs Kill Zones (checklist §10-4). El
+// bgcolor tenue de sesion queda SOLO en Estudio+; macros = Estudio+; RTH/ETH = solo Todo (§F9). Asi en
+// Operacion NO hay dos fills de area grande a la vez. Ribbon anclado sobre el maximo reciente (no tapa
+// precio), alto ~0.35xATR. Numeros CONGELADOS (Fase 3 · ADR-002).
+float kzRibTop = ta.highest(high, 100) + nz(chartState.atr14) * 0.6
+float kzRibBot = kzRibTop - nz(chartState.atr14) * 0.35
+var box   kzRibbon    = na
+var label kzRibbonLbl = na
+if i_showKZ and barstate.islast
+    box.delete(kzRibbon)
+    label.delete(kzRibbonLbl)
+    kzRibbon    := na
+    kzRibbonLbl := na
+    if curKZ != KZ_NONE and not na(kzActiveStart) and not na(chartState.atr14)
+        color  kzc = curKZ == KZ_LONDON ? COL_KZ_LON : curKZ == KZ_NY ? COL_KZ_NY : COL_KZ_ASIA
+        string kzn = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY" : "Asia"
+        kzRibbon    := box.new(kzActiveStart, kzRibTop, time, kzRibBot, xloc = xloc.bar_time, bgcolor = color.new(kzc, 25), border_color = color.new(kzc, 25), border_width = 1)
+        kzRibbonLbl := label.new(kzActiveStart, kzRibTop, kzn, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(kzc, 20), textcolor = color.white, size = size.tiny)
+// bgcolor de sesion: SOLO Estudio+ (ultra-tenue >=92 transp), solo la KZ activa (§F9). En Operacion no hay fondo.
+bgcolor(i_showKZ and f_famOK(FAM_EST) and curKZ != KZ_NONE ? (curKZ == KZ_LONDON ? color.new(COL_KZ_LON, 93) : curKZ == KZ_NY ? color.new(COL_KZ_NY, 93) : color.new(COL_KZ_ASIA, 93)) : na, title = "Kill Zone activa (Estudio+)")
+// Macros intradia (§F9): sombreado SOLO Estudio+. Gris = NY Lunch (kind 3, filtro), purpura = macros de impulso.
+bgcolor(i_showMacros and f_famOK(FAM_EST) and curMacroActive ? color.new(curMacroKind == 3 ? color.gray : color.purple, 92) : na, title = "Macro activa (Estudio+)")
+// RTH/ETH (§F9): sombreado de ETH SOLO en modo Todo (contexto de sesion acotada; en FX i_rthEnable off = siempre RTH).
+bgcolor(i_rthEnable and f_famOK(FAM_TODO) and not curIsRTH ? color.new(color.gray, 94) : na, title = "ETH (Todo)")
 
 // --- Mapa MTF: niveles heredados de HTF en cascada [T13a · ESQUELETO-P3 §2.5] (Visual-only) ---
 // Dibujo DIFERENCIADO: lineas P/D del HTF punteadas + tenues con prefijo de TF, para no
