@@ -113,6 +113,7 @@ export type SMC_Zone
     bool   trueFvg      = false   // [T26 §5.1] FVG de alta calidad: su vela media es displacement
     bool   propulsion   = false   // [T34 §5.8] OB de continuacion: anidado en un OB vivo mismo-sentido
     bool   gradedFvg    = false   // [T43 §5.18] FVG que toca un gradient level del grid (§5.16)
+    float  strength     = 0.0     // [Eje2 ADR-014] calidad 0-1 (f_zoneStrength) -> jerarquia visual + scoring F3
 
 // Evento puntual (BOS, CHoCH, MSS, Sweep, Judas, Displacement, IDM, EMA cross/bounce...)
 export type SMC_Event
@@ -122,6 +123,7 @@ export type SMC_Event
     int    barTime
     string tf   = ""
     int    kind = 0
+    float  strength = 0.0   // [Eje2 ADR-014] calidad 0-1 (f_eventStrength) -> jerarquia visual + scoring F3
 
 // Punto de swing estructural
 export type SMC_Swing
@@ -130,6 +132,7 @@ export type SMC_Swing
     int    barTime
     int    kind  = 0
     bool   swept = false
+    float  strength = 0.0   // [Eje2 ADR-014] calidad 0-1 (escala+frescura+rol) -> jerarquia visual
 
 // Pool de liquidez (EQH/EQL clusterizados)
 export type SMC_Pool
@@ -142,6 +145,7 @@ export type SMC_Pool
     int    barIdx       = na
     int    sweptBarTime = na
     int    sweptBarIdx  = na
+    float  strength     = 0.0     // [Eje2 ADR-014] calidad 0-1 (touches+frescura+cercania) -> jerarquia visual
 
 // Grid de gradient levels de un rango-fuente ya fijado [§5.16 · T41]
 export type SMC_GradientGrid
