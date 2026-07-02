@@ -2686,6 +2686,23 @@ int TRANSP_SEC  = 92                         // fill Secundario
 int W_PRIM      = 2                          // grosor linea Primario
 int W_SEC       = 1                          // grosor linea Secundario
 
+// --- Densidad visual (i_densidad) + nivel visual f_visualLevel [Eje2 · Paso 4 · §2.2/§2.4/§8.1] ---
+// Filtro TRANSVERSAL adicional a los i_show*: consume el strength del Paso 2 (via f_strengthLevel del
+// CORE) para decidir cuanto "grita" cada marca. Nivel visual 0/1/2 = Terciario/Secundario/Primario; se
+// dibuja si alcanza el minimo del modo (densMin). Las ANCLAS estructurales (§2.3, isAnchor) fuerzan
+// Primario. FUNDACION del Paso 4: el top-N por score (f_strongestN §2.5), los pisos MTF (§7.1) y la
+// matriz fina por-familia (§8.2) son la iteracion siguiente. Default "Todo" = NO oculta nada (no
+// regresivo); el usuario baja a Estudio/Operacion para depurar. Umbrales CONGELADOS hasta Fase 3.
+string GRP_DENS = "Densidad visual (§8)"
+i_densidad = input.string("Todo", "Densidad", options = ["Operación", "Estudio", "Todo"], group = GRP_DENS, tooltip = "Operación = solo Primario (lo mas fuerte / anclas) · Estudio = + Secundario · Todo = todo (default)")
+int densMin = i_densidad == "Operación" ? 2 : i_densidad == "Estudio" ? 1 : 0
+// nivel visual 0/1/2 a partir del strength quantizado del CORE; ancla -> Primario forzado (§2.3).
+f_visualLevel(int sLevel, bool isAnchor) =>
+    isAnchor ? 2 : sLevel
+// atajo por marca: true si la marca (con su strength y flag de ancla) debe dibujarse en el modo actual.
+f_densOK(float strength, bool isAnchor) =>
+    f_visualLevel(f_strengthLevel(strength), isAnchor) >= densMin
+
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
 // f_drawSwing: etiqueta flotante HH/HL/LH/LL en la vela del pivote. Estructura
@@ -3136,7 +3153,7 @@ if i_showOB and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_OB and z.state != ZS_INVALID
+            if z.kind == KIND_OB and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_obBoxes, f_drawOB(z))
                 // Nombre del OB (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
@@ -3168,7 +3185,7 @@ if i_showBreaker and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_BREAKER and z.state != ZS_INVALID
+            if z.kind == KIND_BREAKER and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_brkBoxes, f_drawBreaker(z))
                 color brkCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
                 string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
@@ -3196,7 +3213,7 @@ if i_showIFVG and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_IFVG and z.state != ZS_INVALID
+            if z.kind == KIND_IFVG and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_ifvgBoxes, f_drawIFVG(z))
                 color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                 array.push(SMC_ifvgLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = ifvgCol, size = size.small, xloc = xloc.bar_index))
@@ -3223,7 +3240,7 @@ if i_showBPR and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_BPR and z.state != ZS_INVALID
+            if z.kind == KIND_BPR and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_bprBoxes, f_drawBPR(z))
                 array.push(SMC_bprLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "BPR", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_FVG, size = size.small, xloc = xloc.bar_index))
 
@@ -3240,7 +3257,7 @@ if i_showVI and barstate.islast
         int firstVI = math.max(0, nVI - i_maxShowVI)
         for i = firstVI to nVI - 1
             SMC_Zone z = array.get(SMC_vi, i)
-            if z.state != ZS_INVALID
+            if z.state != ZS_INVALID and f_densOK(z.strength, false)
                 color vcol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                 int vtransp = z.state == ZS_MITIGATED ? 92 : 82
                 array.push(SMC_viBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = color.new(vcol, vtransp), border_color = color.new(vcol, 60), border_width = 1, xloc = xloc.bar_index))
@@ -3297,7 +3314,7 @@ if i_showMB and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID
+            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_mbBoxes, f_drawMB(z))
                 color mbCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
                 array.push(SMC_mbLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_index))
@@ -3316,7 +3333,7 @@ if i_showVacuum and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_VACUUM and z.state != ZS_INVALID
+            if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 color vacc = z.state == ZS_MITIGATED ? color.new(color.gray, 92) : color.new(COL_OB, 84)
                 array.push(SMC_vacBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = vacc, border_color = color.new(COL_OB, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index))
                 array.push(SMC_vacLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB, size = size.small, xloc = xloc.bar_index))
@@ -3328,7 +3345,7 @@ var label SMC_iprLbl = na
 if i_showIPR and barstate.islast
     box.delete(SMC_iprBox)
     label.delete(SMC_iprLbl)
-    if not na(currentIpr)
+    if not na(currentIpr) and f_densOK(currentIpr.strength, false)
         color iprc = currentIpr.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
         SMC_iprBox := box.new(left = currentIpr.barIdx - i_iprWindow, top = currentIpr.top, right = bar_index, bottom = currentIpr.bottom, bgcolor = color.new(iprc, 95), border_color = color.new(iprc, 40), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
         SMC_iprLbl := label.new(bar_index, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, "IPR", style = label.style_label_left, color = color.new(iprc, 85), textcolor = iprc, size = size.tiny, xloc = xloc.bar_index)
@@ -3363,7 +3380,7 @@ if i_showFVG and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_FVG and z.state != ZS_INVALID
+            if z.kind == KIND_FVG and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_fvgBoxes, f_drawFVG(z))
                 // Nombre del FVG (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
@@ -3400,7 +3417,7 @@ if i_showOTE and barstate.islast
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if (z.kind == KIND_GP or z.kind == KIND_OTE) and z.state != ZS_INVALID
+            if (z.kind == KIND_GP or z.kind == KIND_OTE) and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_oteBoxes, f_drawOTE(z))
                 color oteCol = z.kind == KIND_GP ? COL_OTE_GP : COL_OTE
                 string oteTxt = z.kind == KIND_GP ? "GP" : "OTE"
