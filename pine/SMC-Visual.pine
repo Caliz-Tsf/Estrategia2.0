@@ -11,6 +11,7 @@ GRP_STRUCT = "Estructura"
 GRP_OB     = "Order Blocks"
 GRP_FVG    = "Fair Value Gaps"
 GRP_PD     = "Premium/Discount"
+GRP_GRAD   = "Gradient Levels (§5B)"
 GRP_EQHL   = "Equal Highs/Lows"
 GRP_LIQ    = "Liquidez"
 GRP_KZ     = "Kill Zones / Sesiones"
@@ -98,6 +99,8 @@ i_iprMinGaps   = input.int(3,      "IPR: FVG mín. mismo lado", minval = 2, grou
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
 i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
+i_showGradient = input.bool(true,  "Mostrar Gradient Levels (grid del rango §5.16)", group = GRP_GRAD)
+i_gradEighths  = input.bool(true,  "Incluir eighths (0.125/0.375/0.625/0.875)", group = GRP_GRAD)
 i_showEQHL     = input.bool(true,  "Mostrar Equal Highs/Lows",         group = GRP_EQHL)
 i_eqThreshold  = input.float(0.1,  "Umbral igualdad (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_EQHL)
 i_eqlLength    = input.int(3,      "Barras confirmacion EQH/EQL", minval = 1, group = GRP_EQHL)
@@ -3205,6 +3208,35 @@ if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bot
     array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.top,    "Premium "  + str.tostring(trailing.top, format.mintick),    style = label.style_label_left, color = color.new(color.red, 80),   textcolor = color.red,   size = size.small))
     array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(color.gray, 80),  textcolor = color.gray,  size = size.small))
     array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_left, color = color.new(color.green, 80), textcolor = color.green, size = size.small))
+
+// --- Gradient Levels: grid del dealing range [§5.16 · T41] (Visual-only) ---
+// Grid sobre el rango-fuente P1 (dealing range Premium/Discount = trailing.top/bottom).
+// Quadrants (0.25/0.75) linea solida azul tenue; eighths punteada mas tenue. Los niveles
+// 0/0.5/1 ya los dibuja el bloque P/D (Discount/EQ/Premium) -> aqui se saltan (no duplicar
+// tinta). Toggle i_showGradient; eighths on/off con i_gradEighths.
+var array<line>  SMC_gradLines  = array.new<line>()
+var array<label> SMC_gradLabels = array.new<label>()
+if i_showGradient and barstate.islast and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
+    for l in SMC_gradLines
+        line.delete(l)
+    for lb in SMC_gradLabels
+        label.delete(lb)
+    array.clear(SMC_gradLines)
+    array.clear(SMC_gradLabels)
+    [gLevels, gIsQuad] = f_computeGradientLevels(trailing.top, trailing.bottom, i_gradEighths)
+    int gLeft = math.min(nz(trailing.topTime, time), nz(trailing.bottomTime, time))
+    if array.size(gLevels) > 0
+        for gi = 0 to array.size(gLevels) - 1
+            float lvl  = array.get(gLevels, gi)
+            bool  q    = array.get(gIsQuad, gi)
+            float frac = (lvl - trailing.bottom) / (trailing.top - trailing.bottom)
+            bool  skip = frac <= 0.001 or frac >= 0.999 or math.abs(frac - 0.5) < 0.001
+            if not skip
+                color  gcol   = q ? color.new(color.blue, 35) : color.new(color.blue, 70)
+                string gstyle = q ? line.style_solid : line.style_dotted
+                array.push(SMC_gradLines, line.new(gLeft, lvl, time, lvl, xloc = xloc.bar_time, color = gcol, style = gstyle, width = 1))
+                string gtxt = q ? (frac < 0.5 ? "LQ " : "UQ ") + str.tostring(lvl, format.mintick) : str.tostring(math.round(frac * 8)) + "/8"
+                array.push(SMC_gradLabels, label.new(bar_index + 2, lvl, gtxt, style = label.style_label_left, color = color.new(color.blue, 90), textcolor = color.blue, size = size.tiny))
 
 // Kill Zone activa: sombreado de fondo (T11). London azul / NY AM naranja / Tokyo violeta. Solo informa
 // la sesion institucional activa (§3.4 · ADR-001); NO marca entradas ni bloquea (eso es el scoring #34).
