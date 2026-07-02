@@ -965,6 +965,113 @@ Devuelve `macroActiva` (bool) + identificador. Anti-repaint: por reloj (no repin
 
 ---
 
+## 5B. GRADIENT LEVELS — grading por quadrants/eighths (T41–T44)
+
+> Familia derivada del ESQUELETO-P4 (S079). **T41** = herramienta núcleo (grid del rango). **T42** = confluencia exponencial candidata **#52** (multiplicador, requiere **ADR-013** antes del wiring en Fase 2). **T43** = refina el FVG (§2.2) con flag `gradedFvg` (sin # nueva). **T44** = grading de mecha (opcional, diferible). Todo umbral numérico CONGELADO hasta calibración Fase 3 (ADR-002).
+
+### 5.16 Gradient Levels — grading del rango `f_computeGradientLevels` · T41 — herramienta (NO confluencia)
+
+**Concepto.** Toda referencia de rango se trata como una **escala graduada**, no como una línea suelta: se mide un rango-fuente y se divide en `low (0)` / `lower-quadrant (0.25)` / `equilibrium-CE (0.5)` / `upper-quadrant (0.75)` / `high (1.0)`, y opcionalmente en **eighths** (0.125/0.375/0.625/0.875). Generaliza `f_premiumDiscount` (§2.3) de 2 zonas a un grid de N puntos. Doctrina: *"we're just measuring a range and dividing it into mid range, upper quadrant, lower quadrant and high and the low"* (`madre-2026.md:90-94`). No suma al score por sí sola (regla §0.9, igual que Standard Deviation §5.11): es el **insumo** de T42 (confluencia exponencial) y T43 (FVG válido).
+
+**Definición cuantificada.** Dado el rango-fuente `[bottom, top]` (con `top > bottom`), `nivel(f) = bottom + f·(top − bottom)` para cada fracción `f`:
+- **Quadrants (SIEMPRE):** `f ∈ {0, 0.25, 0.5, 0.75, 1}`.
+- **Eighths (si `gradEighths=true`):** además `f ∈ {0.125, 0.375, 0.625, 0.875}`. Sixteenths **fuera de alcance** (no se calculan).
+- El `0.5` es idéntico al `eq` de §2.3; el grid es una extensión estricta del dealing range (no lo reemplaza).
+
+**Política de rango-fuente (determinista, en orden de prioridad):**
+1. **P1 — Dealing range Premium/Discount (§2.3, `f_premiumDiscount`).** Rango-fuente **por defecto** siempre que haya un dealing range vigente (strong high ↔ strong low, escala `pdSwingLen=50`). Ya es determinista, símbolo-agnóstico y anti-repaint.
+2. **P2 — Suspension block diario (Fib highest-high→low del día del broker, `madre-2026.md:135,:207`).** Se **construye** cuando el P/D de P1 es "stale" (swing origen a más de `gradStaleBars` velas) o gana el desempate por cuerpos. `top=highest(high, díaBroker)`, `bottom=lowest(low, díaBroker)`, confirmado en el cierre D1 (misma frontera que Opening Gaps §5.10).
+3. **P3 — Gaps de apertura (§5.10, `f_detectOpeningGaps`).** Cada gap `(close_previo, open_nuevo)` es un mini-rango graduable. Corre en **paralelo** (no reemplaza a P1/P2 como rango principal); alimenta el filtro FVG-válido (T43) cuando el FVG cae cerca de un gap reciente.
+
+**Desempate cuerpos-vs-nivel (`madre-2026.md:408,:440,:479`).** Cuando dos rangos-fuente candidatos producen grids con niveles distintos cerca del precio, gana el grid cuyos niveles los **cuerpos** (open/close, no mechas) de las últimas `gradBodyLookback` velas confirmadas respetan más (más cierres dentro de `gradTol×ATR14` de algún nivel). Determinista y auditable (cuenta, no interpreta) → `f_bodyRespectsLevel`.
+
+**Persistencia.** Cada rango-fuente que se fija genera un grid **nuevo**; los grids de los últimos `gradPersistDays` se mantienen como referencia (ghost); los más viejos se descartan (mecanismo de cuota como Present-mode, para no reventar el presupuesto de ~500 objetos).
+
+**Mitigación / ciclo de vida.** No es P1–P4 puro: es un **grid persistente recomputado en frontera** (más cercano a la "serie de niveles globales" de Opening Gaps §5.10 que a una zona con 4 estados). Un grid nuevo no invalida al anterior; el anterior pasa a `ageDays++` y se dibuja ghost hasta `gradPersistDays`, luego se descarta. El grid se **reemplaza** cuando su rango-fuente cambia (nuevo swing dominante / nuevo día / nuevo gap), **no** por precio cruzándolo (no es un nivel que se "consuma").
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `gradEighths` | **true** | incluir 0.125/0.375/0.625/0.875 (la doctrina los trata como la escala real de trabajo); sixteenths fuera de alcance. |
+| `gradPersistDays` | **5** | doctrina `madre-2026.md:93,:322`; tope real sujeto a presupuesto de objetos. |
+| `gradStaleBars` | **150** | = 3×`pdSwingLen`; velas desde el swing origen del P/D tras las que se evalúa el candidato P2 (suspension diario). |
+| `gradBodyLookback` | **5** | velas para `f_bodyRespectsLevel` (desempate). |
+| `gradTol` | **0.12** | × ATR14 (entre `eqThreshold`=0.1 y holgura media); "toca/está sobre un gradient level" (compartido con T42/T43). |
+
+**Confirmación / anti-repaint.** El grid se fija SOLO cuando su rango-fuente confirma (`barstate.isconfirmed`: swing dominante confirmado / cierre D1 / gap de apertura confirmado en frontera) — nunca intra-vela. Heredado de fuentes ya anti-repaint (§2.3/§5.10).
+
+**Contraejemplo.** Calcular el grid sobre un rango-fuente **no confirmado** (p.ej. un swing candidato sin BOS de confirmación, o el rango intradía en formación) → grid discrecional/repintable, **PROHIBIDO**. Tampoco es gradient level un **número redondo** arbitrario (1.14000, 1.15000…): el grading exige un rango-fuente real (dealing range / suspension / gap), no la retícula del eje de precio.
+
+**Casos de prueba** *(EURUSD, TV MCP 2026-07-01; OANDA:EURUSD H1, dealing range vigente leído del panel T14 / etiquetas P/D del indicador)*:
+- ✓ **Grid H1.** Dealing range `[bottom=1.13246 (Discount), top=1.16221 (Premium)]`, span 0.02975. Quadrants: `0→1.13246 · 0.25→1.13990 · 0.5→1.14733 · 0.75→1.15477 · 1→1.16221`. El `0.5=1.14733` coincide **exacto** con la etiqueta EQ del indicador (`(1.16221+1.13246)/2=1.147335`). Precio 1.13851 → pct 20.3% (lower-quadrant/discount), coincide con el panel "Discount 20%".
+- ✓ **Eighth que atrae al precio (doctrina "runs to the level").** Eighth `0.125 = 1.13246+0.125·0.02975 = 1.13618`. La vela H1 de mayor volumen del tramo (21 346, institucional) hizo **low exacto 1.13618** y revirtió al alza (cerró 1.13956) → el precio corrió al gradient level y rebotó. Además el OB cercano `[1.13542, 1.13628]` **contiene** 1.13618 y el FVG `[1.13628, 1.13686]` se apoya en su borde → confluencia de PD arrays sobre el mismo eighth (insumo directo de T42/T43).
+- ✓ **Grids anidados MTF (niveles globales).** Dealing range D1 `[1.13246, 1.20831]` (etiquetas "D1: Discount/Premium"), span 0.07585, quadrants `0.25→1.15142 · 0.5→1.17039 · 0.75→1.18935`. Comparte el extremo discount `1.13246` con el grid H1 → los gradient levels de un rango-fuente HTF son **globales** (mismos en todo TF), no se recomputan por TF (§6.3.36).
+- ✗ **Contraejemplo (número redondo ≠ gradient level).** Los niveles 1.13000/1.14000/1.15000 de la retícula de precio NO son gradient levels aunque el precio los toque: no derivan de un rango-fuente medido → no disparan T42 ni validan un FVG (T43).
+
+### 5.17 Confluencia exponencial nivel∩quadrant `f_gradientConfluenceBonus` · T42 — candidata #52 (multiplicador, requiere ADR-013)
+
+**Concepto.** La probabilidad de que el precio corra hacia un nivel (REH/REL, FVG, pool) aumenta **exponencialmente** si ese nivel coincide con un **quadrant** del rango mayor (`madre-2026.md:92,:287`, verbatim *"the probability of it running to them increases exponentially if it's part of or around a quadrant level of the entirety of the range"*). NO es un voto plano: es un **multiplicador** sobre el score direccional ya calculado.
+
+**Definición cuantificada.** `⏳ forma exacta y tope a calibrar Fase 3 (ADR-002)` — mecanismo fijado:
+```
+scoreDir_raw   = Σ(peso_i × activa_i)                        // arquitectura actual §4.8, SIN cambios
+gradientBonus  = f_gradientConfluenceBonus(nSobreQuadrant, gradMultMax)   // 0 .. (gradMultMax−1)
+scoreDir_final = scoreDir_raw × (1 + gradientBonus)
+```
+- `nSobreQuadrant` = nº de confluencias de zona YA activas en `scoreDir_raw` (OB #17/#19, FVG #18/#20, pool #9) cuyo nivel cae dentro de `gradTol×ATR14` de un punto **isQuadrant=true** (0/0.25/0.5/0.75/1). Los **eighths NO** disparan el bonus (la doctrina lo liga a "quadrant level de la entereza del rango").
+- `f_gradientConfluenceBonus` = función **creciente saturante** (p.ej. `1 − exp(−k·n)` con tope `gradMultMax`); `n=0 → bonus=0`. Se fija `k` en Fase 3.
+- **Requiere ADR-013** antes del wiring real en `f_scoreConfluences` (Fase 2, F2-T01): cambia el contrato de puramente aditivo a aditivo+multiplicativo. En Fase 1 T42 solo entrega la **función pura** + esta spec.
+
+**Parámetros default.**
+| Param | Default | Nota |
+|---|---|---|
+| `gradTol` | (reusa T41) | mismo input, no duplicar tolerancia. |
+| `gradMultMax` | `⏳` | tope del multiplicador; calibración Fase 3 (ADR-002). |
+| `k` | `⏳` | pendiente de saturación; Fase 3. |
+
+**Confirmación / anti-repaint.** Se evalúa en `barstate.isconfirmed`, sobre el `scoreDir_raw` ya calculado de esa vela.
+
+**Contraejemplo.** Un nivel que coincide con un **eighth** (0.125/0.375/0.625/0.875) pero NO con un quadrant → NO dispara el bonus exponencial (sí puede validar un FVG en T43, que admite cualquier punto del grid, pero eso no es el multiplicador de T42).
+
+**Casos de prueba** *(EURUSD)*: la confluencia OB+FVG sobre el eighth 1.13618 (§5.16 caso 2) coincide con un **eighth**, no un quadrant → **NO** dispara T42 (sí T43). Un caso que SÍ dispararía: confluencia de zona sobre el `0.25=1.13990` (quadrant). `⏳ conteo de instancias sobre quadrant pendiente de pasada dedicada TV + calibración k/gradMultMax Fase 3`.
+
+### 5.18 FVG válido = toca gradient level (refina `f_detectFVG` §2.2) `f_nearGradientLevel` · T43
+
+**Concepto.** No todos los FVG son iguales: los de alta probabilidad se forman **tocando un gradient level**; los que no, no son "FVG válidos" (`madre-2026.md:101-103,:209`, verbatim *"high probability FVGs form in close proximity and are touching one of the gradient levels… if it's not doing these things it's not a valid fair value gap"*). Refina #18/#20 con un **flag de calidad** (`gradedFvg`), sin número de confluencia nuevo (patrón `trueFvg` §5.1 / `propulsion` §5.8).
+
+**Definición cuantificada.** Al confirmarse un FVG (`f_detectFVG`, §2.2):
+- Evaluar `f_nearGradientLevel(fvg.ce, levels, gradTol×ATR14)` contra el grid T41 más relevante (preferencia: suspension diario / gap de apertura sobre el dealing range grande, §5.16 P2/P3).
+- Si `true` → `gradedFvg = true` en `SMC_Zone` (nuevo campo) → eleva `strength` en la capa de discriminación (§6, NO suma # nueva). Admite quadrant **o** eighth (cualquier punto del grid).
+- Si `false` → el FVG sigue existiendo (no se descarta), pero sin el bono de calidad.
+- Guard con T44: si hay una mecha adyacente a **0 velas** del FVG → preferir graduar la mecha (§5.19), no el FVG.
+
+**Parámetros default.** `gradTol` = reusa T41/T42 (mismo input).
+
+**Confirmación / anti-repaint.** Mismo instante en que el FVG se confirma (`barstate.isconfirmed`, §2.2); el flag no reintroduce repaint.
+
+**Contraejemplo.** Un FVG "suelto" cuyo CE cae lejos de todo nivel del grid (el "fake-ICT FVG" que cita la doctrina) → detectado igual por `f_detectFVG`, pero `gradedFvg=false`, `strength` baja.
+
+**Casos de prueba** *(EURUSD, TV MCP 2026-07-01)*: ✓ FVG H1 `[1.13628, 1.13686]`, CE = `(1.13628+1.13686)/2 = 1.13657`; distancia al eighth 0.125 (1.13618) = 0.00039 ≈ 0.22×ATR14 (ATR≈0.0018) → con `gradTol=0.12` queda **fuera** por poco (borde), pero su borde inferior 1.13628 sí toca el eighth → caso límite útil para calibrar `gradTol`. ✓ OB `[1.13542, 1.13628]` contiene el eighth 1.13618 (graded). ✗ Contraejemplo: `⏳ FVG lejos de todo nivel — pasada dedicada TV`.
+
+### 5.19 [OPCIONAL — diferible] Grading de mecha REH/REL `f_gradeWick` · T44 — herramienta (NO confluencia)
+
+**Concepto.** El anchor de un REH/REL es la vela más a la izquierda del swing extremo; si tiene mecha, se gradúa la mecha (LQ/CE/UQ) igual que un rango — *"we grade those because they're gaps"* (`madre-2026.md:96-99,:183`). El precio a menudo entra solo a un quadrant de la mecha y rechaza (parcial obligatorio LQ↔CE); si ni alcanza el CE → señal de debilidad/reversión. La mecha se gradúa **premium** si está sobre el precio actual, **discount** si por debajo (`madre-2026.md:116`). Regla de separación (`madre-2026.md:263`): si un FVG está a **0 velas** de una mecha → graduar la mecha, no el FVG; si **≥1 vela** → coexisten como PD arrays independientes.
+
+**Definición cuantificada.** `⏳ a cuantificar [impl]`
+- Anchor = vela izquierda del swing extremo (`f_detectSwings`, §1.1) — ya determinista.
+- `[top, bottom]` de la mecha = `[high, max(open,close)]` (mecha superior) o `[min(open,close), low]` (inferior) según lado → reusa `f_computeGradientLevels` sobre ese rango pequeño.
+- Separación FVG-vs-mecha: `|barIdx(FVG) − barIdx(mecha)| == 0` → preferir mecha; `≥1` → ambos coexisten.
+
+**Parámetros default.** Reusa `gradEighths`/`gradTol` de T41/T42 (sin parámetros propios).
+
+**Confirmación / anti-repaint.** El swing extremo debe estar confirmado (criterio `f_detectSwings`) antes de graduar su mecha.
+
+**Contraejemplo.** Graduar la mecha de un swing **no confirmado** (candidato que aún puede cambiar) → discrecional, prohibido.
+
+**Casos de prueba** *(EURUSD)*: `⏳PENDIENTE-TVMCP` (pasada dedicada tras cerrar T41–T43). **Nota de prioridad:** confirmar con usuario si T44 entra en el sprint de T41–T43 o queda en backlog explícito.
+
+---
+
 ## 6. CAPA DE CALIDAD / DISCRIMINACIÓN (graduada) — *variante · fuerza · invalidación · visual*
 
 > **Estado: POBLADO (Sesion-056).** Esqueleto creado en S054; 4 slots §6.2.2–6.2.5 rellenados (S055/056); **§6.3 poblado con los ~35 conceptos restantes (S056)**. Añade una capa **graduada** sobre las §1–§5 (que solo *detectan*). NO modifica ninguna definición ni umbral congelado de §0–§5 — es **aditiva**. Pendiente del set: implementar el tag `strength` + jerarquía visual en Pine (HANDOFF §5–§6) y ejecutar la verificación graduada (F1-GATE ampliado). Mapea a la columna vertebral **Detectar → Graduar → Contextualizar → Decidir** (ver [`METODOLOGIA-VERIFICACION-VISUAL.md`](METODOLOGIA-VERIFICACION-VISUAL.md)).

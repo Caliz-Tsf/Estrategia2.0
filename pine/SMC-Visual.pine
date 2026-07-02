@@ -192,6 +192,7 @@ KIND_VACUUM = 49
 KIND_IPR  = 50
 KIND_INSIDEDAY = 51
 KIND_SMT  = 52
+KIND_GRADIENT  = 53
 DIR_BULL     = 1
 DIR_BEAR     = -1
 ZS_ACTIVE    = 0
@@ -204,6 +205,9 @@ LF_INVALID = 2
 PD_DISCOUNT    = -1
 PD_EQUILIBRIUM = 0
 PD_PREMIUM     = 1
+GRAD_SRC_PD         = 0
+GRAD_SRC_SUSPENSION = 1
+GRAD_SRC_OPENGAP    = 2
 KZ_NONE   = 0
 KZ_LONDON = 1
 KZ_NY     = 2
@@ -255,6 +259,15 @@ type SMC_Pool
     int    barIdx       = na
     int    sweptBarTime = na
     int    sweptBarIdx  = na
+type SMC_GradientGrid
+    float  top
+    float  bottom
+    int    srcKind       = 0
+    int    barTimeAnchor = na
+    int    barIdxAnchor  = na
+    array<float> levels
+    array<bool>  isQuadrant
+    int    ageDays       = 0
 type SMC_TFState
     int    bias           = 0
     float  lastBOSPrice   = na
@@ -1152,6 +1165,79 @@ f_premiumDiscount(float price, float top, float bottom, float eqLo, float eqHi) 
         pct  := (price - bottom) / (top - bottom)
         zone := pct >= eqLo and pct <= eqHi ? PD_EQUILIBRIUM : pct > 0.5 ? PD_PREMIUM : PD_DISCOUNT
     [zone, pct]
+
+// --- Gradient Levels: grading del rango [reglas-smc-ict §5.16] · T41 ---
+// f_computeGradientLevels: generaliza f_premiumDiscount (§2.3) de 2 zonas a un grid de N
+// puntos. Dado [bottom, top] (top>bottom), devuelve [levels, isQuadrant]: quadrants
+// {0,0.25,0.5,0.75,1} SIEMPRE + eighths {0.125,0.375,0.625,0.875} si includeEighths.
+// levels en orden ascendente (fraccion -> precio). PURA -> golden test MQL5 directo
+// (ADR-002). NO dibuja, NO lee series globales. Rango invalido (top<=bottom) -> arrays vacios.
+f_computeGradientLevels(float top, float bottom, bool includeEighths) =>
+    array<float> levels     = array.new<float>()
+    array<bool>  isQuadrant = array.new<bool>()
+    if not na(top) and not na(bottom) and top > bottom
+        float span = top - bottom
+        for i = 0 to 8
+            bool q = i % 2 == 0
+            if q or includeEighths
+                array.push(levels, bottom + (i / 8.0) * span)
+                array.push(isQuadrant, q)
+    [levels, isQuadrant]
+
+// f_gradientZone: clasifica 'price' contra un grid ya calculado. Devuelve [idxMasCercano,
+// distEnATR]: indice del nivel mas cercano en 'levels' y |price-level|/atr. PURA.
+// Grid vacio o atr invalido -> [na, na].
+f_gradientZone(float price, array<float> levels, float atr) =>
+    int   idx  = na
+    float dist = na
+    int n = array.size(levels)
+    if n > 0 and not na(price) and not na(atr) and atr > 0
+        float best = na
+        for i = 0 to n - 1
+            float d = math.abs(price - array.get(levels, i))
+            if na(best) or d < best
+                best := d
+                idx  := i
+        dist := best / atr
+    [idx, dist]
+
+// f_nearGradientLevel: test booleano "price toca/esta sobre un gradient level". 'tol' en
+// PRECIO (el consumidor pasa gradTol*ATR14). Consumido por T42 (confluencia) y T43
+// (FVG-valido). PURA. Grid vacio -> false.
+f_nearGradientLevel(float price, array<float> levels, float tol) =>
+    bool near = false
+    int n = array.size(levels)
+    if n > 0 and not na(price) and not na(tol)
+        for i = 0 to n - 1
+            if math.abs(price - array.get(levels, i)) <= tol
+                near := true
+                break
+    near
+
+// f_bodyRespectsLevel: desempate cuerpos-vs-nivel (§5.16). Cuenta de las velas recientes
+// (recentOpens/recentCloses, misma escala) cuantas tienen el CUERPO recostado sobre el
+// grid: min(open,close) Y max(open,close) ambos dentro de 'tol' de algun nivel. El grid
+// candidato con mayor conteo gana. 'tol' en PRECIO. PURA (arrays por parametro, no
+// request.security). Velas o grid vacios -> 0.
+f_bodyRespectsLevel(array<float> recentOpens, array<float> recentCloses, array<float> levels, float tol) =>
+    int count = 0
+    int nb = math.min(array.size(recentOpens), array.size(recentCloses))
+    int nl = array.size(levels)
+    if nb > 0 and nl > 0 and not na(tol)
+        for b = 0 to nb - 1
+            float bodyLo = math.min(array.get(recentOpens, b), array.get(recentCloses, b))
+            float bodyHi = math.max(array.get(recentOpens, b), array.get(recentCloses, b))
+            bool loNear = false
+            bool hiNear = false
+            for i = 0 to nl - 1
+                float lv = array.get(levels, i)
+                if math.abs(bodyLo - lv) <= tol
+                    loNear := true
+                if math.abs(bodyHi - lv) <= tol
+                    hiNear := true
+            if loNear and hiNear
+                count += 1
+    count
 
 // --- Equal Highs / Equal Lows (EQH/EQL) [reglas-smc-ict §2.4] · T08 ---
 // f_detectEQHL: porta el EQH/EQL de LuxAlgo (drawEqualHighLow :384-402,
