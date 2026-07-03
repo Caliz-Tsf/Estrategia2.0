@@ -3059,7 +3059,7 @@ if i_showSweeps and barstate.islast
 // etiqueta flota despejada y NO la tapa la vela (pref. usuario, igual filosofia que los pools
 // que usan bar_index+2). Anclado por bar_time (robusto en spans largos / historia profunda).
 var array<label> SMC_dispLabels = array.new<label>()
-if i_showDisp and barstate.islast
+if i_showDisp and f_famOK(FAM_EST) and barstate.islast                                                      // Displacement = Estudio+ (§F2)
     for lb in SMC_dispLabels
         label.delete(lb)
     array.clear(SMC_dispLabels)
@@ -3209,7 +3209,7 @@ if i_showFlip and barstate.islast
 // i_maxShowRej por reuso del cap de eventos puntuales). El precio toco una EMA y cerro de vuelta con
 // mecha en la direccion de la tendencia. Direccional teal/rojo (§5.2), marca en la punta de la mecha.
 var array<label> SMC_emaBounceLabels = array.new<label>()
-if i_showEmaBounce and barstate.islast
+if i_showEmaBounce and f_famOK(FAM_EST) and barstate.islast                                                 // Rebote EMA = Estudio+ (§F2)
     for lb in SMC_emaBounceLabels
         label.delete(lb)
     array.clear(SMC_emaBounceLabels)
@@ -3225,7 +3225,7 @@ if i_showEmaBounce and barstate.islast
 // Marcadores de cruce de EMA por par [T23 · §4.3]. Punto pequeno con la etiqueta del par (la dir va en
 // color: ↑ azul claro / ↓ gris-azul). Todos los cruces dejan seña para verlos y contabilizarlos.
 var array<label> SMC_emaCrossLabels = array.new<label>()
-if i_showEmaCross and barstate.islast
+if i_showEmaCross and f_famOK(FAM_EST) and barstate.islast                                                  // Cruce EMA = Estudio+ (§F2)
     for lb in SMC_emaCrossLabels
         label.delete(lb)
     array.clear(SMC_emaCrossLabels)
@@ -3259,7 +3259,7 @@ if i_showEmaStack and f_famOK(FAM_EST) and barstate.islast                      
 // La direccion es la REVERSION (la real): FB alcista (rompio abajo y volvio) marca abajo; bajista marca
 // arriba. Direccional teal/rojo (la reversion, familia estructura §5.2), anclado al nivel roto en la barra de confirmacion del retorno.
 var array<label> SMC_fbLabels = array.new<label>()
-if i_showFalseBreak and barstate.islast
+if i_showFalseBreak and f_famOK(FAM_EST) and barstate.islast                                                // False Break = Estudio+ (§F1)
     for lb in SMC_fbLabels
         label.delete(lb)
     array.clear(SMC_fbLabels)
@@ -3296,7 +3296,7 @@ if i_showLegs and f_famOK(FAM_EST) and barstate.islast                          
 // Marcadores de Inside Day [T37 · §5.12]. Compresion D1 -> etiqueta gris "ID" en el medio del rango
 // interior, anclada al dia. Acotado a i_maxShowID, repintado-en-islast.
 var array<label> SMC_idLabels = array.new<label>()
-if i_showInsideDay and barstate.islast
+if i_showInsideDay and f_famOK(FAM_EST) and barstate.islast                                                 // Inside Day = Estudio+ (§F2)
     for lb in SMC_idLabels
         label.delete(lb)
     array.clear(SMC_idLabels)
@@ -3485,7 +3485,7 @@ if i_showOpenGaps and barstate.islast
         array.push(SMC_ogLines, line.new(nymoT, nymoLvl, time, nymoLvl, xloc = xloc.bar_time, color = color.new(COL_FVG, 30), style = line.style_dashed, width = 1))
         array.push(SMC_ogLabels, label.new(time, nymoLvl, "NYMO", style = label.style_label_left, color = color.new(COL_FVG, 85), textcolor = COL_FVG, size = size.tiny, xloc = xloc.bar_time))
     int nBag = array.size(SMC_bag)
-    if nBag > 0
+    if nBag > 0 and f_famOK(FAM_EST)                                                                        // Breakaway BAG = Estudio+ (§F4); las lineas NWOG/NDOG/NYMO (gaps-P) SI van en Operacion
         int firstBag = math.max(0, nBag - i_maxShowBag)
         for i = firstBag to nBag - 1
             SMC_Event bg = array.get(SMC_bag, i)
