@@ -3672,9 +3672,12 @@ f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<lab
         array.push(lines, line.new(bar_index - 1, s.pdLow,  bar_index, s.pdLow,  xloc = xloc.bar_index, color = color.new(col, 35), style = line.style_dotted, width = 1, extend = extend.left))
         array.push(labels, label.new(bar_index + 5, s.pdHigh, tf + ": Premium "  + str.tostring(s.pdHigh, format.mintick), style = label.style_label_left, color = color.new(col, 85), textcolor = col, size = size.small))
         array.push(labels, label.new(bar_index + 5, s.pdLow,  tf + ": Discount " + str.tostring(s.pdLow,  format.mintick), style = label.style_label_left, color = color.new(col, 85), textcolor = col, size = size.small))
-    string biasTxt = s.bias == DIR_BULL ? "Alcista" : s.bias == DIR_BEAR ? "Bajista" : "—"
-    float  biasY   = not na(s.pdHigh) and not na(s.pdLow) ? (s.pdHigh + s.pdLow) / 2.0 : close
-    array.push(labels, label.new(bar_index + 5, biasY, tf + " bias: " + biasTxt, style = label.style_label_left, color = color.new(col, 92), textcolor = col, size = size.small))
+    // §6.5: el label de bias MTF es redundante con la fila "Bias" del panel T14 (misma info por TF) ->
+    // en Operacion se suelta para ahorrar presupuesto de labels; en Estudio+/Todo se conserva.
+    if i_densidad != "Operación"
+        string biasTxt = s.bias == DIR_BULL ? "Alcista" : s.bias == DIR_BEAR ? "Bajista" : "—"
+        float  biasY   = not na(s.pdHigh) and not na(s.pdLow) ? (s.pdHigh + s.pdLow) / 2.0 : close
+        array.push(labels, label.new(bar_index + 5, biasY, tf + " bias: " + biasTxt, style = label.style_label_left, color = color.new(col, 92), textcolor = col, size = size.small))
 
 // f_drawMTFZones [T13c · ADR-010]: dibuja el buffer generico heredado del HTF reconstruyendo la
 // FORMA NATIVA de cada concepto, ANCLADA POR TIEMPO (xloc.bar_time -> cae en su barra real del LTF,
@@ -3694,6 +3697,12 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
     array<int>   ddDir  = array.new<int>()
     float ddTol = atr14 * 0.25
     int   dupHidden = 0
+    // §6.5 PRESUPUESTO GLOBAL (Operacion): el buffer baja las capN MAS CERCANAS por concepto
+    // (capEQ=2/capSweep=2 -> D1:EQH x2, ▼ x2 a niveles DISTINTOS, no son duplicados de nivel). En
+    // Operacion eso excede el budget de labels (§6.5: ≤25). Se recorta a top-1 por (kind,dir) — la mas
+    // cercana, que el buffer ya ordena por distancia (f_nearestNEvents) = la de mayor score_render —
+    // evacuando la 2a (Secundaria, evacuable per §6.5). En Estudio+/Todo NO se recorta (solo dedup nivel).
+    bool opMode = i_densidad == "Operación"
     // §7.2 PROCEDENCIA MTF: el grosor codifica el TF de origen (D1=3px, H1=2px); el hue NO cambia
     // (principio §1-6). El tag "(D1)"/"(H1)" ya viaja en el texto de cada marca (prefijo "D1:" o
     // sufijo "(D1)"); aqui se anade tambien al ▲/▼ del sweep, que era el unico sin rotulo de TF.
@@ -3712,7 +3721,8 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
         bool dup = false
         if labelKind and not na(tp)
             for di = 0 to array.size(ddLvl) - 1
-                if array.get(ddKind, di) == k and array.get(ddDir, di) == dr and math.abs(array.get(ddLvl, di) - tp) <= ddTol
+                // Operacion (§6.5): 1 por (kind,dir), la mas cercana. Estudio+/Todo (§6.2): solo mismo nivel.
+                if array.get(ddKind, di) == k and array.get(ddDir, di) == dr and (opMode or math.abs(array.get(ddLvl, di) - tp) <= ddTol)
                     dup := true
                     break
             if dup
