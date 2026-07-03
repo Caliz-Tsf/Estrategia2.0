@@ -3694,6 +3694,12 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
     array<int>   ddDir  = array.new<int>()
     float ddTol = atr14 * 0.25
     int   dupHidden = 0
+    // §7.2 PROCEDENCIA MTF: el grosor codifica el TF de origen (D1=3px, H1=2px); el hue NO cambia
+    // (principio §1-6). El tag "(D1)"/"(H1)" ya viaja en el texto de cada marca (prefijo "D1:" o
+    // sufijo "(D1)"); aqui se anade tambien al ▲/▼ del sweep, que era el unico sin rotulo de TF.
+    // Herencia §7.1: los heredados se dibujan en TODOS los modos (no pasan por el recorte top-N
+    // nativo SMC_structLabels/SMC_eqLabels) -> un Primario de D1 nunca se silencia en Operacion.
+    int   mtfW = tf == "D1" ? 3 : 2
     for i = 0 to array.size(kinds) - 1
         int   k  = array.get(kinds, i)
         float tp = array.get(tops, i)
@@ -3724,7 +3730,7 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                     int rgt = na(tB) ? nowT : tB
                     float ce = (tp + bt) / 2.0
                     color bgc = k == KIND_OB ? color.new(col, 85) : color.new(color.orange, 88)
-                    array.push(boxes, box.new(tA, tp, rgt, bt, xloc = xloc.bar_time, border_color = color.new(col, 60), border_width = 1, bgcolor = bgc, text = tf + ": " + (k == KIND_OB ? "OB" : "FVG"), text_color = col, text_size = size.tiny, text_halign = text.align_center, text_valign = text.align_center))
+                    array.push(boxes, box.new(tA, tp, rgt, bt, xloc = xloc.bar_time, border_color = color.new(col, 60), border_width = mtfW, bgcolor = bgc, text = tf + ": " + (k == KIND_OB ? "OB" : "FVG"), text_color = col, text_size = size.tiny, text_halign = text.align_center, text_valign = text.align_center))
                     array.push(lines, line.new(tA, ce, rgt, ce, xloc = xloc.bar_time, color = color.new(col, 55), style = line.style_dotted, width = 1))
                 k == KIND_EQH or k == KIND_EQL =>
                     // Estilo NATIVO de f_drawEQHL: AZUL + etiqueta SIN nube (fondo transparente). Linea de
@@ -3732,7 +3738,7 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                     // linea: EQH encima / EQL debajo (pref. usuario S042), con prefijo TF.
                     int rgt = na(tB) ? nowT : tB
                     int mid = math.round((tA + rgt) / 2.0)
-                    array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.blue, style = line.style_dotted, width = 1))
+                    array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.blue, style = line.style_dotted, width = mtfW))
                     array.push(labels, label.new(mid, tp, tf + ": " + (k == KIND_EQH ? "EQH" : "EQL"), xloc = xloc.bar_time, style = k == KIND_EQH ? label.style_label_down : label.style_label_up, color = color.new(color.blue, 100), textcolor = color.blue, size = size.tiny))
                 k == KIND_BOS or k == KIND_CHOCH =>
                     int rgt = na(tB) ? nowT : tB
@@ -3752,13 +3758,14 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                     if not merged
                         bool isMSS = k == KIND_CHOCH and not na(mssLvl) and mssDir == dr and math.abs(mssLvl - tp) <= majTol
                         string baseTxt = k == KIND_CHOCH ? (isMSS ? "CHoCH MSS" : "CHoCH") : "BOS"
-                        array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.new(col, 20), style = line.style_solid, width = 2))
+                        array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.new(col, 20), style = line.style_solid, width = mtfW))
                         array.push(labels, label.new(mid, tp, baseTxt + " (" + tf + ")", xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
                 k == KIND_POOL =>
-                    array.push(lines, line.new(tA, tp, nowT, tp, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dashed, width = 1))
+                    array.push(lines, line.new(tA, tp, nowT, tp, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dashed, width = mtfW))
                     array.push(labels, label.new(nowT, tp, tf + ": " + (dr == DIR_BULL ? "BSL" : "SSL"), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
                 k == KIND_SWEEP =>
-                    string mk = i_mtfSweepMark ? (dr == DIR_BULL ? "▲" : "▼") : (tf + ": Sweep")
+                    // §7.2: el sweep era la unica marca sin tag de TF -> se anade "(D1)"/"(H1)".
+                    string mk = i_mtfSweepMark ? ((dr == DIR_BULL ? "▲" : "▼") + " (" + tf + ")") : (tf + ": Sweep")
                     array.push(labels, label.new(tA, tp, mk, xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
     dupHidden                                                                                              // §6.2: marcas fundidas por duplicado -> panel "Ocultos" (§1-7)
 
