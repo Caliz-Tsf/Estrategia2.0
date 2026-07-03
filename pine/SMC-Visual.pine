@@ -2932,6 +2932,7 @@ SC_MAJOR    = 2
 int STRUCT_OP_CAP = 3
 var array<line>  SMC_structLines  = array.new<line>()
 var array<label> SMC_structLabels = array.new<label>()
+var int hidStruct = 0                                                                                       // §9-1: estructura oculta (detectada - dibujada) para el panel T14
 
 // f_drawStructure: linea del nivel roto (origen pivote -> barra de ruptura) + etiqueta
 // BOS/CHoCH centrada en el midpoint (bar_index). SIN recuadro (fondo transparente) con gap,
@@ -2987,11 +2988,13 @@ if i_showMajor and not na(evStructMajor)
 // marcas mas recientes (BOS/CHoCH/major); Estudio+ conserva la traza completa. array.shift saca
 // las mas antiguas (deja las vigentes al frente del precio). Resuelve el flood ~120 del hallazgo S087.
 if barstate.islast
+    int structBefore = array.size(SMC_structLabels)
     int structKeep = f_famOK(FAM_EST) ? 100000 : STRUCT_OP_CAP
     while array.size(SMC_structLabels) > structKeep
         label.delete(array.shift(SMC_structLabels))
     while array.size(SMC_structLines) > structKeep
         line.delete(array.shift(SMC_structLines))
+    hidStruct := structBefore - array.size(SMC_structLabels)                                                // §9-1
 
 // f_drawEQHL [T08]: linea punteada conectando los dos pivotes "iguales" + etiqueta
 // EQH/EQL en el midpoint (bar_index). VIOLETA para ambos (familia liquidez §5.2): doble
@@ -3004,6 +3007,7 @@ if barstate.islast
 int EQ_OP_CAP = 2
 var array<line>  SMC_eqLines  = array.new<line>()
 var array<label> SMC_eqLabels = array.new<label>()
+var int hidEq = 0                                                                                           // §9-1: EQH/EQL ocultas para el panel T14
 f_drawEQHL(int prevTime, float prevLevel, int prevBarIdx, int curTime, int curBarIdx, float level, bool isHigh) =>
     col = COL_LIQ
     txt = isHigh ? "EQH" : "EQL"
@@ -3019,11 +3023,13 @@ if i_showEQHL and not na(evEqLow)
     f_drawEQHL(eqLPrevTime, eqLPrevLvl, eqLPrevIdx, evEqLow.barTime, evEqLow.barIdx, evEqLow.price, false)
 // Recorte top-N vigente EQH/EQL (§8.2 F7 = P): Operacion deja solo EQ_OP_CAP recientes.
 if barstate.islast
+    int eqBefore = array.size(SMC_eqLabels)
     int eqKeep = f_famOK(FAM_EST) ? 100000 : EQ_OP_CAP
     while array.size(SMC_eqLabels) > eqKeep
         label.delete(array.shift(SMC_eqLabels))
     while array.size(SMC_eqLines) > eqKeep
         line.delete(array.shift(SMC_eqLines))
+    hidEq := eqBefore - array.size(SMC_eqLabels)                                                            // §9-1
 
 // f_drawPools [T09b]: linea horizontal del nivel del pool. VIVO (swept==false): dashed de barTime
 // -> barra actual (la liquidez vive hasta ser barrida). BARRIDO (swept==true): dotted tenue de
@@ -3834,8 +3840,9 @@ float m5Ema200 = emaSlow
 // clicks en chart): "Mostrar panel" lo apaga entero; "Panel compacto" lo MINIMIZA a header + Bias
 // por TF (2 filas). Texto size.small para footprint reducido.
 if i_showPanel and barstate.islast
-    int nrows = i_panelCompact ? 2 : 14
+    int nrows = i_panelCompact ? 2 : 15
     table panel = table.new(position.top_right, 4, nrows, border_width = 1)
+    string modoTxt = i_densidad == "Operación" ? "Op" : i_densidad == "Estudio" ? "Est" : "Todo"           // §9-3: modo activo visible
     color  hdrBg = color.new(color.blue, 0)
     string tsz   = size.small
     // --- M5 / chart (estado propio) ---
@@ -3866,7 +3873,7 @@ if i_showPanel and barstate.islast
     string h1Sw   = h1SwI < 0 ? "—" : str.tostring(array.get(h1Top, h1SwI), format.mintick) + (array.get(h1Dir, h1SwI) == DIR_BULL ? " ↑" : " ↓")
     // --- pintado: fila 0 = cabecera con TF; columna 0 = concepto. Minimizado (i_panelCompact) =
     //     solo header + Bias por TF. text_size = tsz (size.small) en todas las celdas. ---
-    table.cell(panel, 0, 0, "SMC · T14", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
+    table.cell(panel, 0, 0, "SMC · " + modoTxt, text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     table.cell(panel, 1, 0, "D1", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     table.cell(panel, 2, 0, "H1", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     table.cell(panel, 3, 0, f_tfLabel(), text_color = color.white, bgcolor = hdrBg, text_size = tsz)
@@ -3949,6 +3956,17 @@ if i_showPanel and barstate.islast
         table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, kzCell, text_color = curKZ == KZ_NONE ? color.gray : color.aqua, text_size = tsz)
+        r := r + 1
+        // Ocultos [§9-1 · Paso 8]: contador de lo detectado-pero-NO-dibujado en el modo activo (nada
+        // desaparece en silencio, §1-7 / checklist §10-#8). En "Todo" todo se ve => 0. Est/EQ = recortes
+        // top-N vigente; Ref = refinamientos Estudio+ ocultos en Operacion; Liq = sweeps > 1; µ = micro
+        // (vi/ipr) solo-Todo. Fila unica concatenada (limitacion table, per impl §9).
+        int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
+        int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_vi) + array.size(SMC_ipr)
+        int hidLiq = f_famOK(FAM_EST) ? 0 : math.max(0, array.size(SMC_sweeps) - 1)
+        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "")
+        table.cell(panel, 0, r, "Ocultos", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, ocultosTxt, text_color = color.gray, text_size = tsz)
 
 // === ALERTAS === [F1-S1.4-T15 · PINE-PLAN §5 línea 213]
 // Cobertura SMC completa via alertcondition(). Cada concepto+dirección es su propia
