@@ -3684,6 +3684,16 @@ f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<lab
 // Presentacion -> fuera del CORE byte-identico. Ya capado a MTF_K en el transporte.
 f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<float> bots, array<int> dirs, array<int> tas, array<int> tbs, array<line> lines, array<label> labels, array<box> boxes, array<SMC_Event> majEvents, float majTol, float mssLvl, int mssDir) =>
     int nowT = time
+    // §6.2 CONSOLIDACION MTF: el buffer (ADR-010) emite las capN mas cercanas por concepto (capEQ=2,
+    // capSweep=2...); dos EQH/EQL/sweep "iguales" caen a <=0.25xATR del mismo nivel -> duplicado visual
+    // (D1:EQH x2, ▼ x2). Se FUNDE en uno: se registra cada nivel-marca ya dibujado (kind+dir) y se
+    // omite el proximo dentro de ddTol. Los omitidos NO desaparecen en silencio (§1-7): se cuentan y
+    // se devuelven al panel "Ocultos" (token Dup). Arrays locales -> frescos por llamada (D1 y H1 aparte).
+    array<float> ddLvl  = array.new<float>()
+    array<int>   ddKind = array.new<int>()
+    array<int>   ddDir  = array.new<int>()
+    float ddTol = atr14 * 0.25
+    int   dupHidden = 0
     for i = 0 to array.size(kinds) - 1
         int   k  = array.get(kinds, i)
         float tp = array.get(tops, i)
@@ -3691,7 +3701,21 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
         int   dr = array.get(dirs, i)
         int   tA = na(array.get(tas, i)) ? na : int(array.get(tas, i))
         int   tB = na(array.get(tbs, i)) ? na : int(array.get(tbs, i))
-        if k != 0 and not na(tp) and not na(bt) and not na(tA)
+        // gate de duplicado solo para las marcas por-nivel (las cajas OB/FVG son zonas, no se funden aqui)
+        bool labelKind = k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH
+        bool dup = false
+        if labelKind and not na(tp)
+            for di = 0 to array.size(ddLvl) - 1
+                if array.get(ddKind, di) == k and array.get(ddDir, di) == dr and math.abs(array.get(ddLvl, di) - tp) <= ddTol
+                    dup := true
+                    break
+            if dup
+                dupHidden += 1
+            else
+                array.push(ddLvl, tp)
+                array.push(ddKind, k)
+                array.push(ddDir, dr)
+        if k != 0 and not na(tp) and not na(bt) and not na(tA) and not dup
             switch
                 k == KIND_OB or k == KIND_FVG =>
                     // Anclaje vela-a-vela EXACTO (pref. usuario S042): tA ya es la vela origen (OB) o la
@@ -3736,11 +3760,13 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                 k == KIND_SWEEP =>
                     string mk = i_mtfSweepMark ? (dr == DIR_BULL ? "▲" : "▼") : (tf + ": Sweep")
                     array.push(labels, label.new(tA, tp, mk, xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
+    dupHidden                                                                                              // §6.2: marcas fundidas por duplicado -> panel "Ocultos" (§1-7)
 
 // Cascada: el HTF solo se hereda si es estrictamente MAYOR que el chart (D1->{H1,M5}, H1->{M5}).
 var array<line>  SMC_mtfLines  = array.new<line>()
 var array<label> SMC_mtfLabels = array.new<label>()
 var array<box>   SMC_mtfBoxes  = array.new<box>()
+var int hidMtfDup = 0                                                                                       // §6.2/§9-1: marcas MTF fundidas por duplicado (panel "Ocultos")
 bool mtfShowD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
 bool mtfShowH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
 if barstate.islast and (mtfShowD1 or mtfShowH1)
@@ -3754,12 +3780,13 @@ if barstate.islast and (mtfShowD1 or mtfShowH1)
     array.clear(SMC_mtfLabels)
     array.clear(SMC_mtfBoxes)
     float mtfMajTol = atr14 * 0.3
+    hidMtfDup := 0                                                                                          // §6.2: reset por render
     if mtfShowD1
         f_drawMTFState(d1State, "D1", color.new(color.blue, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir)
+        hidMtfDup += f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir)
     if mtfShowH1
         f_drawMTFState(h1State, "H1", color.new(color.fuchsia, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir)
+        hidMtfDup += f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir)
 
 // --- Helpers de panel [adelanto parcial de PINE-PLAN §5 / T14] (Visual-only) ---
 // Buscan el evento/zona/pool mas relevante para mostrar en el panel. Son de PRESENTACION:
@@ -3990,7 +4017,7 @@ if i_showPanel and barstate.islast
         int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
         int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_vi) + array.size(SMC_ipr)
         int hidLiq = (f_famOK(FAM_EST) ? 0 : math.max(0, array.size(SMC_sweeps) - 1)) + hidPools
-        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "")
+        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "") + (hidMtfDup > 0 ? " · Dup " + str.tostring(hidMtfDup) : "")
         table.cell(panel, 0, r, "Ocultos", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, ocultosTxt, text_color = color.gray, text_size = tsz)
 
