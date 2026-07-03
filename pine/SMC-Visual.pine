@@ -3720,11 +3720,13 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
         bool labelKind = k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH
         bool dup = false
         if labelKind and not na(tp)
-            for di = 0 to array.size(ddLvl) - 1
-                // Operacion (§6.5): 1 por (kind,dir), la mas cercana. Estudio+/Todo (§6.2): solo mismo nivel.
-                if array.get(ddKind, di) == k and array.get(ddDir, di) == dr and (opMode or math.abs(array.get(ddLvl, di) - tp) <= ddTol)
-                    dup := true
-                    break
+            // guard: 'for 0 to size-1' con size=0 itera en reversa (di=0 sobre array vacio) -> RE10045.
+            if array.size(ddLvl) > 0
+                for di = 0 to array.size(ddLvl) - 1
+                    // Operacion (§6.5): 1 por (kind,dir), la mas cercana. Estudio+/Todo (§6.2): solo mismo nivel.
+                    if array.get(ddKind, di) == k and array.get(ddDir, di) == dr and (opMode or math.abs(array.get(ddLvl, di) - tp) <= ddTol)
+                        dup := true
+                        break
             if dup
                 dupHidden += 1
             else
