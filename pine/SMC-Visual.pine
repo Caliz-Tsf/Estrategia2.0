@@ -3672,8 +3672,8 @@ f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<lab
         array.push(lines, line.new(bar_index - 1, s.pdLow,  bar_index, s.pdLow,  xloc = xloc.bar_index, color = color.new(col, 35), style = line.style_dotted, width = 1, extend = extend.left))
         array.push(labels, label.new(bar_index + 5, s.pdHigh, tf + ": Premium "  + str.tostring(s.pdHigh, format.mintick), style = label.style_label_left, color = color.new(col, 85), textcolor = col, size = size.small))
         array.push(labels, label.new(bar_index + 5, s.pdLow,  tf + ": Discount " + str.tostring(s.pdLow,  format.mintick), style = label.style_label_left, color = color.new(col, 85), textcolor = col, size = size.small))
-    // §6.5: el label de bias MTF es redundante con la fila "Bias" del panel T14 (misma info por TF) ->
-    // en Operacion se suelta para ahorrar presupuesto de labels; en Estudio+/Todo se conserva.
+    // §6.5: el label de bias MTF es redundante con la fila "Bias" del panel T14 -> en Operacion se
+    // suelta para ahorrar presupuesto de labels (≤25); en Estudio+/Todo se conserva.
     if i_densidad != "Operación"
         string biasTxt = s.bias == DIR_BULL ? "Alcista" : s.bias == DIR_BEAR ? "Bajista" : "—"
         float  biasY   = not na(s.pdHigh) and not na(s.pdLow) ? (s.pdHigh + s.pdLow) / 2.0 : close
@@ -3687,28 +3687,13 @@ f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<lab
 // Presentacion -> fuera del CORE byte-identico. Ya capado a MTF_K en el transporte.
 f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<float> bots, array<int> dirs, array<int> tas, array<int> tbs, array<line> lines, array<label> labels, array<box> boxes, array<SMC_Event> majEvents, float majTol, float mssLvl, int mssDir) =>
     int nowT = time
-    // §6.2 CONSOLIDACION MTF: el buffer (ADR-010) emite las capN mas cercanas por concepto (capEQ=2,
-    // capSweep=2...); dos EQH/EQL/sweep "iguales" caen a <=0.25xATR del mismo nivel -> duplicado visual
-    // (D1:EQH x2, ▼ x2). Se FUNDE en uno: se registra cada nivel-marca ya dibujado (kind+dir) y se
-    // omite el proximo dentro de ddTol. Los omitidos NO desaparecen en silencio (§1-7): se cuentan y
-    // se devuelven al panel "Ocultos" (token Dup). Arrays locales -> frescos por llamada (D1 y H1 aparte).
-    array<float> ddLvl  = array.new<float>()
-    array<int>   ddKind = array.new<int>()
-    array<int>   ddDir  = array.new<int>()
-    float ddTol = atr14 * 0.25
-    int   dupHidden = 0
-    // §6.5 PRESUPUESTO GLOBAL (Operacion): el buffer baja las capN MAS CERCANAS por concepto
-    // (capEQ=2/capSweep=2 -> D1:EQH x2, ▼ x2 a niveles DISTINTOS, no son duplicados de nivel). En
-    // Operacion eso excede el budget de labels (§6.5: ≤25). Se recorta a top-1 por (kind,dir) — la mas
-    // cercana, que el buffer ya ordena por distancia (f_nearestNEvents) = la de mayor score_render —
-    // evacuando la 2a (Secundaria, evacuable per §6.5). En Estudio+/Todo NO se recorta (solo dedup nivel).
+    // §6.5 dedup SIN arrays (array.push dentro de esta funcion dispara RE10045 en este script grande):
+    // acumulador de string con las claves (kind,dir) ya dibujadas + str.contains. En Operacion deja
+    // top-1 por (kind,dir) — mata los duplicados D1:EQH x2 / ▼ x2 del buffer capN. Estudio+/Todo: sin
+    // recorte (opMode=false). D1 y H1 deduplican por separado (seen es local, fresco por llamada).
+    string seen  = ""
     bool opMode = i_densidad == "Operación"
-    // §7.2 PROCEDENCIA MTF: el grosor codifica el TF de origen (D1=3px, H1=2px); el hue NO cambia
-    // (principio §1-6). El tag "(D1)"/"(H1)" ya viaja en el texto de cada marca (prefijo "D1:" o
-    // sufijo "(D1)"); aqui se anade tambien al ▲/▼ del sweep, que era el unico sin rotulo de TF.
-    // Herencia §7.1: los heredados se dibujan en TODOS los modos (no pasan por el recorte top-N
-    // nativo SMC_structLabels/SMC_eqLabels) -> un Primario de D1 nunca se silencia en Operacion.
-    int   mtfW = tf == "D1" ? 3 : 2
+    int  mtfW = tf == "D1" ? 3 : 2                                                                          // §7.2 procedencia: grosor codifica TF de origen (hue sin cambios §1-6)
     for i = 0 to array.size(kinds) - 1
         int   k  = array.get(kinds, i)
         float tp = array.get(tops, i)
@@ -3716,23 +3701,11 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
         int   dr = array.get(dirs, i)
         int   tA = na(array.get(tas, i)) ? na : int(array.get(tas, i))
         int   tB = na(array.get(tbs, i)) ? na : int(array.get(tbs, i))
-        // gate de duplicado solo para las marcas por-nivel (las cajas OB/FVG son zonas, no se funden aqui)
         bool labelKind = k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH
-        bool dup = false
-        if labelKind and not na(tp)
-            // guard: 'for 0 to size-1' con size=0 itera en reversa (di=0 sobre array vacio) -> RE10045.
-            if array.size(ddLvl) > 0
-                for di = 0 to array.size(ddLvl) - 1
-                    // Operacion (§6.5): 1 por (kind,dir), la mas cercana. Estudio+/Todo (§6.2): solo mismo nivel.
-                    if array.get(ddKind, di) == k and array.get(ddDir, di) == dr and (opMode or math.abs(array.get(ddLvl, di) - tp) <= ddTol)
-                        dup := true
-                        break
-            if dup
-                dupHidden += 1
-            else
-                array.push(ddLvl, tp)
-                array.push(ddKind, k)
-                array.push(ddDir, dr)
+        string key = "|" + str.tostring(k) + "_" + str.tostring(dr) + "|"
+        bool dup = opMode and labelKind and not na(tp) and str.contains(seen, key)
+        if opMode and labelKind and not na(tp) and not dup
+            seen := seen + key
         if k != 0 and not na(tp) and not na(bt) and not na(tA) and not dup
             switch
                 k == KIND_OB or k == KIND_FVG =>
@@ -3779,13 +3752,11 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                     // §7.2: el sweep era la unica marca sin tag de TF -> se anade "(D1)"/"(H1)".
                     string mk = i_mtfSweepMark ? ((dr == DIR_BULL ? "▲" : "▼") + " (" + tf + ")") : (tf + ": Sweep")
                     array.push(labels, label.new(tA, tp, mk, xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
-    dupHidden                                                                                              // §6.2: marcas fundidas por duplicado -> panel "Ocultos" (§1-7)
 
 // Cascada: el HTF solo se hereda si es estrictamente MAYOR que el chart (D1->{H1,M5}, H1->{M5}).
 var array<line>  SMC_mtfLines  = array.new<line>()
 var array<label> SMC_mtfLabels = array.new<label>()
 var array<box>   SMC_mtfBoxes  = array.new<box>()
-var int hidMtfDup = 0                                                                                       // §6.2/§9-1: marcas MTF fundidas por duplicado (panel "Ocultos")
 bool mtfShowD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
 bool mtfShowH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
 if barstate.islast and (mtfShowD1 or mtfShowH1)
@@ -3799,13 +3770,12 @@ if barstate.islast and (mtfShowD1 or mtfShowH1)
     array.clear(SMC_mtfLabels)
     array.clear(SMC_mtfBoxes)
     float mtfMajTol = atr14 * 0.3
-    hidMtfDup := 0                                                                                          // §6.2: reset por render
     if mtfShowD1
         f_drawMTFState(d1State, "D1", color.new(color.blue, 0), SMC_mtfLines, SMC_mtfLabels)
-        hidMtfDup += f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir)
+        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir)
     if mtfShowH1
         f_drawMTFState(h1State, "H1", color.new(color.fuchsia, 0), SMC_mtfLines, SMC_mtfLabels)
-        hidMtfDup += f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir)
+        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir)
 
 // --- Helpers de panel [adelanto parcial de PINE-PLAN §5 / T14] (Visual-only) ---
 // Buscan el evento/zona/pool mas relevante para mostrar en el panel. Son de PRESENTACION:
@@ -3889,10 +3859,7 @@ f_bufNear(array<int> kinds, array<float> tops, array<float> bots, int want, floa
 f_bufZoneCell(array<int> kinds, array<float> tops, array<float> bots, int want) =>
     int idx = f_bufNear(kinds, tops, bots, want, close)
     idx < 0 ? "—" : "[" + str.tostring(array.get(bots, idx), format.mintick) + ", " + str.tostring(array.get(tops, idx), format.mintick) + "]"
-// §9-2: glifo de fuerza (Eje 2) del objeto que muestra una fila del panel -> misma lectura que el
-// label, verificable por data_get_pine_tables. Nivel via f_strengthLevel (CORE): 2=alta ●●● / 1=media
-// ●●○ / 0=baja ●○○. Solo la columna M5/chart lo usa (el buffer MTF es geometrico, sin strength
-// transportado). Helper Visual-only (fuera del === LIBRARY CORE === byte-identico).
+// §9-2 TEST: glifo de fuerza.
 f_strGlyph(float s) => f_strengthLevel(s) == 2 ? " ●●●" : f_strengthLevel(s) == 1 ? " ●●○" : " ●○○"
 // Conteo de EQH+EQL presentes en el buffer MTF.
 f_bufCountEQ(array<int> kinds) =>
@@ -4041,7 +4008,7 @@ if i_showPanel and barstate.islast
         int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
         int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_vi) + array.size(SMC_ipr)
         int hidLiq = (f_famOK(FAM_EST) ? 0 : math.max(0, array.size(SMC_sweeps) - 1)) + hidPools
-        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "") + (hidMtfDup > 0 ? " · Dup " + str.tostring(hidMtfDup) : "")
+        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "")
         table.cell(panel, 0, r, "Ocultos", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, ocultosTxt, text_color = color.gray, text_size = tsz)
 
