@@ -439,17 +439,17 @@ Prueba de visibilidad cruzada por familia heredable: marcar el objeto Primario e
 
 ### §11.2 Orden de implementación (para Opus — un commit por paso, ciclo completo del proyecto)
 
-| Paso | Pieza | Toca | Gate |
-|---|---|---|---|
-| 1 | Campos `strength` en UDTs (E.1/HANDOFF §5.1) | CORE | 0/0 ×3 + core-sync + SHA |
-| 2 | `f_zoneStrength`/`f_eventStrength`/`f_strengthLevel` + cálculo en sitios de creación | CORE | ídem |
-| 3 | Constantes `COL_*` centralizadas (§5.2) + matriz de render §5.3/§5.4 aplicada por familia | Visual | 0/0 Visual |
-| 4 | `i_densidad` + `f_visualLevel` v2 (anclas §2.3 + pisos MTF) + matriz §8.2 | Visual | 0/0 |
-| 5 | Reordenar bloques de dibujo a capas L0→L4 (§3) + KZ→ribbon + grid sin fill (§6.3) | Visual | 0/0 + checklist #4 |
-| 6 | Consolidación de labels (§6.2) + alternancia + presupuesto global (§6.5) | Visual | 0/0 + checklist #1–3 |
-| 7 | Estilo de procedencia MTF (§7.2) + pisos de herencia (§7.1) + 3 pendientes (§7.3, un commit c/u) | Visual | 0/0 + checklist #6–7 |
-| 8 | Panel T14: fila Ocultos + glifos strength + modo (§9) | Visual | 0/0 + checklist #8 |
-| 9 | Pasada de verificación completa §10 + Eje 2 (METODOLOGIA §3/§7) por concepto | — | ≥90 + firma usuario → **cierra el gate visual F1** |
+| Paso | Pieza | Toca | Gate | Estado |
+|---|---|---|---|---|
+| ✅ 1 | Campos `strength` en UDTs (E.1/HANDOFF §5.1) | CORE | 0/0 ×3 + core-sync + SHA | S083 `0b1ffba` |
+| ✅ 2 | `f_zoneStrength`/`f_eventStrength`/`f_strengthLevel` + cálculo en sitios de creación | CORE | ídem | S084 `0f1a485` |
+| ✅ 3 | Constantes `COL_*` centralizadas (§5.2) + matriz de render §5.3/§5.4 aplicada por familia | Visual | 0/0 Visual | S084 `042e1e2` |
+| ✅ 4 | `i_densidad` + `f_visualLevel` v2 (anclas §2.3 + pisos MTF) + matriz §8.2 | Visual | 0/0 | S085 `c2410ca` |
+| ✅ 5 | Reordenar bloques de dibujo a capas L0→L4 (§3) + KZ→ribbon + grid sin fill (§6.3) | Visual | 0/0 + checklist #4 | S087 `9be569a`,`6cc4a84` |
+| 🔶 6 | Consolidación de labels (§6.2) + alternancia + presupuesto global (§6.5) | Visual | 0/0 + checklist #1–3 | S088 §8.2✅+top-N✅ (`469f197`/`1959583`/`3ce3c84`); §6.2 consolidación pendiente |
+| ⬜ 7 | Estilo de procedencia MTF (§7.2) + pisos de herencia (§7.1) + 3 pendientes (§7.3, un commit c/u) | Visual | 0/0 + checklist #6–7 | S089 PENDIENTE (12 MTF heredados = excedente budget) |
+| 🔶 8 | Panel T14: fila Ocultos + glifos strength + modo (§9) | Visual | 0/0 + checklist #8 | S088 Ocultos+modo✅ (`2507ec7`); glifos strength §9-2 pendiente |
+| ⬜ 9 | Pasada de verificación completa §10 + Eje 2 (METODOLOGIA §3/§7) por concepto | — | ≥90 + firma usuario → **cierra el gate visual F1** | S089+ PENDIENTE |
 
 ### §11.3 Congelados explícitos (recordatorio ADR-002)
 Pesos E.1 · umbrales 0.33/0.66 · `labelClusterTol=0.25` · franja 0.25×ATR · presupuestos 60/25–150/60–400/150 · top-N por familia (§4) · transparencias 82/92 · grosores 1/2/3px · paleta §5.2 · `score_render` f(cercanía). Se calibran en Fase 3 (IS/OOS); aquí solo estructura + defaults razonables.
