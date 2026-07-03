@@ -2925,6 +2925,14 @@ SC_INTERNAL = 0
 SC_SWING    = 1
 SC_MAJOR    = 2
 
+// Top-N vigente de estructura (§8.2 F1 Operacion = P · §4). Anti-flood del hallazgo S087
+// (validacion vivo): ~120 BOS/CHoCH historicos inundaban Operacion sin recorte. f_drawStructure
+// REGISTRA cada linea+label aqui; el recorte a las STRUCT_OP_CAP mas recientes se hace en islast
+// (solo Operacion; Estudio+ conserva la traza completa). CONGELADO Fase 3 (ADR-002).
+int STRUCT_OP_CAP = 3
+var array<line>  SMC_structLines  = array.new<line>()
+var array<label> SMC_structLabels = array.new<label>()
+
 // f_drawStructure: linea del nivel roto (origen pivote -> barra de ruptura) + etiqueta
 // BOS/CHoCH centrada en el midpoint (bar_index). SIN recuadro (fondo transparente) con gap,
 // como los LL/HH (pref. usuario): ALCISTA encima de la linea (style_label_down), BAJISTA
@@ -2941,12 +2949,11 @@ f_drawStructure(int pivotTime, int pivotBarIdx, float level, int breakTime, int 
     bool isInt = scale == SC_INTERNAL
     bool isMaj = scale == SC_MAJOR
     string txt = (kind == KIND_CHOCH ? (isMSS ? "CHoCH MSS" : "CHoCH") : "BOS") + (isMaj ? " +" : "")
-    if isMaj
-        line.new(pivotTime, level, breakTime, level, xloc = xloc.bar_time, color = col, style = line.style_solid, width = 3)
-    else
-        line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = isInt ? line.style_dashed : line.style_solid, width = isInt ? 1 : 2)
+    line ln = isMaj ? line.new(pivotTime, level, breakTime, level, xloc = xloc.bar_time, color = col, style = line.style_solid, width = 3) : line.new(pivotBarIdx, level, breakBarIdx, level, color = col, style = isInt ? line.style_dashed : line.style_solid, width = isInt ? 1 : 2)
     int midIdx = math.round((pivotBarIdx + breakBarIdx) / 2.0)
-    label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = isMaj ? size.normal : isInt ? size.tiny : size.small)
+    label lb = label.new(midIdx, level, txt, style = dir == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = isMaj ? size.normal : isInt ? size.tiny : size.small)
+    array.push(SMC_structLines, ln)
+    array.push(SMC_structLabels, lb)
 
 // Matriz §8.2 (§F1): swings HH/HL/LH/LL = ruido en Operacion -> solo Estudio+ (f_famOK FAM_EST).
 if i_showSwings and f_famOK(FAM_EST) and newSwingHigh
@@ -2976,23 +2983,47 @@ if i_showMajor and not na(evStructMajor)
     int pivotB = up ? structMajor.highBarIdx : structMajor.lowBarIdx
     f_drawStructure(pivotT, pivotB, evStructMajor.price, evStructMajor.barTime, evStructMajor.barIdx, evStructMajor.kind, evStructMajor.dir, SC_MAJOR, false)
 
+// Recorte top-N vigente de estructura (§8.2 F1 = P): en Operacion deja solo las STRUCT_OP_CAP
+// marcas mas recientes (BOS/CHoCH/major); Estudio+ conserva la traza completa. array.shift saca
+// las mas antiguas (deja las vigentes al frente del precio). Resuelve el flood ~120 del hallazgo S087.
+if barstate.islast
+    int structKeep = f_famOK(FAM_EST) ? 100000 : STRUCT_OP_CAP
+    while array.size(SMC_structLabels) > structKeep
+        label.delete(array.shift(SMC_structLabels))
+    while array.size(SMC_structLines) > structKeep
+        line.delete(array.shift(SMC_structLines))
+
 // f_drawEQHL [T08]: linea punteada conectando los dos pivotes "iguales" + etiqueta
 // EQH/EQL en el midpoint (bar_index). VIOLETA para ambos (familia liquidez §5.2): doble
 // techo/suelo = liquidez (BSL arriba / SSL abajo). VIOLETA (familia liquidez, §5.2, COL_LIQ).
 // Linea por xloc.bar_time (robusta en spans largos, cf. f_drawStructureMajor); etiqueta
 // por bar_index (centra pese a los gaps de finde). Replica drawEqualHighLow LuxAlgo (style
 // dotted).
+// Top-N vigente de EQH/EQL (§8.2 F7 Operacion = P): en Operacion deja solo las EQ_OP_CAP
+// igualdades mas recientes (anti-flood S087); Estudio+ conserva todo. CONGELADO Fase 3 (ADR-002).
+int EQ_OP_CAP = 2
+var array<line>  SMC_eqLines  = array.new<line>()
+var array<label> SMC_eqLabels = array.new<label>()
 f_drawEQHL(int prevTime, float prevLevel, int prevBarIdx, int curTime, int curBarIdx, float level, bool isHigh) =>
     col = COL_LIQ
     txt = isHigh ? "EQH" : "EQL"
-    line.new(prevTime, prevLevel, curTime, level, xloc = xloc.bar_time, color = col, style = line.style_dotted, width = 1)
+    line lnEq = line.new(prevTime, prevLevel, curTime, level, xloc = xloc.bar_time, color = col, style = line.style_dotted, width = 1)
     int midIdx = math.round((prevBarIdx + curBarIdx) / 2.0)
-    label.new(midIdx, level, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small)
+    label lbEq = label.new(midIdx, level, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small)
+    array.push(SMC_eqLines, lnEq)
+    array.push(SMC_eqLabels, lbEq)
 
 if i_showEQHL and not na(evEqHigh)
     f_drawEQHL(eqHPrevTime, eqHPrevLvl, eqHPrevIdx, evEqHigh.barTime, evEqHigh.barIdx, evEqHigh.price, true)
 if i_showEQHL and not na(evEqLow)
     f_drawEQHL(eqLPrevTime, eqLPrevLvl, eqLPrevIdx, evEqLow.barTime, evEqLow.barIdx, evEqLow.price, false)
+// Recorte top-N vigente EQH/EQL (§8.2 F7 = P): Operacion deja solo EQ_OP_CAP recientes.
+if barstate.islast
+    int eqKeep = f_famOK(FAM_EST) ? 100000 : EQ_OP_CAP
+    while array.size(SMC_eqLabels) > eqKeep
+        label.delete(array.shift(SMC_eqLabels))
+    while array.size(SMC_eqLines) > eqKeep
+        line.delete(array.shift(SMC_eqLines))
 
 // f_drawPools [T09b]: linea horizontal del nivel del pool. VIVO (swept==false): dashed de barTime
 // -> barra actual (la liquidez vive hasta ser barrida). BARRIDO (swept==true): dotted tenue de
@@ -3041,7 +3072,8 @@ if i_showSweeps and barstate.islast
     array.clear(SMC_sweepLabels)
     int nSw = array.size(SMC_sweeps)
     if nSw > 0
-        int firstSw = math.max(0, nSw - i_maxShowSweeps)
+        int sweepCap = f_famOK(FAM_EST) ? i_maxShowSweeps : 1                                               // Operacion: solo el ultimo sweep/raid (§8.2 F8)
+        int firstSw = math.max(0, nSw - sweepCap)
         for i = firstSw to nSw - 1
             SMC_Event sw = array.get(SMC_sweeps, i)
             bool bearTrap = sw.dir == DIR_BEAR
@@ -3195,7 +3227,8 @@ if i_showFlip and barstate.islast
     array.clear(SMC_flipLabels)
     int nF = array.size(SMC_flipEvents)
     if nF > 0
-        int firstF = math.max(0, nF - i_maxShowFlip)
+        int flipCap = f_famOK(FAM_EST) ? i_maxShowFlip : 2                                                  // Operacion: solo flips vigentes (§8.2 F1 flips-P)
+        int firstF = math.max(0, nF - flipCap)
         int flipOffMs = 8 * (time - time[1])
         for i = firstF to nF - 1
             SMC_Event fp = array.get(SMC_flipEvents, i)
