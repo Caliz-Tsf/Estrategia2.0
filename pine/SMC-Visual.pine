@@ -3877,6 +3877,11 @@ f_bufNear(array<int> kinds, array<float> tops, array<float> bots, int want, floa
 f_bufZoneCell(array<int> kinds, array<float> tops, array<float> bots, int want) =>
     int idx = f_bufNear(kinds, tops, bots, want, close)
     idx < 0 ? "—" : "[" + str.tostring(array.get(bots, idx), format.mintick) + ", " + str.tostring(array.get(tops, idx), format.mintick) + "]"
+// §9-2: glifo de fuerza (Eje 2) del objeto que muestra una fila del panel -> misma lectura que el
+// label, verificable por data_get_pine_tables. Nivel via f_strengthLevel (CORE): 2=alta ●●● / 1=media
+// ●●○ / 0=baja ●○○. Solo la columna M5/chart lo usa (el buffer MTF es geometrico, sin strength
+// transportado). Helper Visual-only (fuera del === LIBRARY CORE === byte-identico).
+f_strGlyph(float s) => f_strengthLevel(s) == 2 ? " ●●●" : f_strengthLevel(s) == 1 ? " ●●○" : " ●○○"
 // Conteo de EQH+EQL presentes en el buffer MTF.
 f_bufCountEQ(array<int> kinds) =>
     int n = 0
@@ -3914,9 +3919,9 @@ if i_showPanel and barstate.islast
     SMC_Zone  fvgZ  = f_pNearZone(SMC_zones, KIND_FVG, close)
     SMC_Pool  poolP = f_pNearPool(SMC_pools, close)
     SMC_Event swE   = f_pLastEvent(SMC_sweeps)
-    string m5Ob   = na(obZ)  ? "—" : "[" + str.tostring(obZ.bottom, format.mintick)  + ", " + str.tostring(obZ.top, format.mintick)  + "]"
-    string m5Fvg  = na(fvgZ) ? "—" : "[" + str.tostring(fvgZ.bottom, format.mintick) + ", " + str.tostring(fvgZ.top, format.mintick) + "]"
-    string m5Pool = na(poolP) ? "—" : str.tostring(poolP.level, format.mintick) + " " + (poolP.dir == DIR_BULL ? "BSL" : "SSL") + " ·" + str.tostring(poolP.touches)
+    string m5Ob   = na(obZ)  ? "—" : "[" + str.tostring(obZ.bottom, format.mintick)  + ", " + str.tostring(obZ.top, format.mintick)  + "]" + f_strGlyph(obZ.strength)
+    string m5Fvg  = na(fvgZ) ? "—" : "[" + str.tostring(fvgZ.bottom, format.mintick) + ", " + str.tostring(fvgZ.top, format.mintick) + "]" + f_strGlyph(fvgZ.strength)
+    string m5Pool = na(poolP) ? "—" : str.tostring(poolP.level, format.mintick) + " " + (poolP.dir == DIR_BULL ? "BSL" : "SSL") + " ·" + str.tostring(poolP.touches) + f_strGlyph(poolP.strength)
     string m5Sw   = na(swE) ? "—" : str.tostring(swE.price, format.mintick) + (swE.dir == DIR_BULL ? " ↑" : " ↓")
     string kzTxt  = curKZ == KZ_LONDON ? "London" : curKZ == KZ_NY ? "NY AM" : curKZ == KZ_TOKYO ? "Tokyo" : "—"
     string kzCell = curKZ == KZ_NONE ? "—" : kzTxt + (curKZFirst ? " (1ª½)" : "")
