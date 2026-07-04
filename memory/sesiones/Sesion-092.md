@@ -104,4 +104,28 @@ Aplicados a los **9 drawers de zonas**: OTE/GP, OB, Breaker, IFVG, BPR, VI, MB, 
 
 ---
 
+## Adenda — Diseño: doctrina de proyección/confluencia + handoff a Fable (2ª mitad S092)
+
+Tras cerrar §10, la revisión visual con el usuario (screenshots D1/H1/M5, nuestro indicador vs LuxAlgo base) abrió un rediseño de fondo del criterio de visibilidad en Operación. **No se escribió código** (queda como diseño/esqueleto bajo gate).
+
+**Problema:** Operación limpio pero deja **conceptos en cero** — en H1 se ven OB/FVG heredados de D1 pero no los nativos de H1; en D1 ninguno. La spec §4 ya pedía "OB/FVG 3 por dirección" pero solo se implementó top-N para estructura/EQHL (S088); OB/FVG/IDM/Breaker quedaron con filtro puro de strength + ancla única.
+
+**Principio rector que definió el usuario** (evolución del criterio):
+1. Importancia = **relevancia estructural + confluencia**, NO fuerza×cercanía. Importa lo que está en **puntos de giro** y en el **origen del desplazamiento** (ruptura de estructura).
+2. **"3 por lado" = mínimo de escenarios de proyección por profundidad** (cercano→retroceso corto · medio · origen/inducement inicial), con acceso opcional a 4.º/5.º más atrás. Son proyecciones; buscar confluencias = buscar patrones.
+3. **No recortar draws lejanos** (fuera de Premium/Discount D1) si son objetivo de proyección bajo confluencia. El rango D1 es contexto, no tijera. (Corrige el "adiós al BSL 1.51" — puede ser draw válido.)
+4. **Confluencia = métrica real de importancia** (conceptos apilados al mismo nivel).
+5. Granularidad **por concepto Y por variación, caso por caso** (FVG≠trueFVG≠IFVG≠BPR). Ejemplos capturados: IFVG del origen del swing (antes del OB/LL) > IFVG de media; EQH en HH de giro > EQH neutro; sweep en el extremo que antecede el giro; FVG de desplazamiento > micro-internos.
+
+**Alcance ampliado por el usuario:** el mismo modelo cognitivo (leer atrás + proyectar adelante bajo confluencia) debe unificar **visual + score + enjambre + agente decisor MT5**. El score debe pensar como **proyección verificable** (la proyección más exacta sube su score); cada agente del enjambre debe leer qué pasó atrás y proyectar adelante por concepto; el decisor MT5 tendrá un "cuaderno de confluencias"; el swarm debate y evoluciona por precisión de proyección.
+
+**Entregables de esta adenda:**
+- **`docs/planes/DOSSIER-FABLE-proyeccion-confluencia.md`** [NUEVO] — briefing completo a Fable (problemática, principio rector, inventario ~40 conceptos/variaciones, infraestructura Pine a reutilizar, 6 entregables A–F, restricciones, pregunta abierta §7: cómo hacer que la misma doctrina sea única fuente de verdad para render + score + cuaderno EA + debate del enjambre).
+- **Handoff a Fable** (`smc-architect` sobre modelo `claude-fable-5`, agente async `a95a89969932bfd84`) para producir **`docs/planes/ESQUELETO-FABLE-proyeccion-confluencia.md`** [pendiente de su entrega] con la doctrina ordenada A–F.
+- Plan de trabajo vivo en `~/.claude/plans/la-primera-imagen-es-elegant-moler.md` (fuera del repo).
+
+**Estado:** F1-GATE §10 sigue cerrado técnicamente; este rediseño es **trabajo NUEVO** (completa el top-N §4 diferido + lo extiende a proyección/confluencia/score/enjambre). **La firma F1-GATE queda supeditada a decidir si este rediseño entra antes de firmar o se firma el §10 actual y el rediseño va como sprint aparte** (decisión del usuario, próxima sesión, con el esqueleto de Fable en mano).
+
+---
+
 Ver [[Sesion-091]] · [[Sesion-090]] · [[re10045-arrays-y-agent-browser]] · [[eje2-paso5-ribbon-y-hallazgo-gate]].
