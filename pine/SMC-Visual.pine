@@ -2755,6 +2755,59 @@ if barstate.islast and array.size(SMC_zones) > 0
 
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
+
+// === §6.5 · PRESUPUESTO GLOBAL DE TINTA (desalojo determinista) [Eje2 · Paso 6 · S090] ================
+// El budget de labels es GLOBAL por modo (Operación 25 / Estudio 60 / Todo 150). La herencia MTF (§7.1)
+// y las anclas (§2.3) son MANDATORIAS y NUNCA se desalojan; el excedente se corta de las familias L3
+// nativas discrecionales (EQHL/pools/sweep/flip/gaps) por orden inverso de frescura (las mas viejas
+// primero). En M5 se heredan DOS capas MTF (D1+H1) -> el chart limpio se logra soltando el ruido nativo
+// del TF activo, NO la herencia. Sin arrays nuevos (contador int + dedup string) -> no dispara RE10045.
+// Hallazgo S090: el budget ≤25 se cumplia en H1/D1 por aritmetica del top-N, pero M5 (doble capa MTF)
+// llegaba a 35 labels sin este desalojo (§6.5 estaba marcado [impl] sin implementar).
+// f_mtfLblYield: cuenta los labels que EMITIRA la capa MTF (mirror del label-yield de f_drawMTFZones:
+// labelKinds distintos por (kind,dir)). Sobre-cuenta los BOS/CHoCH que luego se fusionan (no dibujan
+// label) -> reserva CONSERVADORA (corta un pelo mas de nativo = seguro para el budget).
+f_mtfLblYield(array<int> kinds, array<int> dirs, array<float> tops) =>
+    string seen = ""
+    int n = 0
+    if array.size(kinds) > 0
+        for i = 0 to array.size(kinds) - 1
+            int k = array.get(kinds, i)
+            float tp = array.get(tops, i)
+            int dr = array.get(dirs, i)
+            bool labelKind = k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH
+            string key = "|" + str.tostring(k) + "_" + str.tostring(dr) + "|"
+            if labelKind and not na(tp) and not str.contains(seen, key)
+                seen := seen + key
+                n += 1
+    n
+// f_capLbls: recorta un array de labels (con sus lineas 1:1) al budget restante borrando las MAS VIEJAS
+// (array.shift) hasta que gCount + size <= cap. Devuelve [nuevoGCount, cortadas]. Solo actua cuando el
+// presupuesto aprieta (Operacion/M5); en Estudio+/Todo el cap holgado deja el while inactivo.
+f_capLbls(array<label> lbls, array<line> lns, int gCount, int cap) =>
+    int cut = 0
+    while array.size(lbls) > 0 and gCount + array.size(lbls) > cap
+        label.delete(array.shift(lbls))
+        if array.size(lns) > 0
+            line.delete(array.shift(lns))
+        cut += 1
+    [gCount + array.size(lbls), cut]
+f_capLblsOnly(array<label> lbls, int gCount, int cap) =>
+    int cut = 0
+    while array.size(lbls) > 0 and gCount + array.size(lbls) > cap
+        label.delete(array.shift(lbls))
+        cut += 1
+    [gCount + array.size(lbls), cut]
+// Reserva MTF + presupuesto de eventos nativos. mtfShow* se recomputa aqui (los flags viven mas abajo).
+bool budMtfD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
+bool budMtfH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
+int budgetLbl = i_densidad == "Operación" ? 25 : i_densidad == "Estudio" ? 60 : 150
+int FRAME_RESERVE = 8                                                                                       // P/D nativo(3)+grid(2)+estructura ancla(~3); default congelado §11.3
+int mtfReserve = (budMtfD1 ? f_mtfLblYield(d1Kind, d1Dir, d1Top) + 2 : 0) + (budMtfH1 ? f_mtfLblYield(h1Kind, h1Dir, h1Top) + 2 : 0)
+int eventCap = math.max(0, budgetLbl - mtfReserve - FRAME_RESERVE)                                          // labels que quedan para eventos nativos L3
+int gEvtLbl = 0                                                                                             // contador de labels de eventos nativos ya emitidos (orden de dibujo)
+int gEvtCut = 0                                                                                             // §10-#8: desalojados -> panel T14 (nada desaparece en silencio)
+
 // === L0 · FONDO TEMPORAL [Eje2 · Paso 5 · ESQUELETO-FABLE §3/§F9/§6.3] ================================
 // Contexto de TIEMPO (Kill Zones, macros, RTH/ETH). Regla "un solo fondo de area" (§6.3): la KZ se rinde
 // como RIBBON (tira delgada arriba, SOLO la sesion EN CURSO = ancla §2.3) en vez del bgcolor full-height
@@ -3659,6 +3712,26 @@ if i_showFVG and barstate.islast
                     color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                     array.push(SMC_fvgCELines, line.new(z.barIdx - 1, ce, bar_index, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_index))
 
+// --- §6.5 · DESALOJO DETERMINISTA de eventos nativos L3 [Eje2 · Paso 6 · S090] ---
+// Punto unico: todas las familias nativas discrecionales ya estan construidas + top-N'd; la capa MTF
+// (mandatoria §7.1) aun NO dibuja. Se recorta el excedente de labels al presupuesto restante (eventCap =
+// budget - reservaMTF - marco). PRIORIDAD de conservacion: EQHL > pools > sweep > flip > gaps; dentro de
+// cada familia caen primero las MAS VIEJAS. En M5 (doble MTF) eventCap≈0 -> el ruido nativo cede a la
+// herencia; en H1 (una MTF) sobra sitio para ~8 nativos; en D1 (sin MTF) se conservan todos. Sin arrays
+// nuevos. Los desalojados se cuentan (gEvtCut) y afloran en la fila "Ocultos" del panel T14 (§10-#8).
+if barstate.islast
+    [g1, c1] = f_capLbls(SMC_eqLabels, SMC_eqLines, gEvtLbl, eventCap)
+    gEvtLbl := g1
+    [g2, c2] = f_capLblsOnly(SMC_poolLabels, gEvtLbl, eventCap)
+    gEvtLbl := g2
+    [g3, c3] = f_capLblsOnly(SMC_sweepLabels, gEvtLbl, eventCap)
+    gEvtLbl := g3
+    [g4, c4] = f_capLbls(SMC_flipLabels, SMC_flipLines, gEvtLbl, eventCap)
+    gEvtLbl := g4
+    [g5, c5] = f_capLbls(SMC_ogLabels, SMC_ogLines, gEvtLbl, eventCap)
+    gEvtLbl := g5
+    gEvtCut := c1 + c2 + c3 + c4 + c5
+
 // --- Mapa MTF: niveles heredados de HTF en cascada [T13a · ESQUELETO-P3 §2.5] (Visual-only) ---
 // Dibujo DIFERENCIADO: lineas P/D del HTF punteadas + tenues con prefijo de TF, para no
 // confundirlas con el TF propio. La herencia es solo hacia TF MENORES (mtfShowD1/H1 filtran por
@@ -4008,7 +4081,7 @@ if i_showPanel and barstate.islast
         int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
         int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_vi) + array.size(SMC_ipr)
         int hidLiq = (f_famOK(FAM_EST) ? 0 : math.max(0, array.size(SMC_sweeps) - 1)) + hidPools
-        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "")
+        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "") + (gEvtCut > 0 ? " · Desalojo " + str.tostring(gEvtCut) : "")
         table.cell(panel, 0, r, "Ocultos", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, ocultosTxt, text_color = color.gray, text_size = tsz)
 
