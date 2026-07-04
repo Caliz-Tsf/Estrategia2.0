@@ -1470,3 +1470,491 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **Invalidación externa.** Una zona HTF invalidada en su TF de origen deja de heredarse a M5. DÓNDE: estado de la zona en su TF (Pine, vía ADR-010); el panel T14 refleja el conteo HTF.
 - **Visual (jerarquía).** **Primario:** bias dominante + P/D + top-N zonas HTF cercanas (con tag `(D1)`/`(H1)` — pendiente diferido (a), metodología §6.b). **Secundario:** zonas HTF medias. **Terciario:** sobrantes del cap → panel T14. Master input `i_densidad` (Operación/Estudio/Todo) filtra por nivel.
 - **MTF.** **Es** la capa MTF: la dirección de transferencia es siempre HTF→LTF (`lookahead_off`, §0); nunca LTF→HTF. Los 3 pendientes diferidos (tag D1/H1, cuadre EQH/EQL, exactitud vela OB/FVG) se cierran aquí (metodología §6.b).
+
+---
+
+## 7. CAPA DE PROYECCIÓN / CONFLUENCIA (relevancia estructural) — *lee-atrás · proyecta-adelante · outcome*
+
+> **Estado: EN RELLENO (Sesion-093+).** Capa **aditiva** sobre §1–§6 — igual que la §6 lo fue sobre §1–§5. **NO modifica ninguna definición, umbral ni `strength` de §0–§6** (siguen byte-idénticas). **NO añade confluencias al catálogo §4.8** (siguen 42+expansiones aprobadas): `posRole/confDegree/depthBand` son **moduladores/lecturas**, mismo estatus que `strength` (ADR-014 §3). Migra la doctrina de `ESQUELETO-FABLE-proyeccion-confluencia.md §2` a su destino normativo bajo gate [[sprint16-gate-reglas-antes-de-codigo]]: **cada ficha se cuantifica + casos EURUSD ANTES de codificar su selección** en Fase A (Visual-only). Todos los números son **candidatos CONGELADOS hasta Fase 3** (ADR-002).
+>
+> **Qué reformula (decisión Freddy S092):** la importancia deja de ser `fuerza × cercanía` y pasa a ser **relevancia estructural + confluencia, leída como proyección**. Cambia UNA cosa concreta en Pine: la llave de orden del render (`score_render` → `score_render_v2`, §7.1), que vive en `SMC-Visual.pine`. La **detección** (§1–§5) y el **grading** (§6) no se tocan. Lo único que cambia es **cuál** de las instancias ya detectadas recibe tinta en Operación y **qué escenario proyecta**.
+>
+> **Fuente única (§0 del esqueleto):** la doctrina se escribe UNA vez aquí; los cuatro consumidores (render Pine, score direccional F2, cuaderno EA F4, debate del enjambre) LEEN derivaciones de los mismos tres primitivos, no re-implementan. Frontera CORE/Visual (ADR-014): los primitivos son detección → CORE, pero se implementan en **dos fases** — fase A aproximación Visual-only (leyendo arrays del CORE, SHA intacto), fase B los promueve al CORE en Fase 2 (ADR nuevo + SHA nuevo). Las fórmulas de A y B son idénticas; solo cambia el archivo.
+
+### 7.0 Los tres primitivos de proyección (normativos — fuente de render + score + EA + enjambre)
+
+> Se calculan **por instancia detectada** (zona/evento/pool ya existentes en §1–§5), al cierre, sobre datos confirmados (anti-repaint). No crean detección nueva: leen `SMC_swings`/`SMC_events`/`SMC_zones`/`SMC_pools` + P/D (§2.3). Candidatos CONGELADOS (ADR-002).
+
+#### 7.0.1 `posRole` — posición estructural `{0=INTERNO, 1=GIRO, 2=ORIGEN}`
+
+- **Qué codifica.** El rol de la instancia en la narrativa estructural: ¿es un **GIRO** (el HH/LL donde se tomó liquidez y el precio se desplazó al lado contrario), el **ORIGEN** de un desplazamiento que rompió estructura (la vela/zona que lanzó el BOS/CHoCH vigente), o **INTERNO** (media tendencia, ruido de proyección)? Es la variable #1 de importancia (manda sobre la cercanía).
+- **Regla determinista (cuantificada).**
+  - **GIRO (1):** la instancia se solapa `±tolPos×ATR` (cand. **0.5×ATR14**) con un swing dominante (`majorLen=50`, §1.1) que fue **seguido** de CHoCH/MSS (§1.4/§1.5) o de un sweep contrario (§3.2) dentro de las siguientes `posLookfwd` velas (cand. **20**). Es decir: el extremo donde el mercado cambió de mano.
+  - **ORIGEN (2):** la instancia **nace** (su `barIdx` de creación) en el arranque de la pierna cuyo desplazamiento (§4.1: `≥1.5×ATR ∧ cuerpo≥70%`) produjo el BOS/CHoCH **vigente**. Compara `zona.barIdx` contra el `originBarIdx` del evento estructural vigente (ambos ya viajan en los UDTs).
+  - **INTERNO (0):** resto (no solapa giro ni es origen del evento vigente).
+  - **Desempate (borde):** una instancia que es GIRO **y** ORIGEN a la vez → **ORIGEN gana** (`posRole=2`; el origen del desplazamiento pesa más que el pivote).
+- **Peso en la llave (§7.1):** `wPos` = ORIGEN **1.0** · GIRO **0.9** · INTERNO **0.35** (CONGELADO). Lo interno se detecta y se **cuenta** (panel T14), nunca se resalta en Operación.
+- **Casos EURUSD.** GIRO+ORIGEN: MSS 06-01 13:00 (displacement 3.51×ATR, §6.2.5) — el swing dominante roto ahí (GIRO) es a la vez el origen de la pierna vigente (ORIGEN → gana ORIGEN). ORIGEN puro: OB bajista 06-05 11:00 [1.16345,1.16420] (pierna −5.27×ATR que rompió estructura, §6.2.1). INTERNO: BOS interno 06-02 04:00 (rompe swing interno 1.16370 sin voltear el LH swing, §6.3.3). *[Verificación fina de `posLookfwd`/`tolPos` en pasada TV antes de A-2.]*
+- **Frontera / `[impl]`.** Fase A: `f_posRole(top, bot, barIdx)` en Visual (`[impl B-2]`). Fase B: al CORE (ADR-01X).
+
+#### 7.0.2 `confDegree` — grado de confluencia `int ≥ 0`
+
+- **Qué codifica.** Nº de **familias distintas** con una instancia **activa** apilada en `±tolConf×ATR` del nivel. Es la versión sin pesos del score de confluencia direccional (§7.1 identidad central): lo que el chart resalta y lo que el score suma son la **misma** lectura del apilamiento.
+- **Regla determinista (cuantificada).** `tolConf` = **0.25×ATR14** (CONGELADO; deliberadamente igual a `labelClusterTol` §6.2 — el cluster de labels y el apilamiento son el mismo fenómeno). **Familias contadas (una por familia, no por instancia):** {OB/Breaker} · {FVG/IFVG/BPR} · {pool BSL/SSL} · {EQH/EQL} · {IDM} · {gap NWOG/NDOG} · {zona OTE/GP}. Las EMAs (§4.3) **NO** cuentan (son confluencias #37–42 propias, no de zona). Se cuenta SOLO en `islast` y SOLO para los candidatos finalistas de cada banda (O(candidatos×arrays), acotado) — nunca por vela. Contador `int` por candidato, **cero arrays nuevos** (RE10045-safe).
+- **Umbral de promoción (regla transversal §7.2):** `confDegree ≥ 2` **fuerza** nivel visual ≥ Secundario aunque la familia sea de Estudio (la confluencia promociona, nunca degrada). Se evalúa **después** del whitelist por modo §8.2 (única excepción documentada a la matriz por modo).
+- **Peso en la llave (§7.1):** `1 + kConf × min(confDegree, 3)`, `kConf` = **0.25** (CONGELADO). Se satura a 3 familias (evita que un cluster raro domine).
+- **Casos EURUSD.** *[Extracción TV antes de A-3: identificar ≥2 niveles con confDegree≥2 (p.ej. OB+FVG+pool apilados en ±0.25×ATR) y ≥1 con confDegree=1 como contraejemplo de no-promoción.]* La tolerancia 0.25×ATR ya está validada como `labelClusterTol` en la consolidación §6.2 vigente.
+- **Frontera / `[impl]`.** Fase A: `f_confDegree(level)` en Visual (`[impl B-3]`). Fase B: al CORE.
+
+#### 7.0.3 `depthBand` — banda de profundidad de proyección `{1..5}`
+
+- **Qué codifica.** En qué **banda de retroceso** del dealing range vigente (§2.3) cae la instancia, medida desde el precio hacia el origen de la pierna dominante. Es el eje que sustituye a "cercanía": la proyección tiene **profundidades** (escenarios), no una sola distancia.
+- **Regla determinista (cuantificada).** Sobre el rango vigente `[origen_pierna, extremo]` (ya disponible vía P/D §2.3), fracción de retroceso `r` desde el precio actual hacia el origen:
+  - **banda 1** = `r ∈ [0, 0.33]` — retroceso corto (toca y sigue; escenario más probable/operable).
+  - **banda 2** = `r ∈ (0.33, 0.66]` — retroceso medio.
+  - **banda 3** = `r ∈ (0.66, 1.0]` — el origen / inducement inicial (soporte último de la pierna).
+  - **bandas 4/5** = **fuera del rango vigente, más atrás en el tiempo**: niveles del dealing range **previo** (4) y del **anterior a ese** (5). Se habilitan solo con `i_profundidad` ≥ 4/5.
+  - Cortes `{0.33, 0.66, 1.0}` CONGELADOS. "Un representante por banda por lado" = el mejor `score_render_v2` de cada celda (§7.1), no los N más fuertes en bruto.
+- **Selección "3 por lado" = MÍNIMO doctrinal, no cap.** Default `i_profundidad = 3` (bandas 1–3). El usuario pide el 4.º/5.º "más atrás" con el input (min 3, max 5). No es filtro de calidad: es alcance temporal/espacial de la proyección.
+- **Casos EURUSD.** Rango vigente de referencia (§2.3): eq `[1.15835, 1.16021]`, dealing range dominante activo. *[Extracción TV antes de A-1: mapear un OB/FVG por banda 1/2/3 arriba y abajo del precio en EURUSD H1; identificar los 2 rangos previos para bandas 4/5.]* **TODO** (`[impl B-4]`): archivar los 2 rangos previos con escalares que rotan (patrón de los grids P3, §5.16 — sin arrays nuevos).
+- **Frontera / `[impl]`.** Fase A: `f_depthBand(level, px)` + `i_profundidad` en Visual (`[impl B-4/B-5]`). Fase B: al CORE.
+
+### 7.1 La llave de render v2 + guardián de draws (normativo — sustituye fuerza×cercanía)
+
+> Vive en `SMC-Visual.pine` (fase A). Es lo ÚNICO que se **sustituye** del render actual; el resto del pipeline visual (capas §3, color §5, antisolape §6, MTF §7, matriz §8.2, checklist §10 del esqueleto visual) se **conserva**.
+
+- **Llave nueva (`[impl B-1]` `f_renderScoreV2`):**
+  ```
+  score_render_v2 = strength × wPos(posRole) × (1 + kConf × min(confDegree, 3))
+     wPos: ORIGEN=1.0 · GIRO=0.9 · INTERNO=0.35     kConf = 0.25     (CONGELADOS)
+     La cercanía NO entra: la profundidad la codifica depthBand.
+     Tie-break dentro de una banda: mayor strength; a igualdad, más fresco.
+  ```
+  `f_renderScore` (cercanía) se **conserva** para las anclas §2.3 hasta migrarlas — no se regresa lo ya aprobado.
+- **Selección por bandas (`[impl B-7]`):** en la pasada `islast` de anclas, rastrear por **concepto (OB/FVG/Breaker/IDM) × lado (hi/lo) × banda (1..i_profundidad)** el mejor `score_render_v2`, guardando **índice** por celda (≤ 4×2×5 = **40 escalares int**, sin arrays → RE10045-safe). Cada drawer compara su `i` contra la celda → `isBandPick` → dibuja aunque `f_densOK` diga no.
+- **Guardián de draws (`[impl B-6]` — regla dura anti-recorte):** una instancia con `confDegree ≥ 2`, **o** un pool alineado al bias como draw objetivo, es **inmune al recorte** por distancia/frescura (top-N, desalojo §6.5, curado MTF) — se trata como **mandatoria**, mismo rango que anclas/MTF. El desalojo compensa cortando más INTERNO discrecional. **Corrige el "adiós al BSL 1.51":** un pool/EQ/old-high fuera del rango P/D se mantiene si es objetivo de proyección. El rango P/D es **contexto de razonamiento (dónde comprar/vender barato/caro), JAMÁS tijera de draws**.
+- **Congelados (ADR-002):** ver §9 del esqueleto — `wPos {1.0/0.9/0.35}` · `kConf 0.25` · `tolConf 0.25×ATR` · `tolPos 0.5×ATR` · bandas `{0.33/0.66/1.0}` · `i_profundidad {3..5}` · promoción `confDegree≥2`.
+
+### 7.2 Fichas por concepto/variación (migración de `ESQUELETO-FABLE §2`)
+
+> **Plantilla por ficha:** *Lee-atrás* (qué la causó) · *posRole requerido* (para tinta en Operación) · *confDegree* (umbral de promoción) · *depthBand* (bandeo) · *Proyección adelante* (escenario + outcome verificable §4.3) · *MTF · Modo mín.* · *Casos EURUSD*. Los casos que NO cumplen su criterio se **detectan igual** (arrays + panel T14), pero no reciben tinta en Operación. Granularidad **por variación** (FVG ≠ trueFVG ≠ IFVG ≠ BPR: misma familia/hue/capa, doctrina distinta). Reutiliza la detección §1–§5 y el `strength` §6 — **no los redefine**.
+>
+> **Regla transversal:** cuando una ficha dice "sube a Operación con confluencia", el mecanismo es único: `confDegree ≥ 2` fuerza nivel visual ≥ Secundario (la confluencia promociona, nunca degrada; se evalúa tras el whitelist §8.2).
+
+#### A1 · Estructura (`GRP_STRUCT`, capa L3 — teal/rojo) — fichas 1–7
+
+##### 7.2.1 Swing interno (§1.1 · `internalLen=3`)
+
+- **Lee-atrás.** Pivote menor dentro de una pierna. Alimenta la detección de IDM y de legs; no es objeto de proyección por sí mismo.
+- **posRole requerido.** Ninguno en tinta: es material de detección (INTERNO por naturaleza). **No recibe tinta en Operación** bajo ningún `confDegree`.
+- **confDegree.** No promociona (excepción explícita: un swing interno nunca sube a Operación aunque apile — lo que apila es la **zona** que lo contiene, no el pivote).
+- **depthBand.** n/a (no bandeado).
+- **Proyección.** No proyecta; es insumo. Se **cuenta** en panel T14 / modo Todo.
+- **MTF · Modo mín.** No baja a TF menores · **Todo**.
+- **Casos EURUSD.** Los swings internos `internalLen=3` ya detectados en §1.1 (marca fina, modo Todo).
+
+##### 7.2.2 Swing dominante HH/HL/LH/LL (§1.1 · `majorLen=50` / §6.3.4)
+
+- **Lee-atrás.** El pivote del tramo que define el bias. La traza completa NO importa; importa **dónde giró el mercado**.
+- **posRole requerido.** **SOLO los de GIRO** — el HH/LL donde se tomó liquidez y el precio se desplazó al lado contrario. Los HH/HL/LH/LL de continuación (media traza) → INTERNO → panel/Estudio.
+- **confDegree.** Refuerza pero no es requisito (el giro dominante ya es Primario por `posRole=GIRO`, `wPos=0.9`).
+- **depthBand.** 1 por banda por lado: los **3 giros que estructuran el rango vigente** (banda 1/2/3). Con `i_profundidad ≥ 4` aparecen los giros de rangos previos.
+- **Proyección.** El giro dominante proyecta el **bias**: desde él se mide el dealing range (§2.3) y las bandas. Outcome = ¿el precio respeta el giro como extremo del rango o lo rompe (nuevo giro)?
+- **MTF · Modo mín.** El giro dominante D1 baja a H1/M5 con tag (§7.4 esqueleto visual, ya) · **Estudio** (labels) / **el giro vigente en Operación**.
+- **Casos EURUSD.** El swing dominante roto en MSS 06-01 13:00 (§6.2.5) = GIRO vigente. *[Mapear los 3 giros del rango activo en pasada TV antes de A-4.]*
+
+##### 7.2.3 BOS interno (§1.3 · `internalLen=3` / §6.3.3)
+
+- **Lee-atrás.** Continuación en estructura menor (gatillo fino / IDM).
+- **posRole requerido.** INTERNO por definición → **nunca en Operación**. Estudio solo si `strength` alta (buen gatillo alineado al bias swing con displacement, §6.3.3).
+- **confDegree.** No promociona a Operación por sí solo (es estructura fina).
+- **depthBand.** n/a (evento puntual).
+- **Proyección.** Confirma la continuación de la pierna vigente dentro de su banda; no abre escenario nuevo.
+- **MTF · Modo mín.** No baja · **Estudio**.
+- **Casos EURUSD.** BOS/CHoCH interno §6.3.3 (06-02 04:00, gatillo a favor del bias bajista).
+
+##### 7.2.4 BOS swing/dominante `+` (§1.3 / §6.3.2 / §6.3.4)
+
+- **Lee-atrás.** Continuación confirmada del bias (rompe por `close` el swing que extiende).
+- **posRole requerido.** **ORIGEN implícito** — el BOS vigente + el que abrió la pierna actual (su origen = ancla del OB causal, §7.2.8). Es evento de proyección: define hacia dónde continúa.
+- **confDegree.** No requiere (el BOS vigente es Primario por rol).
+- **depthBand.** El **vigente** (banda del precio) + el origen de la pierna (banda 3, ancla del OB causal).
+- **Proyección.** Proyecta el **draw** de continuación (el pool objetivo del bias, §7.2.22). Outcome = ¿alcanza el draw antes de un CHoCH contrario?
+- **MTF · Modo mín.** Hereda SIEMPRE con tag (ya) · **Operación**.
+- **Casos EURUSD.** BOS swing de §6.3.2 (base de ruptura `close`, contraejemplo sweep 05-27 12:00).
+
+##### 7.2.5 CHoCH (§1.4 / §6.3.2)
+
+- **Lee-atrás.** Primer quiebre contra-tendencia = **aviso de giro** (rompe el swing que protege).
+- **posRole requerido.** El **vigente** (define el posible giro en curso → posRole=GIRO candidato). Los CHoCH históricos → Estudio.
+- **confDegree.** Refuerza; un CHoCH vigente en un giro con `confDegree≥1` (CHoCH+OB / CHoCH+sweep) es de alta convicción.
+- **depthBand.** El vigente (define el nuevo extremo candidato del rango).
+- **Proyección.** Proyecta un **cambio de bias candidato**: escenario de reacción en la zona de origen del CHoCH. Outcome = ¿un BOS confirma la nueva dirección o revierte (deviation, §1.5 nota)?
+- **MTF · Modo mín.** Hereda (ya) · **Operación**.
+- **Casos EURUSD.** CHoCH swing §6.3.2 (aislado contra bias dominante = menor convicción hasta BOS).
+
+##### 7.2.6 CHoCH-MSS (§1.5 / §6.2.5)
+
+- **Lee-atrás.** Giro **validado con displacement** (`≥1.5×ATR ∧ cuerpo≥70%`): EL evento de giro.
+- **posRole requerido.** **GIRO por definición** — el vigente SIEMPRE recibe tinta (es el certificador del cambio de estructura).
+- **confDegree.** No requiere (GIRO + displacement ya es máxima convicción; `wPos=0.9` + `strength` alta §6.2.5).
+- **depthBand.** El vigente; su origen ancla el OB/FVG causal (banda 3).
+- **Proyección.** Proyecta el nuevo bias con gatillo confirmado: escenario de retroceso a la zona de origen del MSS. Outcome = reacción en el origen → continuación al draw contrario.
+- **MTF · Modo mín.** Hereda (ya) · **Operación**.
+- **Casos EURUSD.** MSS 06-01 13:00, displacement **3.51×ATR**, cuerpo 98% (§6.2.5) = GIRO vigente arquetípico.
+
+##### 7.2.7 Flip (§2.8 / §6.3.9)
+
+- **Lee-atrás.** Zona S/R invertida tras un quiebre (soporte roto → resistencia y viceversa).
+- **posRole requerido.** Solo el flip en un **GIRO** con `confDegree≥1` (flip+OB o flip+FVG). Los flips internos → panel.
+- **confDegree.** **Requisito ≥1** para tinta en Operación (un flip aislado sin zona apilada es ruido de S/R).
+- **depthBand.** Sigue al giro que lo produjo (típicamente banda 3, el origen).
+- **Proyección.** Proyecta re-test del nivel invertido: escenario de rechazo en el flip. Outcome = ¿rechaza (confirma inversión) o lo recupera (flip fallido)?
+- **MTF · Modo mín.** Baja solo si Primario (ya) · **Operación (P)**.
+- **Casos EURUSD.** *[Flip en giro con OB/FVG apilado — extracción TV antes de A-5.]*
+
+#### A2 · Order Blocks (`GRP_OB`, capa L2 — azul) — fichas 8–13
+
+##### 7.2.8 Order Block (§2.1 / §6.2.1)
+
+- **Lee-atrás.** Última vela contraria antes del desplazamiento = **origen institucional** de la pierna.
+- **posRole requerido.** **ORIGEN** — el OB que originó la ruptura de estructura por lado (demanda abajo / oferta arriba). Activo (`state < 2`, no mitigado). Los OB internos (media tendencia) → Estudio.
+- **confDegree.** No requiere (ORIGEN ya es Primario, `wPos=1.0`); apilado con FVG/pool sube su prioridad dentro de la banda.
+- **depthBand.** **1 por banda de profundidad** (mín. 3/lado disponibles; Operación dibuja el de cada banda activa). Reemplaza el "2 nativos/lado" de S092 (2→uno por banda).
+- **Proyección.** Escenario de reacción: si el precio retrocede a este OB ¿rebota en la dirección del bias? Outcome (§4.3) = REACCIONÓ si tocó `±tolConf×ATR` y se desplazó `≥kReact×ATR` (1.0) antes de cerrar más allá del borde protector.
+- **MTF · Modo mín.** D1 primarios heredan (ya); los nativos se **suman** a lo heredado · **Operación**.
+- **Casos EURUSD.** OB bajista 06-05 11:00 [1.16345,1.16420] (pierna −5.27×ATR, `strength` alta = ORIGEN, §6.2.1); OB alcista 06-08 08:00 [1.15079,1.15235].
+
+##### 7.2.9 OB-propulsión `⇈` (§5.8 / §6.3.28)
+
+- **Lee-atrás.** OB que relanzó el movimiento sin mitigarse (propulsión).
+- **posRole requerido.** Hereda el del OB base (típicamente ORIGEN). **No es entrada aparte:** eleva `strength` del OB + glifo `⇈` (ya decidido F3).
+- **confDegree.** Hereda del OB base.
+- **depthBand.** Prioriza al OB dentro de su banda (a igualdad de banda, el propulsión gana el tie-break por `strength`).
+- **Proyección.** Refuerza el escenario del OB base (mayor probabilidad de reacción); no abre escenario propio.
+- **MTF · Modo mín.** Sigue al OB · **Operación (glifo)**.
+- **Casos EURUSD.** Flag `.propulsion` §5.8 (eleva strength del OB base, `[FIX P-05]`).
+
+##### 7.2.10 Breaker (§2.6 / §6.3.8)
+
+- **Lee-atrás.** OB fallado (`state=3`, cerrado a través) → S/R invertido. El OB que falló **al girar la estructura** es la zona de re-test canónica.
+- **posRole requerido.** **GIRO** — el breaker del giro vigente (nace del OB que falló en el HH/LL de giro).
+- **confDegree.** Refuerza; un breaker en giro con `confDegree≥1` es de alta convicción.
+- **depthBand.** 1/lado (la banda del giro).
+- **Proyección.** Escenario de rechazo en el nivel invertido: outcome = ¿rechaza (confirma el giro) o lo recupera (breaker fallido → invalidación)?
+- **MTF · Modo mín.** Hereda si Primario · **Operación**.
+- **Casos EURUSD.** Transición OB `state=3` → Breaker (§2.6/§6.2.1 invalidación #2).
+
+##### 7.2.11 Mitigation Block (§2.8 / §6.3.10)
+
+- **Lee-atrás.** Bloque mitigado que aún actúa como referencia.
+- **posRole requerido.** Indiferente, pero **solo con `confDegree≥2`** (apilado con FVG/pool) recibe tinta en Operación; si no → Estudio (regla dura: un bloque ya mitigado sin apilamiento es contexto histórico).
+- **confDegree.** **Requisito ≥2** (es el caso arquetípico de "promoción por confluencia").
+- **depthBand.** Sigue la zona apilada que lo promociona.
+- **Proyección.** Solo proyecta cuando confluye (refuerza el escenario del apilado); aislado no proyecta.
+- **MTF · Modo mín.** No baja · **Estudio**.
+- **Casos EURUSD.** *[Mitigation block apilado con FVG/pool — extracción TV antes de A-5.]*
+
+##### 7.2.12 Vacuum (§5.7 / §6.3.28-área)
+
+- **Lee-atrás.** Hueco de liquidez tras gap; el precio lo cruza rápido (zona de paso).
+- **posRole requerido.** Ninguno para tinta en Operación: es **contexto de paso**, no de reacción → panel + Estudio.
+- **confDegree.** No promociona (por naturaleza el precio no reacciona en él, lo atraviesa).
+- **depthBand.** n/a.
+- **Proyección.** Marca dónde el precio se moverá **rápido** (ausencia de reacción esperada); informa la narrativa, no un escenario de entrada.
+- **MTF · Modo mín.** No baja · **Estudio**.
+- **Casos EURUSD.** Vacuum Block §5.7 (T33).
+
+##### 7.2.13 Rejection block (§2.7 / §6.2.4)
+
+- **Lee-atrás.** Mechas de rechazo en un extremo = la variante de OB del extremo.
+- **posRole requerido.** **SOLO en el HH/LL de GIRO** (es el OB de mecha del extremo donde giró el mercado). Internos → nunca.
+- **confDegree.** Refuerza (rejection + sweep del nivel = trampa confirmada, §6.2.4).
+- **depthBand.** Sigue al giro (banda del extremo).
+- **Proyección.** Escenario de rechazo en el extremo: outcome = ¿el retorno respeta el nivel o lo cruza (rejection anulada, §6.2.4 invalidación)?
+- **MTF · Modo mín.** No baja · **Estudio**.
+- **Casos EURUSD.** Rejection §6.2.4 (06-08 09:00 / 05-27 12:00, ratio mecha/cuerpo sobre nivel).
+
+#### A3 · FVG (`GRP_FVG`, capa L2 — naranja) — fichas 14–20
+
+##### 7.2.14 FVG (§2.2 / §6.2.2)
+
+- **Lee-atrás.** Imbalance de 3 velas a rebalancear. El relevante = el del **desplazamiento que rompió acumulación + estructura** (donde REACCIONA), normalmente coincide con `trueFvg`.
+- **posRole requerido.** **ORIGEN** (el FVG del desplazamiento que rompió estructura). Los micro-internos = draws de paso → panel/Estudio.
+- **confDegree.** No requiere (ORIGEN Primario); apilado con OB/pool sube prioridad de banda.
+- **depthBand.** 1 por banda por lado. Línea CE solo en el pick de banda 1 (el más operable).
+- **Proyección.** Escenario de rebalanceo: ¿el precio rellena el FVG y reacciona? Outcome = reacción `≥kReact×ATR` desde el CE antes de cerrar a través del borde.
+- **MTF · Modo mín.** D1/H1 heredan (ya); nativos se suman · **Operación**.
+- **Casos EURUSD.** True FVG H1 "T.FVG" (10/34 en H1, §6.2.2); los 3 FVG vivos sin "·g" (caso límite §5.18).
+
+##### 7.2.15 trueFVG / displacement (§5.1 / §6.2.2)
+
+- **Lee-atrás.** FVG cuya vela media es displacement (`≥1.5×ATR ∧ cuerpo≥70%`).
+- **posRole requerido.** Flag que **eleva `strength`** (ya) y **satisface por sí solo el criterio ORIGEN** del FVG base. No entrada aparte.
+- **confDegree.** Hereda del FVG base.
+- **depthBand.** Sigue al FVG.
+- **Proyección.** Certifica que el FVG es de origen institucional → escenario de mayor probabilidad de reacción.
+- **MTF · Modo mín.** Sigue al FVG · **Operación (implícito)**.
+- **Casos EURUSD.** Flag `trueFvg` §5.1 (etiqueta "T.FVG").
+
+##### 7.2.16 gradedFVG `·g` (§5.18 / T43 / ADR-013)
+
+- **Lee-atrás.** FVG cuyo CE cae en un gradient level (§5.16).
+- **posRole requerido.** Flag: eleva `strength` + refina #18/#20 (ya, ADR-013). **Sin tinta propia.**
+- **confDegree.** No cuenta como familia aparte (es refinamiento del FVG).
+- **depthBand.** Sigue al FVG.
+- **Proyección.** Eleva la probabilidad del escenario del FVG base (confluencia con el grid).
+- **MTF · Modo mín.** Sigue al FVG · **—**.
+- **Casos EURUSD.** `gradedFvg` §5.18 (sufijo "·g"; los 3 FVG actuales correctamente sin graduar, §6.2.2).
+
+##### 7.2.17 IFVG — invertida (§5.2 / §6.3.23)
+
+- **Lee-atrás.** FVG violado que invierte su rol (`state=ZS_INVALID`, `dir` invertida).
+- **posRole requerido.** **SOLO el que calza con el inicio del swing** — el FVG generado antes del OB / antes del LL cuando el precio venía cayendo y va a girar → **GIRO** con `confDegree≥1` (con el OB/estructura del giro). Los IFVG de media tendencia → Estudio.
+- **confDegree.** **Requisito ≥1** para tinta en Operación.
+- **depthBand.** Sigue al giro.
+- **Proyección.** Escenario de reacción en el nivel invertido del giro. `[FIX P-05]`: no suma el FVG muerto junto a su IFVG (1 confluencia).
+- **MTF · Modo mín.** Hereda si Primario · **Operación**.
+- **Casos EURUSD.** IFVG §5.2/§6.3.23 (27 FVG invalidados en el caso PLAN-049).
+
+##### 7.2.18 BPR — Balanced Price Range (§5.3 / §6.3.24)
+
+- **Lee-atrás.** Solape de FVGs opuestos = PD-array **defensiva** (doctrina madre-2026).
+- **posRole requerido.** **ORIGEN** de la pierna vigente **o** `confDegree≥2`; el resto → Estudio.
+- **confDegree.** Ruta de promoción: `≥2` sube de Estudio a Operación.
+- **depthBand.** Sigue la pierna/apilamiento.
+- **Proyección.** Zona de reacción defensiva (stop, no entrada primaria; doctrina defensive-array): outcome = ¿respeta el BPR o lo perfora?
+- **MTF · Modo mín.** Hereda si Primario · **Estudio (P sube a Operación con confluencia)**.
+- **Casos EURUSD.** BPR §5.3/§6.3.24 (candidata #44).
+
+##### 7.2.19 VI — Volume Imbalance (§5.5 / §6.3.26)
+
+- **Lee-atrás.** Gap entre cuerpos con mechas solapadas (micro-imbalance).
+- **posRole requerido.** Micro-concepto: **refina el nivel exacto dentro de una zona ya importante** (hereda `confDegree` del padre). **Nunca solo.**
+- **confDegree.** No cuenta como familia propia (afina el nivel del padre).
+- **depthBand.** La del padre.
+- **Proyección.** Precisa el nivel de reacción dentro de la zona padre; no proyecta escenario propio.
+- **MTF · Modo mín.** No baja · **Todo**.
+- **Casos EURUSD.** SIVI/BIVI §5.5 (`[FIX P-05]` eleva strength).
+
+##### 7.2.20 IPR — Imbalanced Price Range (§5.9 / §6.3.29)
+
+- **Lee-atrás.** Rango de precio institucional (contexto/bias).
+- **posRole requerido.** Micro: solo Todo/panel (contexto de bias, no zona de reacción).
+- **confDegree.** No promociona.
+- **depthBand.** n/a.
+- **Proyección.** Informa el sesgo del rango; no abre escenario de entrada.
+- **MTF · Modo mín.** No baja · **Todo**.
+- **Casos EURUSD.** IPR §5.9 (candidata #49).
+
+#### A4 · Liquidez (`GRP_LIQ` + `GRP_EQHL`, capa L3 — violeta) — fichas 21–27
+
+##### 7.2.21 Pool BSL/SSL vivo (§3.1 / §6.3.11)
+
+- **Lee-atrás.** Liquidez en reposo = candidato a **draw** (imán de precio).
+- **posRole requerido.** El **draw del bias** (objetivo, ancla) + los pools en extremos del marco D1/H1 **a cualquier distancia**.
+- **confDegree.** **Guardián de draws (§7.1):** un pool lejano con `confDegree≥2` **o** alineado al bias **NO se recorta por rango** (inmune al top-N/desalojo). Corrige el "adiós al BSL 1.51".
+- **depthBand.** Puede caer en bandas 4/5 (fuera del rango vigente) y aún así mantenerse por el guardián.
+- **Proyección.** Es el **objetivo** de la proyección: outcome = ¿el precio alcanza el pool (draw cumplido) o gira antes?
+- **MTF · Modo mín.** Across D1/H1/M5 (ya) · **Operación**.
+- **Casos EURUSD.** BSL D1 ~1.51 (cluster de máximos EURUSD 2009-2011 no barridos, diagnosticado S092) = pool lejano alineado al bias → **vive** por el guardián.
+
+##### 7.2.22 Pool objetivo (§3.1 / §2.3-ancla)
+
+- **Lee-atrás.** El draw activo de la proyección vigente (a dónde apunta el bias ahora).
+- **posRole requerido.** **Ancla SIEMPRE** (§2.3 esqueleto visual, ya) — inmune a todo recorte.
+- **confDegree.** N/A (mandatorio por ser el objetivo).
+- **depthBand.** La del objetivo vigente.
+- **Proyección.** ES la proyección adelante: define el objetivo del escenario dominante y el R:R.
+- **MTF · Modo mín.** Sí · **Operación**.
+- **Casos EURUSD.** El draw del bias vigente (`⚡Raid↓`@1.17 tomado → siguiente draw D1, S092).
+
+##### 7.2.23 Pool barrido (§3.1 / §3.2)
+
+- **Lee-atrás.** Historial de liquidez tomada = ¿ya liquidaron? (lectura atrás pura).
+- **posRole requerido.** Contexto: Estudio. El **último barrido relevante** alimenta `posRole=GIRO` de otros conceptos (el sweep que antecede el giro).
+- **confDegree.** No promociona (ya cumplió su función).
+- **depthBand.** n/a.
+- **Proyección.** No proyecta; informa que un draw ya se consumió (suele preceder el giro contrario).
+- **MTF · Modo mín.** No · **Estudio**.
+- **Casos EURUSD.** `pool.swept` §3.1 (reconvertido en señal de sweep #10).
+
+##### 7.2.24 Sweep / Raid / Grab (§3.2 / §3.3 / §6.3.12)
+
+- **Lee-atrás.** Toma de liquidez (mecha + cierre de vuelta).
+- **posRole requerido.** El sweep en el **HH/LL que antecede el giro** al lado contrario → **GIRO**. Internos → panel.
+- **confDegree.** Refuerza el giro (sweep + CHoCH/OB = manipulación confirmada).
+- **depthBand.** El del extremo operativo.
+- **Proyección.** Certifica el giro: escenario de reacción tras la trampa. Outcome = ¿gira (sweep válido) o continúa (era ruptura)?
+- **MTF · Modo mín.** El del extremo operativo · **Operación (último)**.
+- **Casos EURUSD.** Sweep §3.2/§6.3.12 (mecha que pincha y cierra de vuelta, contraejemplo de BOS 05-27 12:00).
+
+##### 7.2.25 IDM — Inducement (§3.6 / §6.3.13)
+
+- **Lee-atrás.** Trampa previa a la zona real (liquidez que se toma antes de la reacción).
+- **posRole requerido.** El que **custodia el extremo operativo** (entre el precio y la zona de reacción del giro) = el **"primer escenario" de profundidad** (banda 1).
+- **confDegree.** Refuerza; es parte del giro.
+- **depthBand.** **Top por lado bandas 1–2** en Operación.
+- **Proyección.** Marca el nivel de inducement que se barre antes de que la zona real reaccione: escenario de "toma inducement → reacción en la zona".
+- **MTF · Modo mín.** Nativo (no baja) · **Operación** (sube de Estudio+ — **decisión S092**; reemplaza el cap por recencia `i_maxShowIDM`).
+- **Casos EURUSD.** IDM §3.6/§6.3.13 (custodia del extremo, gatillo fino interno).
+
+##### 7.2.26 Judas (§3.5 / §6.3.14)
+
+- **Lee-atrás.** Barrido falso de apertura de sesión.
+- **posRole requerido.** El de la **sesión activa, solo fresco** (dentro de la KZ en curso). Los históricos → Estudio/panel.
+- **confDegree.** Refuerza si apila con OB/FVG de sesión.
+- **depthBand.** El del extremo de sesión.
+- **Proyección.** Escenario de reversión post-Judas: outcome = ¿la sesión revierte tras el barrido falso?
+- **MTF · Modo mín.** No baja · **Estudio**.
+- **Casos EURUSD.** Judas §3.5/§6.3.14 (barrido de apertura KZ).
+
+##### 7.2.27 EQH / EQL (§2.4 / §6.3.6)
+
+- **Lee-atrás.** Liquidez obvia (doble techo/suelo) = imán claro.
+- **posRole requerido.** Los que están en un **HH/LL de GIRO** donde se toma liquidez y hay desplazamiento. Media tendencia neutra → panel.
+- **confDegree.** Refuerza (EQH + pool + sweep).
+- **depthBand.** Si hay 3 ciclos, importan los **3 EQ de los giros significativos** (1 por banda).
+- **Proyección.** Objetivo de sweep: outcome = ¿se barre el EQH/EQL (draw cumplido)?
+- **MTF · Modo mín.** Heredan si Primarios (ya, cuadre §7.3-b) · **Operación**.
+- **Casos EURUSD.** EQH/EQL §2.4/§6.3.6 (≥2 swings a `|Δ|≤0.1×ATR`; contraejemplo 0.6×ATR = HH/LH, no EQH).
+
+#### A5 · Premium/Discount + Gradient (`GRP_PD` / `GRP_GRAD`, capa L1 — marco) — fichas 28–31
+
+##### 7.2.28 P/D + EQ (§2.3 / §6.3.5)
+
+- **Lee-atrás.** Mitades del dealing range vigente (dónde comprar/vender barato/caro).
+- **posRole requerido.** **Ancla SIEMPRE** (marco §2.3). Es **contexto de razonamiento, JAMÁS filtro de recorte de draws** (regla dura §7.1).
+- **confDegree.** N/A (es el marco que modula, no una zona apilable).
+- **depthBand.** Define el eje de bandas (§7.0.3 se mide sobre el rango P/D).
+- **Proyección.** Contexto premium/discount del escenario: modula la dirección esperada (comprar en discount, vender en premium).
+- **MTF · Modo mín.** 3 líneas D1 rotuladas en LTF (ya) · **Operación**.
+- **Casos EURUSD.** eq `[1.15835, 1.16021]`; rango dominante vigente (§2.3/§6.3.5).
+
+##### 7.2.29 Quadrants LQ/EQ/UQ (§5.16 / T41)
+
+- **Lee-atrás.** Cuartos del rango (grid de gradient levels).
+- **posRole requerido.** Líneas del marco (ya) — **dan el `depthBand` visualmente** (el usuario ve la banda).
+- **confDegree.** N/A (marco); pero una zona que cae en un quadrant sube su `confDegree` (gradient, ADR-013).
+- **depthBand.** Son la referencia visual de las bandas.
+- **Proyección.** Estructura el espacio de proyección (dónde caen los escenarios).
+- **MTF · Modo mín.** Grid global (ya) · **Operación**.
+- **Casos EURUSD.** LQ 1.13990 / EQ 1.14733 / UQ 1.15477 (exactos al 5º decimal, §5.16/T41=96).
+
+##### 7.2.30 Eighths 1/8–7/8 (§5.16)
+
+- **Lee-atrás.** Octavos del rango (afinado del grid).
+- **posRole requerido.** Afinado de **Estudio** (ya): no participan en la selección de Operación.
+- **confDegree.** Un eighth tocado por una zona sube su `confDegree` gradient (ADR-013), pero el eighth en sí no recibe protagonismo.
+- **depthBand.** Sub-banda dentro de las 3 principales.
+- **Proyección.** Precisa niveles de reacción para Estudio.
+- **MTF · Modo mín.** Grid global · **Estudio**.
+- **Casos EURUSD.** eighth 1/8=1.13618 (tocado al tick por vela institucional vol 21346, §5.16).
+
+##### 7.2.31 OTE / Golden Pocket (§2.5 / §6.3.7)
+
+- **Lee-atrás.** Zona de retroceso óptimo 0.62–0.79 de la última pierna impulsiva con BOS.
+- **posRole requerido.** Solo con **pierna activa alineada al bias** (ya). Coincide con banda 2–3.
+- **confDegree.** **Sube el `confDegree`** de las zonas que caen dentro de la OTE (OTE+OB/FVG = entrada premium).
+- **depthBand.** Banda 2–3 (retroceso óptimo).
+- **Proyección.** Escenario de entrada óptima: outcome = reacción dentro de la OTE antes de superar el 100% (anula la pierna).
+- **MTF · Modo mín.** No baja (panel indica OTE D1) · **Operación (activo)**.
+- **Casos EURUSD.** OTE/GP §2.5/§6.3.7 (contraejemplo: fib sobre pierna correctiva 06-09→06-10 = sin significado).
+
+#### A6 · Gaps de apertura (capa L2 — naranja) — fichas 32–35
+
+##### 7.2.32 NWOG — New Week Opening Gap (§5.10 / §6.3.32)
+
+- **Lee-atrás.** Gap de apertura semanal = zona-referencia recurrente.
+- **posRole requerido.** La **más cercana por lado si `confDegree≥1`**; el resto → panel.
+- **confDegree.** **Requisito ≥1** para tinta (un gap sin apilar es solo nivel de referencia).
+- **depthBand.** La banda donde cae el gap.
+- **Proyección.** Nivel de reacción recurrente: outcome = ¿reacciona en el NWOG?
+- **MTF · Modo mín.** Gaps D1 heredan si Primarios (ya) · **Estudio (P sube con confluencia)**.
+- **Casos EURUSD.** NWOG fin de semana 06-07 ~0.85×ATR, 05-31 ~0.72×ATR (§6.3.32).
+
+##### 7.2.33 NDOG — New Day Opening Gap (§5.10 / §6.3.32)
+
+- **Lee-atrás.** Gap de apertura diaria (ventana más corta que NWOG).
+- **posRole requerido.** Ídem NWOG: la más cercana por lado si `confDegree≥1`.
+- **confDegree.** **Requisito ≥1**.
+- **depthBand.** La del gap.
+- **Proyección.** Ídem NWOG, horizonte intradía.
+- **MTF · Modo mín.** Ídem NWOG · **Estudio (P sube con confluencia)**.
+- **Casos EURUSD.** Gaps diarios FX ≈0 típicamente (§6.3.32 contraejemplo: `open`≈`close` previo <0.5×ATR).
+
+##### 7.2.34 NYMO — NY Midnight Open (§5.10 / §4.2)
+
+- **Lee-atrás.** Apertura NY 00:00 = nivel de referencia intradía.
+- **posRole requerido.** Nivel de referencia intradía **en KZ activa**; fuera de KZ → panel.
+- **confDegree.** Refuerza si apila con OB/FVG de sesión.
+- **depthBand.** La del precio en sesión.
+- **Proyección.** Referencia premium/discount intradía (por encima/debajo del NYMO).
+- **MTF · Modo mín.** No · **Estudio**.
+- **Casos EURUSD.** NYMO §5.10 (nivel global, se hereda a M5 naturalmente).
+
+##### 7.2.35 BAG — Breakaway Gap (§5.10 / `KIND_BAG` / §6.3.32)
+
+- **Lee-atrás.** Gap que NO se rellena (expansión) y **además rompe estructura** (BOS en su dir).
+- **posRole requerido.** Señal de displacement: **eleva `strength`/`posRole=ORIGEN`** de las zonas de su pierna; tinta propia solo Estudio.
+- **confDegree.** No cuenta como familia (certifica el origen de las zonas de su pierna).
+- **depthBand.** La de la pierna que lanzó.
+- **Proyección.** Certifica un desplazamiento direccional (como el displacement §4.1): refuerza escenarios de la pierna.
+- **MTF · Modo mín.** No · **Estudio**.
+- **Casos EURUSD.** Breakaway §5.10/§6.3.32 (#45 cand.: gap que confirma BOS → direccional).
+
+#### A7 · Contexto (`GRP_CTX` / `GRP_KZ`, capas L0/L1/L3) — fichas 36–40
+
+##### 7.2.36 EMAs 20/50/200 — rebote/cruce/stack (§4.3 / §6.2.3 / §6.3.18-20)
+
+- **Lee-atrás.** Tendencia media (contexto del TF propio).
+- **posRole requerido.** Líneas tenues (ya); los eventos (cruce/rebote/stack) solo panel. **NO participan en `posRole`/`confDegree`** (son confluencias #37–42 propias, no de zona).
+- **confDegree.** **No cuentan** en el apilamiento de zona (§7.0.2).
+- **depthBand.** n/a.
+- **Proyección.** Contexto de bias medio; su peso va al score (#37–42), no a la tinta de zona.
+- **MTF · Modo mín.** No baja (contexto del TF propio, §6.2.3) · **Estudio (eventos)**.
+- **Casos EURUSD.** Cruce 20×50 / 50×200, Stack Flip (§6.2.3); rebote §6.3.19.
+
+##### 7.2.37 Kill Zones + macros (§3.4 / §5.14 / §6.3.16)
+
+- **Lee-atrás.** Ventanas temporales de manipulación (eje de tiempo).
+- **posRole requerido.** **Ribbon** (ya, S087) — solo sesión en curso. Una zona tocada **dentro** de KZ activa **no cambia su tinta** (el tiempo va al score #34, no al chart).
+- **confDegree.** No cuenta (es contexto temporal, no zona apilable).
+- **depthBand.** n/a (eje de tiempo, no de precio).
+- **Proyección.** Marca **cuándo** es probable la manipulación (ventana del escenario); el peso temporal va al score #34.
+- **MTF · Modo mín.** No (ribbon local) · **Operación (ribbon)**.
+- **Casos EURUSD.** Ribbon KZ §6.3.16/S087 (bgcolor solo Estudio+; macros solo Estudio+).
+
+##### 7.2.38 Displacement (§4.1 / §6.3.17)
+
+- **Lee-atrás.** Vela(s) de expansión institucional (`≥1.5×ATR ∧ cuerpo≥70%`).
+- **posRole requerido.** **No tiene tinta propia:** ES el **certificador de `posRole=ORIGEN`** (y de trueFVG/MSS). Es la fuente del primitivo.
+- **confDegree.** No cuenta como familia (es el mecanismo que asigna ORIGEN).
+- **depthBand.** n/a.
+- **Proyección.** Certifica que una pierna es de origen institucional → habilita los escenarios ORIGEN de sus zonas.
+- **MTF · Modo mín.** Implícito · **— (panel)**.
+- **Casos EURUSD.** Displacement §4.1 (06-01 13:00 3.51×ATR; fuente del primitivo `posRole`).
+
+##### 7.2.39 Legs IMP/CORR + Inside Day + CISD (§4.4 / §5.12 / §5.6 / §6.3.22-30-27)
+
+- **Lee-atrás.** Fase de la pierna (impulsiva/correctiva) / compresión (Inside Day) / cambio en delivery (CISD).
+- **posRole requerido.** **Lectura de contexto:** el leg vigente **define qué lado se proyecta**. CISD solo **fresco + GIRO** (Estudio).
+- **confDegree.** No cuentan como familia; informan qué lado apilar.
+- **depthBand.** El leg vigente delimita el rango de bandas activo.
+- **Proyección.** Determinan la **dirección** del escenario (leg impulsivo = continuación; correctivo = retroceso a zona).
+- **MTF · Modo mín.** No baja · **Estudio**.
+- **Casos EURUSD.** Impulsive/Corrective §4.4/§6.3.22; Inside Day §5.12; CISD §5.6/§6.3.27.
+
+##### 7.2.40 Std-Dev + SMT (§5.11 / §5.13 / §6.3.31-33)
+
+- **Lee-atrás.** Proyecciones de desviación (Std-Dev) / divergencia entre pares correlacionados (SMT).
+- **posRole requerido.** **Herramientas de proyección del agente** (targets banda 4–5) y confluencia inter-símbolo (SMT, futuro multi-par). Panel/Estudio, **sin tinta en Operación**.
+- **confDegree.** SMT es confluencia inter-símbolo (#51), no de apilamiento local; Std-Dev es herramienta de TP (§5.11, no suma al score).
+- **depthBand.** Std-Dev alimenta bandas 4–5 (targets fuera del rango); SMT es transversal.
+- **Proyección.** Std-Dev = niveles de objetivo `−1/−2/−2.5/−4` (§5.11); SMT = confirmación de manipulación inter-símbolo. Son **el instrumento** de la proyección del agente/EA.
+- **MTF · Modo mín.** No · **Estudio**.
+- **Casos EURUSD.** Std-Dev §5.11 (proyección TP, no confluencia); SMT §5.13 requiere par correlacionado (ADR-011, no verificable con un solo símbolo).
+
+---
+
+> **§7 completa: 40/40 fichas en doctrina.** Fundación (§7.0 primitivos + §7.1 llave/guardián) + A1–A7. **Falta (pre-código, gate sprint16):** (1) una **pasada TV concentrada** que clave los casos EURUSD marcados `[Extracción TV…]` con niveles reales por banda + confDegree≥2 + los 2 rangos previos (bandas 4/5), y (2) **aprobación del usuario** por familia. Al cerrarse → corren los pasos **A-1…A-7** de `ESQUELETO-FABLE-proyeccion-confluencia.md §3.6` en `SMC-Visual.pine` (Fase A, Visual-only, CORE intacto), y tras A-7 (cierra la parte visual) → **firma F1-GATE**. Fase B (promoción de primitivos al CORE + ADR nuevo) abre Fase 2.
