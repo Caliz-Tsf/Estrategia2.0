@@ -1494,7 +1494,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
   - **INTERNO (0):** resto (no solapa giro ni es origen del evento vigente).
   - **Desempate (borde):** una instancia que es GIRO **y** ORIGEN a la vez → **ORIGEN gana** (`posRole=2`; el origen del desplazamiento pesa más que el pivote).
 - **Peso en la llave (§7.1):** `wPos` = ORIGEN **1.0** · GIRO **0.9** · INTERNO **0.35** (CONGELADO). Lo interno se detecta y se **cuenta** (panel T14), nunca se resalta en Operación.
-- **Casos EURUSD.** GIRO+ORIGEN: MSS 06-01 13:00 (displacement 3.51×ATR, §6.2.5) — el swing dominante roto ahí (GIRO) es a la vez el origen de la pierna vigente (ORIGEN → gana ORIGEN). ORIGEN puro: OB bajista 06-05 11:00 [1.16345,1.16420] (pierna −5.27×ATR que rompió estructura, §6.2.1). INTERNO: BOS interno 06-02 04:00 (rompe swing interno 1.16370 sin voltear el LH swing, §6.3.3). *[Verificación fina de `posLookfwd`/`tolPos` en pasada TV antes de A-2.]*
+- **Casos EURUSD (pasada TV S094, live H1 04-07, px 1.14376, ATR14 0.00085).** **GIRO+ORIGEN → ORIGEN gana:** MSS H1 **1.13827 · 01-07 12:00** — giro dominante vigente (extremo inferior del tramo) y a la vez origen de la pierna vigente. **ORIGEN puro:** OB D1 **[1.15726,1.16221]** (premium, origen de la pierna bajista dominante, §6.2.1). **INTERNO:** BOS M5 **1.14380 · 03-07 19:35** (continuación fina, no voltea el swing dominante, §6.3.3). *Verificación fina `posLookfwd=20`/`tolPos=0.000425` pendiente en A-2 (confirmar solape del MSS 1.13827 con el swing `majorLen=50` roto dentro de 20 velas).* Caso histórico archivado (S092): MSS 06-01 13:00 (displacement 3.51×ATR); OB bajista 06-05 11:00 [1.16345,1.16420].
 - **Frontera / `[impl]`.** Fase A: `f_posRole(top, bot, barIdx)` en Visual (`[impl B-2]`). Fase B: al CORE (ADR-01X).
 
 #### 7.0.2 `confDegree` — grado de confluencia `int ≥ 0`
@@ -1503,7 +1503,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **Regla determinista (cuantificada).** `tolConf` = **0.25×ATR14** (CONGELADO; deliberadamente igual a `labelClusterTol` §6.2 — el cluster de labels y el apilamiento son el mismo fenómeno). **Familias contadas (una por familia, no por instancia):** {OB/Breaker} · {FVG/IFVG/BPR} · {pool BSL/SSL} · {EQH/EQL} · {IDM} · {gap NWOG/NDOG} · {zona OTE/GP}. Las EMAs (§4.3) **NO** cuentan (son confluencias #37–42 propias, no de zona). Se cuenta SOLO en `islast` y SOLO para los candidatos finalistas de cada banda (O(candidatos×arrays), acotado) — nunca por vela. Contador `int` por candidato, **cero arrays nuevos** (RE10045-safe).
 - **Umbral de promoción (regla transversal §7.2):** `confDegree ≥ 2` **fuerza** nivel visual ≥ Secundario aunque la familia sea de Estudio (la confluencia promociona, nunca degrada). Se evalúa **después** del whitelist por modo §8.2 (única excepción documentada a la matriz por modo).
 - **Peso en la llave (§7.1):** `1 + kConf × min(confDegree, 3)`, `kConf` = **0.25** (CONGELADO). Se satura a 3 familias (evita que un cluster raro domine).
-- **Casos EURUSD.** *[Extracción TV antes de A-3: identificar ≥2 niveles con confDegree≥2 (p.ej. OB+FVG+pool apilados en ±0.25×ATR) y ≥1 con confDegree=1 como contraejemplo de no-promoción.]* La tolerancia 0.25×ATR ya está validada como `labelClusterTol` en la consolidación §6.2 vigente.
+- **Casos EURUSD (pasada TV S094, tolConf=0.25×ATR14=0.000213).** **≥2 (promociona) #1:** OB M5 [1.14380,1.14406] + Pool **1.14408 BSL** (top OB 1.14406 vs pool 1.14408 = 0.00002 < tol) = {OB}+{pool} → **confDegree 2** (banda 1 arriba, junto al precio). **≥2 (promociona) #2:** OB D1 [1.15726,1.16221] + FVG D1 [1.15283,1.15748] (OB low 1.15726 vs FVG top 1.15748 = 0.00022, dentro de tolConf D1) = {OB}+{FVG} → **confDegree 2** (premium, banda 3 arriba). **=1 (contraejemplo, NO promociona):** OB H1 [1.13740,1.13794] — ninguna otra familia contada dentro de tol (sweep 1.13722 no es familia contada; MSS 1.13827 a 0.00033 > tol) → **confDegree 1** (banda 3 abajo). La tolerancia 0.25×ATR ya está validada como `labelClusterTol` en la consolidación §6.2 vigente.
 - **Frontera / `[impl]`.** Fase A: `f_confDegree(level)` en Visual (`[impl B-3]`). Fase B: al CORE.
 
 #### 7.0.3 `depthBand` — banda de profundidad de proyección `{1..5}`
@@ -1516,7 +1516,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
   - **bandas 4/5** = **fuera del rango vigente, más atrás en el tiempo**: niveles del dealing range **previo** (4) y del **anterior a ese** (5). Se habilitan solo con `i_profundidad` ≥ 4/5.
   - Cortes `{0.33, 0.66, 1.0}` CONGELADOS. "Un representante por banda por lado" = el mejor `score_render_v2` de cada celda (§7.1), no los N más fuertes en bruto.
 - **Selección "3 por lado" = MÍNIMO doctrinal, no cap.** Default `i_profundidad = 3` (bandas 1–3). El usuario pide el 4.º/5.º "más atrás" con el input (min 3, max 5). No es filtro de calidad: es alcance temporal/espacial de la proyección.
-- **Casos EURUSD.** Rango vigente de referencia (§2.3): eq `[1.15835, 1.16021]`, dealing range dominante activo. *[Extracción TV antes de A-1: mapear un OB/FVG por banda 1/2/3 arriba y abajo del precio en EURUSD H1; identificar los 2 rangos previos para bandas 4/5.]* **TODO** (`[impl B-4]`): archivar los 2 rangos previos con escalares que rotan (patrón de los grids P3, §5.16 — sin arrays nuevos).
+- **Casos EURUSD (pasada TV S094, live H1 04-07).** Rango vigente (§2.3): **[1.13618, 1.16221]**, EQ 1.14919, px 1.14376 (Discount 29%). Cortes 0.33/0.66/1.0. **Arriba (hi, hacia origen 1.16221):** banda1 [1.14376–1.14985] = OB M5 [1.14380,1.14406] · FVG M5 [1.14562,1.14590]; banda2 [1.14985–1.15594] = FVG D1 [1.15283,1.15748] · UQ 1.15570; banda3 [1.15594–1.16221] = OB D1 [1.15726,1.16221] · Premium 1.16221. **Abajo (lo, hacia extremo 1.13618):** banda1 [1.14126–1.14376] = FVG H1 [1.14309,1.14360] · Pool H1 1.14207 SSL; banda2 [1.13874–1.14126] = BOS H1 1.14095 (sin OB/FVG limpio en esta banda); banda3 [1.13618–1.13874] = OB H1 [1.13740,1.13794] · MSS 1.13827 (GIRO). **Bandas 4/5 (rangos previos):** proxy D1 Discount 1.13246 / Premium 1.20831. **TODO** (`[impl B-4]`): archivar los 2 rangos previos con escalares que rotan (patrón de los grids P3, §5.16 — sin arrays nuevos).
 - **Frontera / `[impl]`.** Fase A: `f_depthBand(level, px)` + `i_profundidad` en Visual (`[impl B-4/B-5]`). Fase B: al CORE.
 
 ### 7.1 La llave de render v2 + guardián de draws (normativo — sustituye fuerza×cercanía)
@@ -1561,7 +1561,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **depthBand.** 1 por banda por lado: los **3 giros que estructuran el rango vigente** (banda 1/2/3). Con `i_profundidad ≥ 4` aparecen los giros de rangos previos.
 - **Proyección.** El giro dominante proyecta el **bias**: desde él se mide el dealing range (§2.3) y las bandas. Outcome = ¿el precio respeta el giro como extremo del rango o lo rompe (nuevo giro)?
 - **MTF · Modo mín.** El giro dominante D1 baja a H1/M5 con tag (§7.4 esqueleto visual, ya) · **Estudio** (labels) / **el giro vigente en Operación**.
-- **Casos EURUSD.** El swing dominante roto en MSS 06-01 13:00 (§6.2.5) = GIRO vigente. *[Mapear los 3 giros del rango activo en pasada TV antes de A-4.]*
+- **Casos EURUSD (pasada TV S094, rango [1.13618,1.16221]).** Los **3 giros que estructuran el rango vigente:** (1) giro inferior = **MSS 1.13827 · 01-07 12:00** (GIRO vigente, extremo bajo del tramo, §6.2.5); (2) giro superior = zona premium **~1.16221** (origen de la pierna bajista dominante, D1 OB/Premium); (3) giro intermedio = **CHoCH H1 1.14119 · 02-07 08:00** / BOS 1.14095 · 30-06 (quiebre que define el sub-rango actual). Con `i_profundidad ≥ 4`: giros de rangos previos (proxy D1 Premium 1.20831 / Discount 1.13246).
 
 ##### 7.2.3 BOS interno (§1.3 · `internalLen=3` / §6.3.3)
 
@@ -1829,7 +1829,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **depthBand.** Define el eje de bandas (§7.0.3 se mide sobre el rango P/D).
 - **Proyección.** Contexto premium/discount del escenario: modula la dirección esperada (comprar en discount, vender en premium).
 - **MTF · Modo mín.** 3 líneas D1 rotuladas en LTF (ya) · **Operación**.
-- **Casos EURUSD.** eq `[1.15835, 1.16021]`; rango dominante vigente (§2.3/§6.3.5).
+- **Casos EURUSD (pasada TV S094, live H1 04-07).** Rango dominante vigente `[1.13618, 1.16221]`, EQ **1.14919**, px 1.14376 → **Discount 29%** (§2.3/§6.3.5).
 
 ##### 7.2.29 Quadrants LQ/EQ/UQ (§5.16 / T41)
 
@@ -1839,7 +1839,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **depthBand.** Son la referencia visual de las bandas.
 - **Proyección.** Estructura el espacio de proyección (dónde caen los escenarios).
 - **MTF · Modo mín.** Grid global (ya) · **Operación**.
-- **Casos EURUSD.** LQ 1.13990 / EQ 1.14733 / UQ 1.15477 (exactos al 5º decimal, §5.16/T41=96).
+- **Casos EURUSD (pasada TV S094, live H1 04-07).** LQ **1.14269** / EQ **1.14919** / UQ **1.15570** (exactos al 5º decimal desde labels del grid, §5.16/T41). *(Junio archivado: LQ 1.13990 / EQ 1.14733 / UQ 1.15477.)*
 
 ##### 7.2.30 Eighths 1/8–7/8 (§5.16)
 
@@ -1849,7 +1849,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **depthBand.** Sub-banda dentro de las 3 principales.
 - **Proyección.** Precisa niveles de reacción para Estudio.
 - **MTF · Modo mín.** Grid global · **Estudio**.
-- **Casos EURUSD.** eighth 1/8=1.13618 (tocado al tick por vela institucional vol 21346, §5.16).
+- **Casos EURUSD (pasada TV S094).** Sobre rango [1.13618, 1.16221]: eighth 1/8 ≈ **1.13943**, 7/8 ≈ **1.15896** (§5.16, salta 0/0.5/1 que ya dibuja P/D). *(Junio archivado: eighth 1/8=1.13618 tocado al tick, vol 21346.)*
 
 ##### 7.2.31 OTE / Golden Pocket (§2.5 / §6.3.7)
 
