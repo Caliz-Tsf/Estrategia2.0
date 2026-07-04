@@ -2701,6 +2701,10 @@ int W_SEC       = 1                          // grosor linea Secundario
 string GRP_DENS = "Densidad visual (§8)"
 i_densidad = input.string("Todo", "Densidad", options = ["Operación", "Estudio", "Todo"], group = GRP_DENS, tooltip = "Operación = solo Primario (lo mas fuerte / anclas) · Estudio = + Secundario · Todo = todo (default)")
 int densMin = i_densidad == "Operación" ? 2 : i_densidad == "Estudio" ? 1 : 0
+// i_profundidad §7.0.3 [A-1]: alcance temporal/espacial de la proyeccion, NO filtro de calidad. 3 = bandas
+// 1-3 del rango vigente (MINIMO doctrinal "3 por lado"); 4/5 piden el 1º/2º rango previo (bandas 4/5,
+// [impl B-4]). Consumido por el bandeo de la seleccion (A-4/B-7). Congelado {3..5} (ADR-002).
+i_profundidad = input.int(3, "Profundidad de proyección (bandas)", minval = 3, maxval = 5, group = GRP_DENS, tooltip = "3 = rango vigente (bandas 1-3). 4/5 = suma rangos previos (más atrás en el tiempo).")
 // --- Matriz modo×familia §8.2 (curacion por familia, ENCIMA del filtro strength) ---
 // modeIdx 0<1<2: mayor = mas laxo (habilita mas familias). Operacion = solo familias de DECISION
 // (OB/Breaker/FVG/IFVG/OTE + anclas); Estudio suma refinamientos (BPR/Mitigation/Vacuum); Todo suma
@@ -2722,6 +2726,22 @@ f_densOK(float strength, bool isAnchor) =>
 // cercania pondera pero NO anula una zona fuerte algo lejana. Llave de orden de anclas y del top-N.
 f_renderScore(float strength, float distAtr) =>
     strength * (1.0 - math.min(distAtr / 6.0, 0.8))
+// f_depthBand §7.0.3 [A-1]: banda de profundidad {1..3} del retroceso de un nivel dentro del dealing
+// range vigente (chartState.pdHigh/pdLow, §2.3), medida desde el precio hacia el extremo de su lado.
+// Cortes CONGELADOS 0.33/0.66/1.0 (ADR-002). Devuelve 0 = fuera del rango vigente (territorio bandas
+// 4/5, [impl B-4]). Lectura PURA: no dibuja ni muta estado; la consume el bandeo de la seleccion (A-4/B-7).
+f_depthBand(float level, float px) =>
+    float hi = chartState.pdHigh
+    float lo = chartState.pdLow
+    int band = 0
+    if not na(hi) and not na(lo) and hi > lo
+        if level >= px and hi > px
+            float r = (level - px) / (hi - px)
+            band := r <= 0.33 ? 1 : r <= 0.66 ? 2 : r <= 1.0 ? 3 : 0
+        else if level < px and px > lo
+            float r = (px - level) / (px - lo)
+            band := r <= 0.33 ? 1 : r <= 0.66 ? 2 : r <= 1.0 ? 3 : 0
+    band
 
 // --- Anclas estructurales §2.3 (Primarias SIEMPRE, independiente del strength) ---
 // "Zona activa mas cercana por lado": 1 arriba + 1 abajo del precio, la de mayor score_render, sobre
