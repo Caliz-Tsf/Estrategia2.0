@@ -2767,7 +2767,10 @@ if barstate.islast and array.size(SMC_zones) > 0
 // f_mtfLblYield: cuenta los labels que EMITIRA la capa MTF (mirror del label-yield de f_drawMTFZones:
 // labelKinds distintos por (kind,dir)). Sobre-cuenta los BOS/CHoCH que luego se fusionan (no dibujan
 // label) -> reserva CONSERVADORA (corta un pelo mas de nativo = seguro para el budget).
-f_mtfLblYield(array<int> kinds, array<int> dirs, array<float> tops) =>
+// curate (M5 doble-MTF, §7 curado por importancia): la capa MTF suelta EQH/EQL y sweeps heredados
+// -> el yield solo cuenta pool/BOS/CHoCH (mirror exacto del skip en f_drawMTFZones), asi eventCap no
+// sobre-reserva. En H1 (curate=false) cuenta todo (herencia D1 completa).
+f_mtfLblYield(array<int> kinds, array<int> dirs, array<float> tops, bool curate) =>
     string seen = ""
     int n = 0
     if array.size(kinds) > 0
@@ -2775,7 +2778,7 @@ f_mtfLblYield(array<int> kinds, array<int> dirs, array<float> tops) =>
             int k = array.get(kinds, i)
             float tp = array.get(tops, i)
             int dr = array.get(dirs, i)
-            bool labelKind = k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH
+            bool labelKind = curate ? (k == KIND_POOL or k == KIND_BOS or k == KIND_CHOCH) : (k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH)
             string key = "|" + str.tostring(k) + "_" + str.tostring(dr) + "|"
             if labelKind and not na(tp) and not str.contains(seen, key)
                 seen := seen + key
@@ -2803,7 +2806,10 @@ bool budMtfD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
 bool budMtfH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
 int budgetLbl = i_densidad == "Operación" ? 25 : i_densidad == "Estudio" ? 60 : 150
 int FRAME_RESERVE = 8                                                                                       // P/D nativo(3)+grid(2)+estructura ancla(~3); default congelado §11.3
-int mtfReserve = (budMtfD1 ? f_mtfLblYield(d1Kind, d1Dir, d1Top) + 2 : 0) + (budMtfH1 ? f_mtfLblYield(h1Kind, h1Dir, h1Top) + 2 : 0)
+// §7 curado M5: por debajo de H1 (=M5) en Operación se hereda solo lo IMPORTANTE (P/D + pool objetivo +
+// BOS/CHoCH); EQH/EQL y sweeps HTF se sueltan. H1 conserva la herencia D1 completa (timeframe==H1 -> false).
+bool mtfCurate = i_densidad == "Operación" and timeframe.in_seconds() < timeframe.in_seconds("60")
+int mtfReserve = (budMtfD1 ? f_mtfLblYield(d1Kind, d1Dir, d1Top, mtfCurate) + 2 : 0) + (budMtfH1 ? f_mtfLblYield(h1Kind, h1Dir, h1Top, mtfCurate) + 2 : 0)
 int eventCap = math.max(0, budgetLbl - mtfReserve - FRAME_RESERVE)                                          // labels que quedan para eventos nativos L3
 int gEvtLbl = 0                                                                                             // contador de labels de eventos nativos ya emitidos (orden de dibujo)
 int gEvtCut = 0                                                                                             // §10-#8: desalojados -> panel T14 (nada desaparece en silencio)
@@ -3758,7 +3764,7 @@ f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<lab
 // distinto); EQH/EQL = linea de tramo tA->tB punteada; BOS/CHoCH = linea origen->ruptura; pool =
 // linea al nivel; sweep = marca triangulo en su barra. tA/tB vienen en epoch-ms (casteo a int).
 // Presentacion -> fuera del CORE byte-identico. Ya capado a MTF_K en el transporte.
-f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<float> bots, array<int> dirs, array<int> tas, array<int> tbs, array<line> lines, array<label> labels, array<box> boxes, array<SMC_Event> majEvents, float majTol, float mssLvl, int mssDir) =>
+f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<float> bots, array<int> dirs, array<int> tas, array<int> tbs, array<line> lines, array<label> labels, array<box> boxes, array<SMC_Event> majEvents, float majTol, float mssLvl, int mssDir, bool curate) =>
     int nowT = time
     // §6.5 dedup SIN arrays (array.push dentro de esta funcion dispara RE10045 en este script grande):
     // acumulador de string con las claves (kind,dir) ya dibujadas + str.contains. En Operacion deja
@@ -3777,9 +3783,12 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
         bool labelKind = k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH
         string key = "|" + str.tostring(k) + "_" + str.tostring(dr) + "|"
         bool dup = opMode and labelKind and not na(tp) and str.contains(seen, key)
+        // §7 curado M5: suelta EQH/EQL y sweeps heredados (liquidez menor) -> M5 hereda solo lo importante
+        // (P/D via f_drawMTFState + pool objetivo + estructura BOS/CHoCH + OB/FVG). H1 (curate=false) intacto.
+        bool skipKind = curate and (k == KIND_EQH or k == KIND_EQL or k == KIND_SWEEP)
         if opMode and labelKind and not na(tp) and not dup
             seen := seen + key
-        if k != 0 and not na(tp) and not na(bt) and not na(tA) and not dup
+        if k != 0 and not na(tp) and not na(bt) and not na(tA) and not dup and not skipKind
             switch
                 k == KIND_OB or k == KIND_FVG =>
                     // Anclaje vela-a-vela EXACTO (pref. usuario S042): tA ya es la vela origen (OB) o la
@@ -3789,7 +3798,10 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                     float ce = (tp + bt) / 2.0
                     color bgc = k == KIND_OB ? color.new(col, 85) : color.new(color.orange, 88)
                     array.push(boxes, box.new(tA, tp, rgt, bt, xloc = xloc.bar_time, border_color = color.new(col, 60), border_width = mtfW, bgcolor = bgc, text = tf + ": " + (k == KIND_OB ? "OB" : "FVG"), text_color = col, text_size = size.tiny, text_halign = text.align_center, text_valign = text.align_center))
-                    array.push(lines, line.new(tA, ce, rgt, ce, xloc = xloc.bar_time, color = color.new(col, 55), style = line.style_dotted, width = 1))
+                    // §7 curado M5: la caja ya muestra la zona -> la linea CE (refinamiento) se suelta en M5
+                    // (curate) para respetar el presupuesto de objetos (≤60); en H1/Estudio+ se conserva.
+                    if not curate
+                        array.push(lines, line.new(tA, ce, rgt, ce, xloc = xloc.bar_time, color = color.new(col, 55), style = line.style_dotted, width = 1))
                 k == KIND_EQH or k == KIND_EQL =>
                     // Estilo NATIVO de f_drawEQHL: AZUL + etiqueta SIN nube (fondo transparente). Linea de
                     // toque a toque (tA->tB = los dos pivotes iguales del HTF). Etiqueta al CENTRO de la
@@ -3845,10 +3857,10 @@ if barstate.islast and (mtfShowD1 or mtfShowH1)
     float mtfMajTol = atr14 * 0.3
     if mtfShowD1
         f_drawMTFState(d1State, "D1", color.new(color.blue, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir)
+        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir, mtfCurate)
     if mtfShowH1
         f_drawMTFState(h1State, "H1", color.new(color.fuchsia, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir)
+        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir, mtfCurate)
 
 // --- Helpers de panel [adelanto parcial de PINE-PLAN §5 / T14] (Visual-only) ---
 // Buscan el evento/zona/pool mas relevante para mostrar en el panel. Son de PRESENTACION:
