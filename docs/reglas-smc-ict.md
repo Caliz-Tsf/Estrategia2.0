@@ -1611,7 +1611,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **depthBand.** Sigue al giro que lo produjo (típicamente banda 3, el origen).
 - **Proyección.** Proyecta re-test del nivel invertido: escenario de rechazo en el flip. Outcome = ¿rechaza (confirma inversión) o lo recupera (flip fallido)?
 - **MTF · Modo mín.** Baja solo si Primario (ya) · **Operación (P)**.
-- **Casos EURUSD.** *[Flip en giro con OB/FVG apilado — extracción TV antes de A-5.]*
+- **Casos EURUSD.** Giro alcista 30-06/01-07 (tras sweep de Discount 1.13618 → CHoCH 1.14119): `FLIP ↑` 1.14150 (= low del bar 30-06 11:00) y `FLIP ↑` 1.14095 (= nivel del BOS H1 30-06 14:00, resistencia rota→soporte, arquetipo). Ambos con tinta en Operación (pasaron `confDegree≥1`, flip en giro apilado). Verificado vivo S096 (EURUSD H1, `data_get_pine_labels` + graphics del estudio; niveles exactos, giro cruzado contra OHLCV/panel).
 
 #### A2 · Order Blocks (`GRP_OB`, capa L2 — azul) — fichas 8–13
 
@@ -1653,7 +1653,7 @@ Todo lo que el CORE ya calcula hoy y sirve para componer `strength`. Si un conce
 - **depthBand.** Sigue la zona apilada que lo promociona.
 - **Proyección.** Solo proyecta cuando confluye (refuerza el escenario del apilado); aislado no proyecta.
 - **MTF · Modo mín.** No baja · **Estudio**.
-- **Casos EURUSD.** *[Mitigation block apilado con FVG/pool — extracción TV antes de A-5.]*
+- **Casos EURUSD.** Ventana julio EURUSD H1: ningún Mitigation Block alcanza `confDegree≥2` → cero tinta en Operación; todos permanecen en Estudio (panel "Ocultos: Est"). Confirma la regla dura (promoción solo por confluencia): un bloque ya mitigado y aislado queda como contexto histórico, no como zona de reacción operable. Verificado vivo S096 (EURUSD H1: 0/24 labels de Operación son MB).
 
 ##### 7.2.12 Vacuum (§5.7 / §6.3.28-área)
 
