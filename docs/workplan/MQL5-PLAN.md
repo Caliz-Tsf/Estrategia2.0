@@ -1,7 +1,17 @@
 # MQL5-PLAN — Diseño técnico del Expert Advisor MT5
-> Anexo 6 del WORKPLAN-MAESTRO-V2.md | Estrategia 2.0 | 2026-06-10
+> Anexo 6 del WORKPLAN-MAESTRO-V2.md | Estrategia 2.0 | 2026-06-10 · **REFRESCADO 2026-07-06 (S097)**
 > Cubre el Paso 6 del PROMPT-FABLE. Nivel: diseño técnico — el código se escribe en Fase 4, SOLO tras validar Fase 3 en TradingView.
 > **Decisión del usuario:** el EA es 100% nativo y autónomo en MQL5. NO existe puente webhook TV→MT5. El EA recalcula toda la detección y el scoring por sí mismo, con los pesos validados en Fase 3.
+
+---
+
+## 0. NOTA DE REFRESCO (2026-07-06, S097) — qué cambió desde 2026-06-10
+Este documento se escribió antes de que el CORE Pine evolucionara. Sincronizado contra el CORE actual (**1700 líneas, SHA `5510361166844bd5`**). Cambios que los structs espejo DEBEN reflejar:
+- **`strength` (ADR-014):** propiedad de DETECCIÓN (vive en el CORE byte-idéntico, no en Visual). Todo UDT de zona/evento/swing/pool la lleva. El EA la necesita para jerarquía y para alimentar el scoring. **Añadida abajo.**
+- **KIND hasta 53:** el enum `KIND_*` creció (KIND_GRADIENT=53, breaker/flip/mitigation/rejection/IFVG/BPR, etc.). El struct `SMC_Zone.kind` ya es `int`, pero el enum espejo debe cubrir ≤53.
+- **Gradient Levels (§5.16, KIND_GRADIENT=53):** grid de quadrants/eighths + `gradedFvg` (flag "FVG toca nivel del grid") + confluencia exponencial #52 (multiplicador, ADR-013). Nuevo subsistema a mapear.
+- **Primitivos §7 (`posRole` / `confDegree` / `depthBand`):** capa de proyección/confluencia. **Hoy son Fase A Visual-only** (calculados en `SMC-Visual.pine`). **Fase B los promueve al CORE** con campos UDT nuevos + SHA nuevo + ADR. **Hasta que Fase B cierre, el EA los recalcula igual que el CORE** (son lectura pura de la detección existente). Reservados en los structs abajo como `[Fase B]`.
+- **Enjambre + debate + cuaderno del EA:** el diseño 2026-06-10 no contemplaba el modelo de decisión del agente (proyección + debate darwiniano). Se especifica en el **DOSSIER-FABLE Fase 4** (`docs/planes/DOSSIER-FABLE-fase4-ea-mt5.md`) → Fable produce el esqueleto. **Este MQL5-PLAN cubre solo el EA determinista;** la capa cognitiva (enjambre) es aditiva y se ancla en Fase 3/4.
 
 ---
 
@@ -41,13 +51,21 @@ Regla: un módulo solo incluye módulos por debajo de él en el grafo. Display l
 ### SMC_Types.mqh
 Espejo exacto de los UDT Pine (PINE-PLAN §2):
 ```cpp
-struct SMC_Zone   { double top, bottom; int dir; datetime barTime; int state; double mitigatedPct; ENUM_TIMEFRAMES tf; int kind; };
-struct SMC_Event  { double price; int dir; datetime barTime; ENUM_TIMEFRAMES tf; int kind; };
-struct SMC_Swing  { double price; datetime barTime; int kind; bool swept; };
-struct SMC_Pool   { double level; int dir; int touches; datetime barTime; bool swept; ENUM_TIMEFRAMES tf; };
-struct SMC_TFState{ int bias; SMC_Event lastBOS, lastCHoCH; double pdHigh, pdLow; double ema20, ema50, ema200; SMC_Zone nearestOB, nearestFVG; /*...*/ };
+// [REFRESCO S097] + strength (ADR-014), gradedFvg/propulsion (§5.16/§5.18), y campos §7 [Fase B]
+struct SMC_Zone   { double top, bottom; int dir; datetime barTime; int state; double mitigatedPct;
+                    ENUM_TIMEFRAMES tf; int kind; double strength;            // ADR-014
+                    bool gradedFvg; bool trueFvg; bool propulsion;            // §5.16/§5.18
+                    int posRole; int confDegree; int depthBand; };            // §7 [Fase B: hoy recalculado, no persistido]
+struct SMC_Event  { double price; int dir; datetime barTime; ENUM_TIMEFRAMES tf; int kind; double strength; };
+struct SMC_Swing  { double price; datetime barTime; int kind; bool swept; double strength; };
+struct SMC_Pool   { double level; int dir; int touches; datetime barTime; bool swept; ENUM_TIMEFRAMES tf; double strength; };
+struct SMC_TFState{ int bias; SMC_Event lastBOS, lastCHoCH; double pdHigh, pdLow, pdEq;
+                    double ema20, ema50, ema200; SMC_Zone nearestOB, nearestFVG;
+                    double gradTop, gradBottom; int gradSrcKind; /*grid §5.16*/ };
 struct SMC_Signal { int dir; double score, entry, sl, tp1, tpExt; string confluences; datetime t; };
-// enums KIND_*, STATE_*, + inputs compartidos (umbrales de reglas-smc-ict.md como constantes input)
+// enums KIND_* (≤53, incl. KIND_GRADIENT=53, KIND_BREAKER/FLIP/MITIGATION/REJECTION/IFVG/BPR),
+//       STATE_* (ciclo de vida §5.4), POSROLE_{INTERNO=0,GIRO=1,ORIGEN=2}, + inputs compartidos
+//       (umbrales de reglas-smc-ict.md como constantes input; wPos/kConf/tolConf/tolPos/bandas congelados)
 ```
 
 ### SMC_Structures.mqh  *(mapea f_detectSwings, f_classifySwing, f_detectBOS/CHoCH/MSS, f_detectDisplacement, f_isImpulsive, f_detectOB, f_detectFVG, f_updateZoneMitigation, f_detectBreaker/Rejection/Flip, f_detectOTE)*
@@ -158,6 +176,10 @@ Todo el trabajo pesado ocurre solo en vela nueva (en M5: una vez cada 5 min) →
 | f_detectEQHL / f_buildPools / f_detectSweep / Grab / Judas / IDM / FalseBreakout | SMC_Liquidity | OnNewBar interno | |
 | f_premiumDiscount / f_killZone / f_sessionOpens / f_emaState | SMC_MTF | OnNewBar/getters | KZ: sessionProfile + hora local de mercado con DST [ADR-001]; convertir hora broker→GMT con TimeGMT(); ta.ema → seed SMA + alpha 2/(n+1), NO iMA directo sin validar |
 | snapshots request.security("D"/"60") | SMC_MTF | CopyRates(PERIOD_D1/H1) | usar solo velas cerradas (shift 1); la vela diaria del broker puede abrir a otra hora que TV → documentar offset del broker elegido |
+| f_computeGradientLevels / f_gradientZone / f_nearGradientLevel / f_selectGradientSource | SMC_MTF (grid) + SMC_Structures (gradedFvg) | OnNewBar interno | §5.16 KIND_GRADIENT=53; grid P1/P2/P3, ghost/persistencia; gradedFvg = CE del FVG dentro de gradTol×ATR de un nivel |
+| f_zoneStrength / f_eventStrength / f_strengthLevel | todos los detectores | interno, al crear cada instancia | ADR-014; pesos de strength congelados (HANDOFF §5.2); alimenta jerarquía y scoring |
+| f_posRole / f_confDegree / f_depthBand (§7) | SMC_Scoring (lectura pura) | interno | **[Fase B]** hoy Visual-only; el EA los recalcula sobre la detección; wPos/kConf/tolConf/tolPos/bandas congelados (ADR-002) |
+| f_gradientConfluenceBonus (#52, multiplicador) | SMC_Scoring | Evaluate | ADR-013: `scoreDir_final = scoreDir_raw × (1+bonus)`; wiring en Fase 2, calibración Fase 3 |
 | f_scoreConfluences | SMC_Scoring | Evaluate | pesos = inputs, default = scoring-weights-final.md de Fase 3 |
 | f_computeSLTP | SMC_RiskManager | ComputeSLTP | + normalización tick size / stops level del broker |
 | panel (tabla Pine) | SMC_Display | Update | objetos OBJ_LABEL / Canvas |
