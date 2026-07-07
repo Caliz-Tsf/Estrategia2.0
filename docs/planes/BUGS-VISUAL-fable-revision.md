@@ -43,6 +43,19 @@ Cadena de evidencia (verificada por grep sobre el archivo completo):
 
 Esto explica por qué el análisis estático previo no lo fijó: el fallo está **aguas arriba** del cómputo de banda/celda — el loop de población ni se ejecuta, así que volcar `state/dir/band` no habría revelado nada. También explica la asimetría Operación vs Estudio/Todo (en Estudio/Todo `densMin≤1` → las nativas dibujan por `f_densOK` sin depender del path roto).
 
+### 🔬 Prueba de aislamiento en vivo — Barrido D1 (S101, 2026-07-07)
+
+El barrido concepto-por-concepto en **D1** aporta la evidencia más limpia del root cause, porque **D1 es el TF techo → no hay herencia MTF que enmascare el fallo**:
+
+| Modo (mismo TF D1, mismo instante) | Boxes (`data_get_pine_boxes`) | Ocultos (panel) |
+|---|---|---|
+| **Operación** (`in_123="Operación"`) | **0 boxes** (chart totalmente sin cajas) | Est 339 · EQ 60 · Liq 30 · Ref 1058 · Grad 4 · µ 100 |
+| **Estudio** (`in_123="Estudio"`) | **14 boxes** (OB/FVG nativos repartidos en el rango) | Est 0 · EQ 0 · Liq 0 · Ref 0 · µ 100 · Desalojo 64 |
+
+**Lectura:** la detección nativa D1 funciona (14 cajas en Estudio); al conmutar a Operación el mismo instante cae a **0** cajas. Como en D1 no hay cajas heredadas de un TF superior, el síntoma queda **desnudo**: la única diferencia entre 14→0 es el gate de densidad de Operación (`densMin=2`), que depende de anclas+band-pick, que dependen del guard `aAtr>0` con `aAtr=chartState.atr14=na`. **Aísla el bug al gate de Operación, no a la detección.** Corrobora el root cause por experimento, no solo por análisis estático.
+
+Las **familias de labels** (no-caja) en D1 Operación dibujan correctas y dentro de presupuesto (17 labels ≤25): A1 estructura (BOS×2, BOS+, FLIP↓×2), A4 liquidez (EQH×2, ⚡Raid↓, pool BSL), A5 grid P/D exacto (Premium 1.20831 / EQ 1.17038 / Discount 1.13246 / LQ 1.15142 / UQ 1.18935, verificados al 5º decimal), A6 gaps (NWOG/NDOG/NYMO). **Solo las familias de CAJA (A2 OB, A3 FVG) desaparecen en Operación** — consistente con que el band-pick es la única vía de las cajas nativas y es lo que colapsa.
+
 **Efectos colaterales del mismo `na` (a validar tras el fix):** `f_posRole` (2788: `float atr = chartState.atr14`) devuelve siempre `INTERNO` (0) → `wPos` siempre 0.35; bandas 4/5 (`f_depthBand` gate 2739) quedan muertas; ribbon KZ usa `nz(chartState.atr14)→0` (2/3 líneas colapsadas). Todos se sanan con la misma asignación.
 
 **Fix candidato (para que Fable confirme/apruebe):** copiar el ATR local a `chartState.atr14` una vez por barra, junto a las otras asignaciones de `chartState`. Ubicación natural: tras calcular `atr14` (2006) o junto al bloque `pdHigh/pdLow` (1962). Sin repaint (ATR de cierre; el dibujo sigue en `islast`), sin tocar CORE, sin arrays nuevos → cumple las 4 restricciones. **Cuidado:** el snapshot P/D se congela en `isconfirmed`, pero `atr14` se necesita en la barra viva para el path de dibujo `islast` → conviene asignar `chartState.atr14 := atr14` **sin gatear en `isconfirmed`** (o con `nz`), a diferencia de `pdHigh/pdLow`. Confirmar con Fable si esta asimetría es correcta o si el path de dibujo debería usar el ATR local directamente en vez de `chartState.atr14`.
@@ -90,6 +103,7 @@ En **M5 Operación** la fila **Ocultos** reporta `Est 0 · EQ 0`, pero:
 - Panel `EQ H/L` (columna M5) = **81** EQ detectados en el buffer nativo; en el chart solo se dibujan **2 EQH** (0 EQL) → ~79 EQ efectivamente no mostrados, contados como **0** ocultos.
 - Estructura: solo 3 labels nativas dibujadas (CHoCH / BOS / CHoCH MSS) de una historia M5 con cientos de BOS/CHoCH → `Est 0`.
 - **Contraste:** en **H1 Operación** la misma fila reporta `Est 498 · EQ 105` (el contador SÍ está activo y con valores grandes). Mismo código, resultado incoherente entre TFs.
+- **Confirmación de alcance (barrido D1, S101):** en **D1 Operación** la fila reporta `Est 339 · EQ 60 · Liq 30 · Ref 1058 · Grad 4 · µ 100` (contador sano, valores grandes, coherente con H1). **El sub-reporte es específico de TFs bajos (M5)** — no aparece en D1 ni H1. Refuerza la hipótesis de root cause (tamaño del array de labels dibujadas + `max_labels_count` en M5).
 
 ### Root cause (hipótesis, verificada en código estático)
 - `EQ H/L` (columna M5) = `array.size(SMC_eqhl)` (línea **4342**) = EQ **detectados** en el buffer nativo (81).
@@ -115,15 +129,19 @@ El panel T14 titula **"OB/FVG cercano [a, b]"** usando `f_pNearZone` (línea ~42
 
 > Se rellena a medida que se revisa cada familia. Objetivo: Operación = **limpio pero NO vacío** — las zonas **limpias y más importantes por TF + por herencia**.
 
-| Familia (§7.2) | Debe verse en Operación | Estado validación |
+Barrido cubierto: **H1 + M5 (S100)** y **D1 (S101)**.
+
+| Familia (§7.2) | Debe verse en Operación | Estado validación (D1/H1/M5) |
 |---|---|---|
-| A1 Estructura (BOS/CHoCH/MSS/FLIP/swings) | Giro vigente + flips en giro | ✅ dibuja (labels) · ⚠️ contador Ocultos M5 (**BUG #3**) |
-| A2 Order Blocks | OB nativos activos cercanos (top-N por banda) + heredados MTF | 🔴 **BUG #1** — nativos no dibujan |
-| A3 FVG | FVG nativos activos cercanos + heredados | 🔴 **BUG #1** — nativos no dibujan |
-| A4 Liquidez (EQH/EQL/pools/sweep) | EQ + pools + sweeps cercanos | ✅ dibuja · ⚠️ contador Ocultos M5 (**BUG #3**) |
-| A5 P/D + Gradient | Grid Premium/UQ/EQ/LQ/Discount + eighths | ✅ correcto (BUG #2 cerrado — no era bug) |
-| A6 Gaps apertura (NWOG/NDOG/NYMO) | Gaps del día/semana | ✅ dibuja (NDOG/NYMO en vivo) |
-| A7 Contexto / MTF | Herencia D1/H1 (bias+P/D+zonas) | ✅ dibuja (cajas MTF extienden a barra actual) |
+| A1 Estructura (BOS/CHoCH/MSS/FLIP/swings) | Giro vigente + flips en giro | ✅ dibuja labels los 3 TFs · ⚠️ contador Ocultos solo M5 (**BUG #3**) |
+| A2 Order Blocks | OB nativos activos cercanos (top-N por banda) + heredados MTF | 🔴 **BUG #1** — nativos no dibujan en Operación (D1: 0 cajas; Estudio D1: 14 cajas OK) |
+| A3 FVG | FVG nativos activos cercanos + heredados | 🔴 **BUG #1** — nativos no dibujan en Operación (mismo aislamiento D1) |
+| A4 Liquidez (EQH/EQL/pools/sweep) | EQ + pools + sweeps cercanos | ✅ dibuja los 3 TFs (D1: EQH×2, ⚡Raid, pool BSL) · ⚠️ Ocultos M5 (**BUG #3**) |
+| A5 P/D + Gradient | Grid Premium/UQ/EQ/LQ/Discount + eighths | ✅ correcto los 3 TFs (D1 verificado al 5º decimal; BUG #2 cerrado) |
+| A6 Gaps apertura (NWOG/NDOG/NYMO) | Gaps del día/semana | ✅ dibuja (D1: NWOG/NDOG/NYMO) |
+| A7 Contexto / MTF | Herencia D1/H1 (bias+P/D+zonas) | ✅ H1/M5 heredan; D1 es techo (sin herencia — por eso su Operación queda sin cajas) |
+
+**Conclusión del barrido (D1+H1+M5):** no se detectaron bugs nuevos. **BUG #1** es el único bloqueante (root cause confirmado + aislado en vivo). **BUG #3** acotado a M5. **BUG #2** cerrado. Documento listo para entrega única a Fable.
 
 ---
 
