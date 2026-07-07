@@ -2004,6 +2004,11 @@ var array<int>   obBufTime = array.new<int>()
 var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
 float atr14      = ta.atr(14)
+// [S103 · BUG#1] Poblar el escalar de suavizado en el estado del chart. Sin gate isconfirmed:
+// atr14 es escalar de PRESENTACION que el path islast necesita SIEMPRE (asimetria deliberada con
+// pdHigh/pdLow, que son snapshot al cierre). Sin esto queda na -> colapsa band-pick/posRole/
+// confDegree/rotacion de bandas/guardian de pools/ribbon KZ (los 6 colaterales). Ver RESPUESTA-FABLE A.1.
+chartState.atr14 := atr14
 var int lastSweepBar = na  // ultima barra con sweep -> gate del Mitigation Block (§2.8: "sin sweep previo")
 // --- Gradient Levels: rango-fuente P1/P2/P3 + seleccion + ghost [reglas-smc-ict §5.16 · T41] ---
 // P1 = dealing range (trailing). P2 = suspension diario = highest/lowest del ULTIMO dia D1
