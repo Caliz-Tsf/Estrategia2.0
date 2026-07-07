@@ -224,4 +224,74 @@ El usuario pidió explícitamente saber si su entendimiento es correcto. Respues
 
 ---
 
+## BLOQUE E — RESULTADO DE EJECUCIÓN (Opus · S103 · 2026-07-07)
+
+> PASO 1 aplicado (commit `1164ed4`, fix 1 línea `chartState.atr14 := atr14` tras L2006, sin gate). Compila 0/0, core-sync OK (CORE 1700 líneas SHA `5510361166844bd5` intacto, cambio fuera del LIBRARY CORE). Re-aplicado a TV vivo (instancia `R25uRq`, densidad Operación, OANDA:EURUSD). **PASO 2 = este barrido.**
+
+### E.1 · Veredicto del PASO 1 (BUG #1) — ✅ CONFIRMADO EN VIVO
+Cajas nativas D1 Operación **0 → 6** tras el fix. Dibujo nativo completo revivido en los 3 TFs. **Los 6 colaterales sanos:**
+1. **band-pick / anclas** → cajas nativas OB/FVG dibujan (D1 6 boxes; H1/M5 con OB×3). ✅
+2. **f_posRole** → roles reflejados en labels (OB/FVG/Breaker con posición). ✅
+3. **f_confDegree** → glifos `●●○`/`●○○` en panel + sufijo `·g` (FVG graduado). ✅
+4. **rotación de bandas** → grid P/D 5/5 dibuja (Premium/UQ/EQ/LQ/Discount) + `Grad 4` en panel. ✅
+5. **guardián de pools** → `BSL ·3` a 1.51 (pool lejano inmune al recorte) sobrevive en D1. ✅
+6. **ribbon KZ** → label `London` presente en H1 y M5 (D1 sin sesión = ➖ correcto). ✅
+
+### E.2 · Matriz de validación rellenada (Operación, EURUSD, 2026-07-07)
+> ✅ dibuja · 🔴 falla · ➖ no aplica · ∅ concepto no presente en la ventana visible (no es bug).
+
+| # | Concepto | D1 nat | H1 nat | H1 her | M5 nat | M5 herD1 | M5 herH1 |
+|---|---|---|---|---|---|---|---|
+| 1 | BOS (3 escalas) | ✅ | ✅ | 🔴 falta | ✅ | ✅ `BOS (D1)` | 🔴 falta |
+| 2 | CHoCH | ✅ | ✅ | ✅ `CHoCH (D1)` | ✅ | ✅ `CHoCH (D1)` | 🔴 falta |
+| 3 | MSS | 🔴 no dibuja (1.18080·22-01 fuera top-N) | 🔴 | ➖ | 🔴 | ➖ | ➖ |
+| 4 | FLIP | ✅ `FLIP ↓` | ∅ | ➖ | ∅ | ➖ | ➖ |
+| 5 | Giro vigente visible (#4) | ✅ CHoCH 1.16551 | ✅ | ➖ | ✅ | ➖ | ➖ |
+| 6 | OB | ✅ ×2 | ✅ ×3 | ∅ | ✅ ×3 | ∅ | ∅ |
+| 7 | Breaker | ✅ `BRK ↓` | ∅ | ➖ | ✅ `BRK ↓↑` | ➖ | ➖ |
+| 8 | Mitigation Block | ✅ `MB` | ✅ `MB` | ➖ | ✅ `MB` | ➖ | ➖ |
+| 9 | FVG | ✅ `FVG·g` `T.FVG·g` | ✅ ×2 | ∅ | ✅ `FVG·g` `FVG` | ∅ | ∅ |
+| 10 | IFVG | ∅ | ∅ | ➖ | ∅ | ➖ | ➖ |
+| 11 | BPR | ∅ | ∅ | ➖ | ∅ | ➖ | ➖ |
+| 12 | EQH / EQL | ✅ EQH×2 | ✅ EQH+EQL | ✅ `D1: EQH/EQL` | ✅ EQH+EQL | ∅ | ∅ |
+| 13 | Pools BSL (arriba) | ✅ `BSL ·3` | ✅ ×4 | ✅ `D1: BSL` | ✅ ×2 | ✅ `D1: BSL` | ✅ `H1: BSL` |
+| 14 | Pools SSL (abajo) | 🟠 no label nativo (coincide grid Discount) | 🟠 nativo no | ✅ `D1: SSL` | ✅ `SSL ·3` | ✅ `D1: SSL` | ✅ `H1: SSL` |
+| 15 | Sweeps / Raid | ✅ `⚡ Raid ↓` | ✅ `✗ Sweep ↑` | ∅ | ✅ (panel 1.14314↓) | ∅ | ∅ |
+| 16 | P/D grid | ✅ 5/5 | ✅ 5/5 | ✅ D1 P/D | ✅ 5/5 | ✅ D1 P/D | ✅ H1 P/D |
+| 17 | Gradient / eighths | ✅ `Grad 4` + líneas | ✅ | ➖ | ✅ | ➖ | ➖ |
+| 18 | Gaps apertura | ✅ NWOG/NDOG/NYMO | ✅ NYMO | ➖ | ∅ | ➖ | ➖ |
+| 19 | IDM | ✅ ×4 | ✅ ×4 | ➖ | ✅ ×4 | ➖ | ➖ |
+| 20 | OTE / GP | ∅ | ∅ | ➖ | ∅ | ➖ | ➖ |
+| 21 | Vacuum / VI / IR / Disp | ∅ | ∅ | ➖ | ∅ | ➖ | ➖ |
+| 22 | Kill Zone ribbon | ➖ | ✅ London | ➖ | ✅ London | ➖ | ➖ |
+| 23 | SMT | ∅ | ∅ | ➖ | ∅ | ➖ | ➖ |
+
+**Criterios transversales:**
+
+| Criterio | D1 | H1 | M5 |
+|---|---|---|---|
+| ≥1 objetivo liquidez ABAJO y ≥1 ARRIBA (#6) | 🟠 arriba sí (BSL·3); abajo solo grid Discount, sin pool SSL nativo | ✅ BSL arriba + D1:SSL abajo | ✅ SSL·3 + BSL nativo ambos |
+| Cola del swing poblada por bandas, ambas direcciones (#8) | ✅ | ✅ | ✅ (densa) |
+| Giro vigente (CHoCH/MSS) visible (#4) | ✅ | ✅ | ✅ |
+| **Budget ≤25 labels Operación** | 🔴 **26** | 🔴 **35** | 🔴 **36** |
+| Panel: Ocultos = detectado−dibujado (#3) | 🔴 mide recorte | 🔴 `Est 498·EQ 105` (recorte) | 🔴 `Est 311·EQ 81` (ya no 0·0, pero sigue = recorte) |
+| Panel: sin columna TF duplicada (#9) | 🔴 `D1\|H1\|1D` | 🔴 `D1\|H1\|H1` | ➖ `D1\|H1\|M5` ✓ |
+| 6 colaterales BUG #1 sanos | ✅ | ✅ | ✅ |
+
+### E.3 · Veredicto por cada condicional (decisión de PASOS 3–6)
+
+- **PASO 3 (panel #3 + #9) — NECESARIO.** Confirmados los dos: Ocultos sigue midiendo recorte (no detectado−dibujado; en M5 el `0·0` de S100 era colateral de BUG #1, ahora da `311·81` pero por recorte, no por semántica correcta) + columna TF duplicada en D1 (`1D`) y H1 (`H1`).
+- **PASO 4 (herencia estructural garantizada) — NECESARIO.** La herencia nearest-N (caps 1/1) es irregular: `CHoCH (D1)` se hereda en H1 y M5, pero `BOS (D1)` solo aparece en M5, no en H1; la herencia H1→M5 de estructura **no dibuja** (BOS/CHoCH de H1 ausentes en M5, solo llegan P/D+pools de H1). Falta la red de seguridad por escalares TFState.
+- **PASO 5 (guardián del giro vigente) — NO NECESARIO.** El CHoCH vigente se ve nativo en los 3 TFs con las bandas vivas (fila #5 ✅✅✅). La condición de Fable ("solo si el giro sigue cayendo del recorte") NO se cumple → se OMITE. (MSS #3 no dibuja, pero el MSS D1 1.18080 es del 22-ene, fuera de top-N; el *giro vigente* = CHoCH 1.16551, y ese sí se ve.)
+- **PASO 6 (liquidez #6 + tuning cola #8) — NECESARIO, es el trabajo principal restante.** Dos frentes:
+  1. **Budget ≤25 roto en los 3 TFs** (26/35/36). Es regresión directa del fix: al revivir band-pick + herencia MTF se empujan muchas más labels de las que el desalojo §6.5 (calibrado con band-pick muerto, S099 M5=23) puede recortar. Tuning obligatorio dentro de ≤25 (caps por banda / promoción confDegree≥2 / recalibrar reserva §6.5), sin tocar parámetros ADR-002 sin ADR.
+  2. **#6 en D1:** falta objetivo de liquidez inferior como pool nativo (el nearest SSL 1.13246 coincide con la línea grid Discount y no se dibuja como pool). Aplicar la variante menos invasiva de B.6 (incluir `poolSSLIdx`/`poolBSLIdx` en `isObjetivo` aunque falle eligible-touches, solo Visual).
+  - **Nota MSS (#3):** el MSS no dibuja como label propio en ningún TF. No estaba en el alcance de los 6 puntos, pero conviene decidir si el último MSS merece label (candidato menor, dentro del budget ya apretado — diferir salvo indicación del usuario).
+
+### E.4 · Estado del gate
+F1-GATE **sigue bloqueado**: el fix revive el sistema (✅) pero abre el budget ≤25 en los 3 TFs (🔴). No se firma hasta cerrar PASO 6 (budget) + PASO 3/4. Evidencia: `S103-paso1-D1-postfix.png`, `S103-paso2-M5-postfix.png`.
+
+---
+
 *Fable · S102 · anclas verificadas en vivo sobre commit `8618cc3` · CORE intacto (este documento no toca código).*
+*Opus · S103 · Bloques E añadidos: PASO 1 aplicado (`1164ed4`) + PASO 2 barrido vivo. Veredictos: PASO 3/4/6 necesarios, PASO 5 omitido.*
