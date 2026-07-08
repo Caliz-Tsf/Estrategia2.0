@@ -2800,6 +2800,24 @@ if barstate.isconfirmed and not na(chartState.pdHigh) and not na(chartState.pdLo
 f_depthBand(float level, float px) =>
     float hi = chartState.pdHigh
     float lo = chartState.pdLow
+    // §7 [S105 · visión swing-ideal]: extremo de pierna = el MÁS LEJANO entre {rango vigente,
+    // swing dominante propio (structMajor), rango HTF heredado (D1 en H1/M5, H1 en M5)}. Así las
+    // bandas 1-3 abarcan la pierna COMPLETA hasta el origen del swing (≈ Premium D1 / HH dominante),
+    // no solo el rango estrecho del TF -> los conceptos de arriba de la pierna dejan de caer en banda 0.
+    if not na(structMajor.highLevel) and (na(hi) or structMajor.highLevel > hi)
+        hi := structMajor.highLevel
+    if not na(structMajor.lowLevel) and (na(lo) or structMajor.lowLevel < lo)
+        lo := structMajor.lowLevel
+    if timeframe.in_seconds() < timeframe.in_seconds("D")
+        if not na(d1State.pdHigh) and (na(hi) or d1State.pdHigh > hi)
+            hi := d1State.pdHigh
+        if not na(d1State.pdLow) and (na(lo) or d1State.pdLow < lo)
+            lo := d1State.pdLow
+    if timeframe.in_seconds() < timeframe.in_seconds("60")
+        if not na(h1State.pdHigh) and (na(hi) or h1State.pdHigh > hi)
+            hi := h1State.pdHigh
+        if not na(h1State.pdLow) and (na(lo) or h1State.pdLow < lo)
+            lo := h1State.pdLow
     int band = 0
     if not na(hi) and not na(lo) and hi > lo
         if level >= px and hi > px
