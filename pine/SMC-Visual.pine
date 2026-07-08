@@ -2634,6 +2634,45 @@ plot(i_showEMA ? emaFast : na, "EMA rapida", color = color.new(color.aqua,   0),
 plot(i_showEMA ? emaMid  : na, "EMA media",  color = color.new(color.orange, 0), linewidth = 1)
 plot(i_showEMA ? emaSlow : na, "EMA lenta",  color = color.new(color.red,    0), linewidth = 2)
 
+// [S103 · OBS#9] f_m5Light: version LIGERA de f_computeTFState — SOLO los 17 escalares (bias,
+// BOS/CHoCH/MSS, P/D, EMA/ATR), SIN la geometria cara (OB/FVG/pools/arrays). Permite traer el estado
+// M5 al panel via request.security("5") desde un chart D1/H1 sin reventar memoria: el motor completo
+// sobre ~200k velas M5 da "Memory limits exceeded"; solo-escalares (tuple 17 vs 89) tiene chance de
+// caber. Visual-only (fuera del CORE byte-identico; la Strategy no dibuja panel). Contrato = las 17
+// primeras posiciones del tuple de f_computeTFState (mismo orden -> reconstituye un SMC_TFState valido).
+f_m5Light(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
+    var SMC_TFState   lst       = SMC_TFState.new()
+    var SMC_Structure lstructTf = SMC_Structure.new()
+    var SMC_Trailing  ltrailTf  = SMC_Trailing.new()
+    float latr14 = ta.atr(14)
+    [lsh, lsl]   = f_detectSwings(swingLen)
+    [lpdH, lpdL] = f_detectSwings(pdLen)
+    if barstate.isconfirmed and not na(lsh)
+        f_setStructureHigh(lstructTf, lsh, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(lsl)
+        f_setStructureLow(lstructTf, lsl, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(lpdH)
+        f_resetTrailingHigh(ltrailTf, lpdH, bar_index - pdLen, time[pdLen])
+    if barstate.isconfirmed and not na(lpdL)
+        f_resetTrailingLow(ltrailTf, lpdL, bar_index - pdLen, time[pdLen])
+    f_updateTrailing(ltrailTf, high, low, time)
+    if barstate.isconfirmed
+        lst.pdHigh := ltrailTf.top
+        lst.pdLow  := ltrailTf.bottom
+        SMC_Event lev = f_detectStructure(lstructTf, bar_index, time, true, true)
+        f_updateTFState(lst, lev)
+        SMC_Event levM = f_detectMSS(lev, open, high, low, close, latr14, dispFactor, bodyPct)
+        if not na(levM)
+            lst.lastMSSPrice := levM.price
+            lst.lastMSSDir   := levM.dir
+            lst.lastMSSTime  := levM.barTime
+    lst.pdMid  := na(lst.pdHigh) or na(lst.pdLow) ? na : (lst.pdHigh + lst.pdLow) / 2.0
+    lst.ema20  := ta.ema(close, 20)
+    lst.ema50  := ta.ema(close, 50)
+    lst.ema200 := ta.ema(close, 200)
+    lst.atr14  := latr14
+    [lst.bias, lst.lastBOSPrice, lst.lastBOSDir, lst.lastBOSTime, lst.lastCHoCHPrice, lst.lastCHoCHDir, lst.lastCHoCHTime, lst.lastMSSPrice, lst.lastMSSDir, lst.lastMSSTime, lst.pdHigh, lst.pdLow, lst.pdMid, lst.ema20, lst.ema50, lst.ema200, lst.atr14]
+
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
 // transporta UDT/array). f_computeTFState se evalua en el contexto del HTF con estado var
@@ -2644,6 +2683,10 @@ plot(i_showEMA ? emaSlow : na, "EMA lenta",  color = color.new(color.red,    0),
 [h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
 SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
 SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
+// [S103 · OBS#9] Estado M5 LIGERO (solo escalares) para la 3.a col del panel cuando el chart NO esta
+// en M5. request.security("5", f_m5Light) — tuple de 17, sin geometria -> prueba de memoria.
+[m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr] = request.security(syminfo.tickerid, "5", f_m5Light(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
+SMC_TFState m5State = SMC_TFState.new(m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr)
 // Buffer generico de ranuras reconstituido por HTF (ADR-009). 2a llamada/TF (mas cupo) se
 // activaria aqui con un 2o request.security cuando Sprint 1.5/1.6 lo exijan (no ahora).
 d1Kind = array.from(d1_k0, d1_k1, d1_k2, d1_k3, d1_k4, d1_k5, d1_k6, d1_k7, d1_k8, d1_k9, d1_k10, d1_k11)
@@ -2658,7 +2701,6 @@ h1Bot  = array.from(h1_b0, h1_b1, h1_b2, h1_b3, h1_b4, h1_b5, h1_b6, h1_b7, h1_b
 h1Dir  = array.from(h1_d0, h1_d1, h1_d2, h1_d3, h1_d4, h1_d5, h1_d6, h1_d7, h1_d8, h1_d9, h1_d10, h1_d11)
 h1TA   = array.from(h1_ta0, h1_ta1, h1_ta2, h1_ta3, h1_ta4, h1_ta5, h1_ta6, h1_ta7, h1_ta8, h1_ta9, h1_ta10, h1_ta11)
 h1TB   = array.from(h1_tb0, h1_tb1, h1_tb2, h1_tb3, h1_tb4, h1_tb5, h1_tb6, h1_tb7, h1_tb8, h1_tb9, h1_tb10, h1_tb11)
-
 // --- PALETA CENTRALIZADA (COL_*) + MATRIZ DE RENDER [Eje2 · Paso 3 · ESQUELETO-FABLE §5.2/5.3/5.4] ---
 // 100% render -> vive FUERA del === LIBRARY CORE === (no rompe check-core-sync). Colapsa el "rainbow"
 // disperso a la paleta canonica por FAMILIA (§5.2): el HUE identifica QUE es; la direccion, dentro de
@@ -3198,6 +3240,7 @@ var array<line>  SMC_structLines  = array.new<line>()
 var array<label> SMC_structLabels = array.new<label>()
 var array<float> SMC_structLevels = array.new<float>()                                                      // §3.5-f [A-7]: nivel paralelo para el recorte por banda
 var int hidStruct = 0                                                                                       // §9-1: estructura oculta (detectada - dibujada) para el panel T14
+var int structDrawnCum = 0                                                                                  // [S103 · BUG#3] total de marcas de estructura CREADAS (swing+major) — base de "detectado" para el panel
 // f_keepBestPerBand §3.5-f [A-7]: sustituye el recorte por RECENCIA por "mejor score_render_v2 por banda"
 // (posRole+confDegree; strength neutra 1.0 — en la marca de estructura/EQ manda la POSICION, no la fuerza).
 // Conserva 1 representante (el de mayor v2) por banda de profundidad hasta 'cap'; borra el resto (label+
@@ -3279,11 +3322,13 @@ if i_showStruct and not na(evStructSwing)
     int originIdx = up ? structSwing.highBarIdx : structSwing.lowBarIdx
     int originT   = up ? structSwing.highTime  : structSwing.lowTime
     f_drawStructure(originT, originIdx, evStructSwing.price, evStructSwing.barTime, evStructSwing.barIdx, evStructSwing.kind, evStructSwing.dir, SC_SWING, i_showMSS and not na(evMSS))
+    structDrawnCum += 1                                                                                     // [S103 · BUG#3] marca creada (scope global; Pine no deja mutar global en funcion)
 if i_showInternal and f_famOK(FAM_EST) and not na(evStructInt)                                              // estructura interna = Estudio+ (§F1)
     bool up = evStructInt.dir == DIR_BULL
     int originIdx = up ? structInternal.highBarIdx : structInternal.lowBarIdx
     int originT   = up ? structInternal.highTime  : structInternal.lowTime
     f_drawStructure(originT, originIdx, evStructInt.price, evStructInt.barTime, evStructInt.barIdx, evStructInt.kind, evStructInt.dir, SC_INTERNAL, false)
+    structDrawnCum += 1                                                                                     // [S103 · BUG#3] marca creada (internal solo en Estudio+)
 
 // Estructura dominante (50) [T07B]: misma f_drawStructure con escala SC_MAJOR (grosor 3,
 // sufijo " +", linea por bar_time). Antes era una funcion aparte f_drawStructureMajor.
@@ -3292,16 +3337,17 @@ if i_showMajor and not na(evStructMajor)
     int pivotT = up ? structMajor.highTime : structMajor.lowTime
     int pivotB = up ? structMajor.highBarIdx : structMajor.lowBarIdx
     f_drawStructure(pivotT, pivotB, evStructMajor.price, evStructMajor.barTime, evStructMajor.barIdx, evStructMajor.kind, evStructMajor.dir, SC_MAJOR, false)
+    structDrawnCum += 1                                                                                     // [S103 · BUG#3] marca creada (major)
 
 // Recorte top-N vigente de estructura (§8.2 F1 = P): en Operacion deja solo las STRUCT_OP_CAP
 // marcas mas recientes (BOS/CHoCH/major); Estudio+ conserva la traza completa. array.shift saca
 // las mas antiguas (deja las vigentes al frente del precio). Resuelve el flood ~120 del hallazgo S087.
 if barstate.islast
-    int structBefore = array.size(SMC_structLabels)
     if f_famOK(FAM_EST)
         hidStruct := 0                                                                                      // Estudio+: traza completa
     else
-        hidStruct := f_keepBestPerBand(SMC_structLabels, SMC_structLines, SMC_structLevels, STRUCT_OP_CAP)  // §3.5-f: mejor giro por banda
+        f_keepBestPerBand(SMC_structLabels, SMC_structLines, SMC_structLevels, STRUCT_OP_CAP)               // §3.5-f: recorta a "mejor giro por banda" (retorno descartado)
+        hidStruct := math.max(0, structDrawnCum - array.size(SMC_structLabels))                             // [S103 · BUG#3] detectado - dibujado (no el recorte)
     // sincroniza el array de niveles si Estudio+ no recorto (mantiene paralelismo para el proximo modo)
     while array.size(SMC_structLevels) > array.size(SMC_structLabels)
         array.pop(SMC_structLevels)
@@ -3338,7 +3384,8 @@ if barstate.islast
     if f_famOK(FAM_EST)
         hidEq := 0                                                                                          // Estudio+: todo
     else
-        hidEq := f_keepBestPerBand(SMC_eqLabels, SMC_eqLines, SMC_eqLevels, EQ_OP_CAP)                      // §3.5-f: mejor EQ por banda (los EQ de giro)
+        f_keepBestPerBand(SMC_eqLabels, SMC_eqLines, SMC_eqLevels, EQ_OP_CAP)                               // §3.5-f: recorta a "mejor EQ por banda" (retorno descartado)
+        hidEq := math.max(0, array.size(SMC_eqhl) - array.size(SMC_eqLabels))                              // [S103 · BUG#3] detectado (SMC_eqhl) - dibujado
     while array.size(SMC_eqLevels) > array.size(SMC_eqLabels)
         array.pop(SMC_eqLevels)
 
@@ -4171,7 +4218,7 @@ f_pNearPool(array<SMC_Pool> a, float price) =>
 f_tfLabel() =>
     string p = timeframe.period
     float  m = str.tonumber(p)
-    p == "D" ? "D1" : p == "W" ? "W1" : p == "M" ? "MN" : na(m) ? p : m >= 60 ? "H" + str.tostring(int(m / 60)) : "M" + p
+    (p == "D" or p == "1D") ? "D1" : (p == "W" or p == "1W") ? "W1" : (p == "M" or p == "1M") ? "MN" : na(m) ? p : m >= 60 ? "H" + str.tostring(int(m / 60)) : "M" + p  // [S103] normaliza 1D/1W/1M (timeframe.period moderno) -> D1/W1/MN, para OBS#9
 f_biasTxt(int b) => b == DIR_BULL ? "▲ Alcista" : b == DIR_BEAR ? "▼ Bajista" : "—"
 f_dirCol(int d)  => d == DIR_BULL ? color.teal : d == DIR_BEAR ? color.red : color.gray
 // Celda de evento estructural (BOS/CHoCH/MSS): "precio · dd-MM HH:mm".
@@ -4229,13 +4276,20 @@ float m5Ema50  = emaMid
 float m5Ema200 = emaSlow
 
 // === PANEL === [T14 · diseño PINE-PLAN §5 completo]
-// Tabla multi-columna: Concepto | D1 | H1 | M5/chart. D1/H1 salen de d1State/h1State (escalares
-// via request.security) + buffer geometrico (OB/FVG/pool/sweep); M5 de los arrays nativos. Conceptos
+// Tabla multi-columna: Concepto | D1 | H1 | M5. D1/H1 salen de d1State/h1State (escalares via
+// request.security) + buffer geometrico (OB/FVG/pool/sweep). La 3.a col es SIEMPRE M5: arrays NATIVOS
+// si el chart esta en M5, o el transporte LIGERO f_m5Light (solo escalares) si esta en D1/H1 [S103 OBS#9].
+// Geometria M5 (OB/FVG/pool/sweep/EQ) = "—" fuera de M5 (es la parte cara, no cabe en memoria). Conceptos
 // solo-chart (Bias dom. 50, Kill Zone) muestran "—" en D1/H1. Controles en Ajustes (Pine no recibe
 // clicks en chart): "Mostrar panel" lo apaga entero; "Panel compacto" lo MINIMIZA a header + Bias
 // por TF (2 filas). Texto size.small para footprint reducido.
 if i_showPanel and barstate.islast
     int nrows = i_panelCompact ? 2 : 15
+    // [S103 · OBS#9] 3.a columna SIEMPRE M5 (D1|H1|M5). En M5 usa arrays NATIVOS (chartIsM5); en D1/H1
+    // usa el transporte LIGERO f_m5Light via request.security("5") — solo ESCALARES (bias/BOS/CHoCH/MSS/
+    // P-D/EMA), porque el motor completo sobre ~200k velas M5 da "Memory limits exceeded". La geometria
+    // (OB/FVG/pool/sweep/EQ) es la parte cara -> se ve solo estando en M5; fuera de M5 muestra "—".
+    bool chartIsM5 = f_tfLabel() == "M5"
     table panel = table.new(position.top_right, 4, nrows, border_width = 1)
     string modoTxt = i_densidad == "Operación" ? "Op" : i_densidad == "Estudio" ? "Est" : "Todo"           // §9-3: modo activo visible
     color  hdrBg = color.new(color.blue, 0)
@@ -4266,85 +4320,88 @@ if i_showPanel and barstate.islast
     int    h1SwI  = f_bufNear(h1Kind, h1Top, h1Bot, KIND_SWEEP, close)
     string d1Sw   = d1SwI < 0 ? "—" : str.tostring(array.get(d1Top, d1SwI), format.mintick) + (array.get(d1Dir, d1SwI) == DIR_BULL ? " ↑" : " ↓")
     string h1Sw   = h1SwI < 0 ? "—" : str.tostring(array.get(h1Top, h1SwI), format.mintick) + (array.get(h1Dir, h1SwI) == DIR_BULL ? " ↑" : " ↓")
+    // --- M5 escalares (transporte ligero request.security "5"): 3.a col cuando el chart NO esta en M5 [S103] ---
+    [m5PdT, m5PdColT]   = f_pdCell(m5State.pdHigh, m5State.pdLow)
+    [m5EmaT, m5EmaColT] = f_emaCell(m5State.ema20, m5State.ema50, m5State.ema200)
     // --- pintado: fila 0 = cabecera con TF; columna 0 = concepto. Minimizado (i_panelCompact) =
     //     solo header + Bias por TF. text_size = tsz (size.small) en todas las celdas. ---
     table.cell(panel, 0, 0, "SMC · " + modoTxt, text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     table.cell(panel, 1, 0, "D1", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     table.cell(panel, 2, 0, "H1", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
-    table.cell(panel, 3, 0, f_tfLabel(), text_color = color.white, bgcolor = hdrBg, text_size = tsz)
+    table.cell(panel, 3, 0, chartIsM5 ? "M5 ●" : "M5", text_color = color.white, bgcolor = hdrBg, text_size = tsz)
     int r = 1
     // Bias (los 3 TFs) — siempre visible (es la fila del modo minimizado)
     table.cell(panel, 0, r, "Bias", text_color = color.gray, text_size = tsz)
     table.cell(panel, 1, r, f_biasTxt(d1State.bias), text_color = f_dirCol(d1State.bias), text_size = tsz)
     table.cell(panel, 2, r, f_biasTxt(h1State.bias), text_color = f_dirCol(h1State.bias), text_size = tsz)
-    table.cell(panel, 3, r, f_biasTxt(chartState.bias), text_color = f_dirCol(chartState.bias), text_size = tsz)
+    table.cell(panel, 3, r, chartIsM5 ? f_biasTxt(chartState.bias) : f_biasTxt(m5State.bias), text_color = chartIsM5 ? f_dirCol(chartState.bias) : f_dirCol(m5State.bias), text_size = tsz)
     r := r + 1
     if not i_panelCompact
         // Bias dominante (50) [T07B]: solo escala chart (no se transporta MTF) -> "—" en D1/H1.
         table.cell(panel, 0, r, "Bias dom. (50)", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, majTxt, text_color = f_dirCol(structMajor.bias), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? majTxt : "—", text_color = chartIsM5 ? f_dirCol(structMajor.bias) : color.gray, text_size = tsz)
         r := r + 1
         // Premium/Discount (los 3 TFs)
         table.cell(panel, 0, r, "Premium/Discount", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, d1Pd, text_color = d1PdCol, text_size = tsz)
         table.cell(panel, 2, r, h1Pd, text_color = h1PdCol, text_size = tsz)
-        table.cell(panel, 3, r, m5Pd, text_color = m5PdCol, text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Pd : m5PdT, text_color = chartIsM5 ? m5PdCol : m5PdColT, text_size = tsz)
         r := r + 1
         // Ultimo BOS
         table.cell(panel, 0, r, "Último BOS", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_evCell(d1State.lastBOSPrice, d1State.lastBOSTime), text_color = f_dirCol(d1State.lastBOSDir), text_size = tsz)
         table.cell(panel, 2, r, f_evCell(h1State.lastBOSPrice, h1State.lastBOSTime), text_color = f_dirCol(h1State.lastBOSDir), text_size = tsz)
-        table.cell(panel, 3, r, f_evCell(chartState.lastBOSPrice, chartState.lastBOSTime), text_color = f_dirCol(chartState.lastBOSDir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? f_evCell(chartState.lastBOSPrice, chartState.lastBOSTime) : f_evCell(m5State.lastBOSPrice, m5State.lastBOSTime), text_color = chartIsM5 ? f_dirCol(chartState.lastBOSDir) : f_dirCol(m5State.lastBOSDir), text_size = tsz)
         r := r + 1
         // Ultimo CHoCH
         table.cell(panel, 0, r, "Último CHoCH", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_evCell(d1State.lastCHoCHPrice, d1State.lastCHoCHTime), text_color = f_dirCol(d1State.lastCHoCHDir), text_size = tsz)
         table.cell(panel, 2, r, f_evCell(h1State.lastCHoCHPrice, h1State.lastCHoCHTime), text_color = f_dirCol(h1State.lastCHoCHDir), text_size = tsz)
-        table.cell(panel, 3, r, f_evCell(chartState.lastCHoCHPrice, chartState.lastCHoCHTime), text_color = f_dirCol(chartState.lastCHoCHDir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? f_evCell(chartState.lastCHoCHPrice, chartState.lastCHoCHTime) : f_evCell(m5State.lastCHoCHPrice, m5State.lastCHoCHTime), text_color = chartIsM5 ? f_dirCol(chartState.lastCHoCHDir) : f_dirCol(m5State.lastCHoCHDir), text_size = tsz)
         r := r + 1
         // Ultimo MSS (D1/H1 desde el state; M5 desde SMC_eventsMSS)
         table.cell(panel, 0, r, "Último MSS", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_evCell(d1State.lastMSSPrice, d1State.lastMSSTime), text_color = f_dirCol(d1State.lastMSSDir), text_size = tsz)
         table.cell(panel, 2, r, f_evCell(h1State.lastMSSPrice, h1State.lastMSSTime), text_color = f_dirCol(h1State.lastMSSDir), text_size = tsz)
-        table.cell(panel, 3, r, na(mssE) ? "—" : f_evCell(mssE.price, mssE.barTime), text_color = na(mssE) ? color.gray : f_dirCol(mssE.dir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? (na(mssE) ? "—" : f_evCell(mssE.price, mssE.barTime)) : f_evCell(m5State.lastMSSPrice, m5State.lastMSSTime), text_color = chartIsM5 ? (na(mssE) ? color.gray : f_dirCol(mssE.dir)) : f_dirCol(m5State.lastMSSDir), text_size = tsz)
         r := r + 1
         // OB cercano
         table.cell(panel, 0, r, "OB cercano", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, m5Ob, text_color = na(obZ) ? color.gray : f_dirCol(obZ.dir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Ob : "—", text_color = chartIsM5 and not na(obZ) ? f_dirCol(obZ.dir) : color.gray, text_size = tsz)
         r := r + 1
         // FVG cercano
         table.cell(panel, 0, r, "FVG cercano", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, m5Fvg, text_color = na(fvgZ) ? color.gray : f_dirCol(fvgZ.dir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Fvg : "—", text_color = chartIsM5 and not na(fvgZ) ? f_dirCol(fvgZ.dir) : color.gray, text_size = tsz)
         r := r + 1
         // Pool cercano
         table.cell(panel, 0, r, "Pool cercano", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, d1Pool, text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, h1Pool, text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, m5Pool, text_color = na(poolP) ? color.gray : f_dirCol(poolP.dir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Pool : "—", text_color = chartIsM5 and not na(poolP) ? f_dirCol(poolP.dir) : color.gray, text_size = tsz)
         r := r + 1
         // Ultimo Sweep
         table.cell(panel, 0, r, "Último Sweep", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, d1Sw, text_color = d1SwI < 0 ? color.gray : f_dirCol(array.get(d1Dir, d1SwI)), text_size = tsz)
         table.cell(panel, 2, r, h1Sw, text_color = h1SwI < 0 ? color.gray : f_dirCol(array.get(h1Dir, h1SwI)), text_size = tsz)
-        table.cell(panel, 3, r, m5Sw, text_color = na(swE) ? color.gray : f_dirCol(swE.dir), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Sw : "—", text_color = chartIsM5 and not na(swE) ? f_dirCol(swE.dir) : color.gray, text_size = tsz)
         r := r + 1
         // EMA 20/50/200 (alineacion por TF)
         table.cell(panel, 0, r, "EMA 20/50/200", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, d1Ema, text_color = d1EmaCol, text_size = tsz)
         table.cell(panel, 2, r, h1Ema, text_color = h1EmaCol, text_size = tsz)
-        table.cell(panel, 3, r, m5Ema, text_color = m5EmaCol, text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Ema : m5EmaT, text_color = chartIsM5 ? m5EmaCol : m5EmaColT, text_size = tsz)
         r := r + 1
         // EQ H/L (conteo): D1/H1 del buffer, M5 del array nativo
         table.cell(panel, 0, r, "EQ H/L", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, str.tostring(f_bufCountEQ(d1Kind)), text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, str.tostring(f_bufCountEQ(h1Kind)), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, str.tostring(array.size(SMC_eqhl)), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? str.tostring(array.size(SMC_eqhl)) : "—", text_color = color.gray, text_size = tsz)
         r := r + 1
         // Kill Zone (basada en tiempo: misma para todos los TFs -> solo columna chart)
         table.cell(panel, 0, r, "Kill Zone", text_color = color.gray, text_size = tsz)
@@ -4353,8 +4410,8 @@ if i_showPanel and barstate.islast
         table.cell(panel, 3, r, kzCell, text_color = curKZ == KZ_NONE ? color.gray : color.aqua, text_size = tsz)
         r := r + 1
         // Ocultos [§9-1 · Paso 8]: contador de lo detectado-pero-NO-dibujado en el modo activo (nada
-        // desaparece en silencio, §1-7 / checklist §10-#8). En "Todo" todo se ve => 0. Est/EQ = recortes
-        // top-N vigente; Ref = refinamientos Estudio+ ocultos en Operacion; Liq = sweeps > 1; µ = micro
+        // desaparece en silencio, §1-7 / checklist §10-#8). En "Todo" todo se ve => 0. Est/EQ = detectado -
+        // dibujado ([S103] no el recorte); Ref = refinamientos Estudio+ ocultos en Operacion; Liq = sweeps > 1; µ = micro
         // (vi/ipr) solo-Todo. Fila unica concatenada (limitacion table, per impl §9).
         int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
         int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_vi) + array.size(SMC_ipr)
