@@ -135,10 +135,6 @@ i_rthEnd         = input.int(960,    "RTH fin (min del día, hora NY; 960=16:00)
 // Mapa MTF [T13a]: hereda los escalares de HTF hacia TF menores (cascada D1->{H1,M5}, H1->{M5}).
 i_showD1         = input.bool(true, "Heredar D1 (bias + P/D)", group = GRP_MTF)
 i_showH1         = input.bool(true, "Heredar H1 (bias + P/D)", group = GRP_MTF)
-// [S104] Ventana de la geometría M5 traída al panel (3.a col cuando el chart NO está en M5). El motor
-// completo sobre M5 desde un chart D1/H1 da "Memory limits exceeded"; calc_bars_count acota el cálculo
-// del contexto "5" a las últimas N velas -> memoria contenida (probar transporte de geometría con ventana).
-i_m5Window       = input.int(3000, "M5: ventana de geometría (velas, calc_bars_count)", minval = 300, maxval = 20000, group = GRP_MTF, tooltip = "Nº de velas M5 recientes sobre las que se computa la geometría (OB/FVG/pool/sweep) del panel cuando el chart NO está en M5. Acota memoria y evita 'Memory limits exceeded'. Menor = más ligero; mayor = más contexto histórico.")
 i_mtfCapOB       = input.int(2, "Traspaso OB por HTF (0-10, 0=off)",    minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapFVG      = input.int(2, "Traspaso FVG por HTF (0-10, 0=off)",   minval = 0, maxval = 10, group = GRP_MTF)
 i_mtfCapPool     = input.int(2, "Traspaso Pools por HTF (0-10, 0=off)", minval = 0, maxval = 10, group = GRP_MTF)
@@ -2638,9 +2634,44 @@ plot(i_showEMA ? emaFast : na, "EMA rapida", color = color.new(color.aqua,   0),
 plot(i_showEMA ? emaMid  : na, "EMA media",  color = color.new(color.orange, 0), linewidth = 1)
 plot(i_showEMA ? emaSlow : na, "EMA lenta",  color = color.new(color.red,    0), linewidth = 2)
 
-// [S104] f_m5Light (transporte M5 LIGERO de solo-escalares, S103) ELIMINADA: sustituida por el
-// transporte de GEOMETRÍA COMPLETA con ventana (f_computeTFState sobre "5" + calc_bars_count = i_m5Window)
-// validado en vivo — la ventana acota memoria (evita "Memory limits exceeded") y sí trae OB/FVG/pool/sweep.
+// [S103 · OBS#9] f_m5Light: version LIGERA de f_computeTFState — SOLO los 17 escalares (bias,
+// BOS/CHoCH/MSS, P/D, EMA/ATR), SIN la geometria cara (OB/FVG/pools/arrays). Permite traer el estado
+// M5 al panel via request.security("5") desde un chart D1/H1 sin reventar memoria: el motor completo
+// sobre ~200k velas M5 da "Memory limits exceeded"; solo-escalares (tuple 17 vs 89) tiene chance de
+// caber. Visual-only (fuera del CORE byte-identico; la Strategy no dibuja panel). Contrato = las 17
+// primeras posiciones del tuple de f_computeTFState (mismo orden -> reconstituye un SMC_TFState valido).
+f_m5Light(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
+    var SMC_TFState   lst       = SMC_TFState.new()
+    var SMC_Structure lstructTf = SMC_Structure.new()
+    var SMC_Trailing  ltrailTf  = SMC_Trailing.new()
+    float latr14 = ta.atr(14)
+    [lsh, lsl]   = f_detectSwings(swingLen)
+    [lpdH, lpdL] = f_detectSwings(pdLen)
+    if barstate.isconfirmed and not na(lsh)
+        f_setStructureHigh(lstructTf, lsh, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(lsl)
+        f_setStructureLow(lstructTf, lsl, bar_index - swingLen, time[swingLen])
+    if barstate.isconfirmed and not na(lpdH)
+        f_resetTrailingHigh(ltrailTf, lpdH, bar_index - pdLen, time[pdLen])
+    if barstate.isconfirmed and not na(lpdL)
+        f_resetTrailingLow(ltrailTf, lpdL, bar_index - pdLen, time[pdLen])
+    f_updateTrailing(ltrailTf, high, low, time)
+    if barstate.isconfirmed
+        lst.pdHigh := ltrailTf.top
+        lst.pdLow  := ltrailTf.bottom
+        SMC_Event lev = f_detectStructure(lstructTf, bar_index, time, true, true)
+        f_updateTFState(lst, lev)
+        SMC_Event levM = f_detectMSS(lev, open, high, low, close, latr14, dispFactor, bodyPct)
+        if not na(levM)
+            lst.lastMSSPrice := levM.price
+            lst.lastMSSDir   := levM.dir
+            lst.lastMSSTime  := levM.barTime
+    lst.pdMid  := na(lst.pdHigh) or na(lst.pdLow) ? na : (lst.pdHigh + lst.pdLow) / 2.0
+    lst.ema20  := ta.ema(close, 20)
+    lst.ema50  := ta.ema(close, 50)
+    lst.ema200 := ta.ema(close, 200)
+    lst.atr14  := latr14
+    [lst.bias, lst.lastBOSPrice, lst.lastBOSDir, lst.lastBOSTime, lst.lastCHoCHPrice, lst.lastCHoCHDir, lst.lastCHoCHTime, lst.lastMSSPrice, lst.lastMSSDir, lst.lastMSSTime, lst.pdHigh, lst.pdLow, lst.pdMid, lst.ema20, lst.ema50, lst.ema200, lst.atr14]
 
 // === MTF === [T13a · ESQUELETO-P3 §2.4/§4.1]
 // Escalares de cada HTF traidos como TUPLE PLANO via request.security (R-P3-2: security NO
@@ -2652,20 +2683,10 @@ plot(i_showEMA ? emaSlow : na, "EMA lenta",  color = color.new(color.red,    0),
 [h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
 SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
 SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
-// [S104 · geometría M5 CON VENTANA] La 3.a col del panel trae GEOMETRÍA REAL M5 (OB/FVG/pool/sweep,
-// 12 slots) igual que D1/H1, no solo escalares. El motor completo f_computeTFState sobre M5 desde un
-// chart D1/H1 daba "Memory limits exceeded" (~200k velas); calc_bars_count = i_m5Window limita el
-// cálculo del contexto "5" a las últimas N velas -> memoria acotada. Reemplaza el transporte LIGERO
-// f_m5Light de S103 (17 escalares, sin geometría), ya eliminado tras validar esto en vivo (S104).
-// lookahead_off SIEMPRE (regla #1, anti-repaint). Tuple = 89 campos (17 escalares + 12×6 geometría).
-[m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr, m5_k0, m5_t0, m5_b0, m5_d0, m5_ta0, m5_tb0, m5_k1, m5_t1, m5_b1, m5_d1, m5_ta1, m5_tb1, m5_k2, m5_t2, m5_b2, m5_d2, m5_ta2, m5_tb2, m5_k3, m5_t3, m5_b3, m5_d3, m5_ta3, m5_tb3, m5_k4, m5_t4, m5_b4, m5_d4, m5_ta4, m5_tb4, m5_k5, m5_t5, m5_b5, m5_d5, m5_ta5, m5_tb5, m5_k6, m5_t6, m5_b6, m5_d6, m5_ta6, m5_tb6, m5_k7, m5_t7, m5_b7, m5_d7, m5_ta7, m5_tb7, m5_k8, m5_t8, m5_b8, m5_d8, m5_ta8, m5_tb8, m5_k9, m5_t9, m5_b9, m5_d9, m5_ta9, m5_tb9, m5_k10, m5_t10, m5_b10, m5_d10, m5_ta10, m5_tb10, m5_k11, m5_t11, m5_b11, m5_d11, m5_ta11, m5_tb11] = request.security(syminfo.tickerid, "5", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off, calc_bars_count = i_m5Window)
+// [S103 · OBS#9] Estado M5 LIGERO (solo escalares) para la 3.a col del panel cuando el chart NO esta
+// en M5. request.security("5", f_m5Light) — tuple de 17, sin geometria -> prueba de memoria.
+[m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr] = request.security(syminfo.tickerid, "5", f_m5Light(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
 SMC_TFState m5State = SMC_TFState.new(m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr)
-m5Kind = array.from(m5_k0, m5_k1, m5_k2, m5_k3, m5_k4, m5_k5, m5_k6, m5_k7, m5_k8, m5_k9, m5_k10, m5_k11)
-m5Top  = array.from(m5_t0, m5_t1, m5_t2, m5_t3, m5_t4, m5_t5, m5_t6, m5_t7, m5_t8, m5_t9, m5_t10, m5_t11)
-m5Bot  = array.from(m5_b0, m5_b1, m5_b2, m5_b3, m5_b4, m5_b5, m5_b6, m5_b7, m5_b8, m5_b9, m5_b10, m5_b11)
-m5Dir  = array.from(m5_d0, m5_d1, m5_d2, m5_d3, m5_d4, m5_d5, m5_d6, m5_d7, m5_d8, m5_d9, m5_d10, m5_d11)
-m5TA   = array.from(m5_ta0, m5_ta1, m5_ta2, m5_ta3, m5_ta4, m5_ta5, m5_ta6, m5_ta7, m5_ta8, m5_ta9, m5_ta10, m5_ta11)
-m5TB   = array.from(m5_tb0, m5_tb1, m5_tb2, m5_tb3, m5_tb4, m5_tb5, m5_tb6, m5_tb7, m5_tb8, m5_tb9, m5_tb10, m5_tb11)
 // Buffer generico de ranuras reconstituido por HTF (ADR-009). 2a llamada/TF (mas cupo) se
 // activaria aqui con un 2o request.security cuando Sprint 1.5/1.6 lo exijan (no ahora).
 d1Kind = array.from(d1_k0, d1_k1, d1_k2, d1_k3, d1_k4, d1_k5, d1_k6, d1_k7, d1_k8, d1_k9, d1_k10, d1_k11)
@@ -4257,17 +4278,17 @@ float m5Ema200 = emaSlow
 // === PANEL === [T14 · diseño PINE-PLAN §5 completo]
 // Tabla multi-columna: Concepto | D1 | H1 | M5. D1/H1 salen de d1State/h1State (escalares via
 // request.security) + buffer geometrico (OB/FVG/pool/sweep). La 3.a col es SIEMPRE M5: arrays NATIVOS
-// si el chart esta en M5, o el transporte de GEOMETRÍA CON VENTANA (f_computeTFState sobre "5" +
-// calc_bars_count) si esta en D1/H1 [S104] -> OB/FVG/pool/sweep M5 reales tambien fuera de M5. Conceptos
+// si el chart esta en M5, o el transporte LIGERO f_m5Light (solo escalares) si esta en D1/H1 [S103 OBS#9].
+// Geometria M5 (OB/FVG/pool/sweep/EQ) = "—" fuera de M5 (es la parte cara, no cabe en memoria). Conceptos
 // solo-chart (Bias dom. 50, Kill Zone) muestran "—" en D1/H1. Controles en Ajustes (Pine no recibe
 // clicks en chart): "Mostrar panel" lo apaga entero; "Panel compacto" lo MINIMIZA a header + Bias
 // por TF (2 filas). Texto size.small para footprint reducido.
 if i_showPanel and barstate.islast
     int nrows = i_panelCompact ? 2 : 15
-    // [S104] 3.a columna SIEMPRE M5 (D1|H1|M5). En M5 usa arrays NATIVOS (chartIsM5); en D1/H1 usa el
-    // transporte de GEOMETRÍA CON VENTANA (f_computeTFState sobre "5" + calc_bars_count = i_m5Window) que
-    // trae escalares + OB/FVG/pool/sweep reales. La ventana acota memoria (el motor completo sin ventana
-    // sobre ~200k velas M5 daba "Memory limits exceeded"). EQ H/L (conteo nativo) sigue en "—" fuera de M5.
+    // [S103 · OBS#9] 3.a columna SIEMPRE M5 (D1|H1|M5). En M5 usa arrays NATIVOS (chartIsM5); en D1/H1
+    // usa el transporte LIGERO f_m5Light via request.security("5") — solo ESCALARES (bias/BOS/CHoCH/MSS/
+    // P-D/EMA), porque el motor completo sobre ~200k velas M5 da "Memory limits exceeded". La geometria
+    // (OB/FVG/pool/sweep/EQ) es la parte cara -> se ve solo estando en M5; fuera de M5 muestra "—".
     bool chartIsM5 = f_tfLabel() == "M5"
     table panel = table.new(position.top_right, 4, nrows, border_width = 1)
     string modoTxt = i_densidad == "Operación" ? "Op" : i_densidad == "Estudio" ? "Est" : "Todo"           // §9-3: modo activo visible
@@ -4299,11 +4320,6 @@ if i_showPanel and barstate.islast
     int    h1SwI  = f_bufNear(h1Kind, h1Top, h1Bot, KIND_SWEEP, close)
     string d1Sw   = d1SwI < 0 ? "—" : str.tostring(array.get(d1Top, d1SwI), format.mintick) + (array.get(d1Dir, d1SwI) == DIR_BULL ? " ↑" : " ↓")
     string h1Sw   = h1SwI < 0 ? "—" : str.tostring(array.get(h1Top, h1SwI), format.mintick) + (array.get(h1Dir, h1SwI) == DIR_BULL ? " ↑" : " ↓")
-    // [S104] geometría M5 transportada CON VENTANA (calc_bars_count): pool/sweep para la 3.a col cuando NO en M5
-    int    m5PoolIT = f_bufNear(m5Kind, m5Top, m5Bot, KIND_POOL, close)
-    string m5PoolT = m5PoolIT < 0 ? "—" : str.tostring(array.get(m5Top, m5PoolIT), format.mintick) + (array.get(m5Dir, m5PoolIT) == DIR_BULL ? " BSL" : " SSL")
-    int    m5SwIT  = f_bufNear(m5Kind, m5Top, m5Bot, KIND_SWEEP, close)
-    string m5SwT   = m5SwIT < 0 ? "—" : str.tostring(array.get(m5Top, m5SwIT), format.mintick) + (array.get(m5Dir, m5SwIT) == DIR_BULL ? " ↑" : " ↓")
     // --- M5 escalares (transporte ligero request.security "5"): 3.a col cuando el chart NO esta en M5 [S103] ---
     [m5PdT, m5PdColT]   = f_pdCell(m5State.pdHigh, m5State.pdLow)
     [m5EmaT, m5EmaColT] = f_emaCell(m5State.ema20, m5State.ema50, m5State.ema200)
@@ -4355,25 +4371,25 @@ if i_showPanel and barstate.islast
         table.cell(panel, 0, r, "OB cercano", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, chartIsM5 ? m5Ob : f_bufZoneCell(m5Kind, m5Top, m5Bot, KIND_OB), text_color = chartIsM5 and not na(obZ) ? f_dirCol(obZ.dir) : color.gray, text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Ob : "—", text_color = chartIsM5 and not na(obZ) ? f_dirCol(obZ.dir) : color.gray, text_size = tsz)
         r := r + 1
         // FVG cercano
         table.cell(panel, 0, r, "FVG cercano", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, chartIsM5 ? m5Fvg : f_bufZoneCell(m5Kind, m5Top, m5Bot, KIND_FVG), text_color = chartIsM5 and not na(fvgZ) ? f_dirCol(fvgZ.dir) : color.gray, text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Fvg : "—", text_color = chartIsM5 and not na(fvgZ) ? f_dirCol(fvgZ.dir) : color.gray, text_size = tsz)
         r := r + 1
         // Pool cercano
         table.cell(panel, 0, r, "Pool cercano", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, d1Pool, text_color = color.gray, text_size = tsz)
         table.cell(panel, 2, r, h1Pool, text_color = color.gray, text_size = tsz)
-        table.cell(panel, 3, r, chartIsM5 ? m5Pool : m5PoolT, text_color = chartIsM5 and not na(poolP) ? f_dirCol(poolP.dir) : (m5PoolIT < 0 ? color.gray : f_dirCol(array.get(m5Dir, m5PoolIT))), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Pool : "—", text_color = chartIsM5 and not na(poolP) ? f_dirCol(poolP.dir) : color.gray, text_size = tsz)
         r := r + 1
         // Ultimo Sweep
         table.cell(panel, 0, r, "Último Sweep", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, d1Sw, text_color = d1SwI < 0 ? color.gray : f_dirCol(array.get(d1Dir, d1SwI)), text_size = tsz)
         table.cell(panel, 2, r, h1Sw, text_color = h1SwI < 0 ? color.gray : f_dirCol(array.get(h1Dir, h1SwI)), text_size = tsz)
-        table.cell(panel, 3, r, chartIsM5 ? m5Sw : m5SwT, text_color = chartIsM5 and not na(swE) ? f_dirCol(swE.dir) : (m5SwIT < 0 ? color.gray : f_dirCol(array.get(m5Dir, m5SwIT))), text_size = tsz)
+        table.cell(panel, 3, r, chartIsM5 ? m5Sw : "—", text_color = chartIsM5 and not na(swE) ? f_dirCol(swE.dir) : color.gray, text_size = tsz)
         r := r + 1
         // EMA 20/50/200 (alineacion por TF)
         table.cell(panel, 0, r, "EMA 20/50/200", text_color = color.gray, text_size = tsz)
