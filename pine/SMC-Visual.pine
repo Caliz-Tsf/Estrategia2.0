@@ -74,11 +74,6 @@ i_showOTE      = input.bool(true,  "Mostrar OTE / Golden Pocket",       group = 
 i_oteR1        = input.float(0.50,  "Fib inicio GP (50%)",   minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR2        = input.float(0.618, "Fib GP/OTE (61.8%)",    minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
 i_oteR3        = input.float(0.79,  "Fib fin OTE (79%)",     minval = 0.0, maxval = 1.0, step = 0.001, group = GRP_OTE)
-i_showStdDev   = input.bool(false, "Proyectar Standard Deviation (objetivos, §5.11)", group = GRP_OTE)
-i_stdMult1     = input.float(1.0,  "StdDev #1", step = 0.5, group = GRP_OTE)
-i_stdMult2     = input.float(2.0,  "StdDev #2", step = 0.5, group = GRP_OTE)
-i_stdMult3     = input.float(2.5,  "StdDev #3", step = 0.5, group = GRP_OTE)
-i_stdMult4     = input.float(4.0,  "StdDev #4", step = 0.5, group = GRP_OTE)
 i_showFVG      = input.bool(true,  "Mostrar Fair Value Gaps",          group = GRP_FVG)
 i_fvgThreshold = input.float(0.25, "Umbral tamaño (x ATR14)", minval = 0.0, step = 0.05, group = GRP_FVG)
 i_showCE       = input.bool(true,  "Mostrar nivel CE (50%)",           group = GRP_FVG)
@@ -90,9 +85,6 @@ i_showIR       = input.bool(true,  "Mostrar Immediate Rebalance (§5.4)", group 
 i_irFactor     = input.float(1.0,  "IR: rango vela impulso (x ATR14)", minval = 0.3, step = 0.1, group = GRP_FVG)
 i_irBodyPct    = input.float(0.60, "IR: cuerpo mínimo (frac. rango)", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_FVG)
 i_maxShowIR    = input.int(20,     "Max marcadores de IR (recientes)", minval = 1, group = GRP_FVG)
-i_showVI       = input.bool(false, "Mostrar Volume Imbalance (§5.5, micro)", group = GRP_FVG)
-i_viThreshold  = input.float(0.05, "VI: gap mínimo de cuerpo (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_FVG)
-i_maxShowVI    = input.int(15,     "Max cajas de VI (recientes)", minval = 1, group = GRP_FVG)
 i_showIPR      = input.bool(true,  "Mostrar IPR (rango desbalanceado, §5.9)", group = GRP_FVG)
 i_iprWindow    = input.int(10,     "IPR: ventana (velas)", minval = 2, group = GRP_FVG)
 i_iprMinGaps   = input.int(3,      "IPR: FVG mín. mismo lado", minval = 2, group = GRP_FVG)
@@ -1874,11 +1866,14 @@ f_pushZoneV(array<SMC_Zone> a, SMC_Zone z, int maxN, float curPrice, float atr14
     array.push(a, z)
     while array.size(a) > maxN
         int n = array.size(a)
-        // extremos ACTIVOS protegidos por lado (mayor top / menor bottom = techo y origen de la pierna)
+        // [S107] 1 sola pasada: extremos ACTIVOS protegidos (mayor top / menor bottom = techo y origen de la
+        // pierna) + primer INVALID (más viejo) + primer MITIGATED (más viejo). Antes eran 3 loops separados.
         int   idxMaxTop = -1
         int   idxMinBot = -1
         float maxTop = na
         float minBot = na
+        int   idxInvalid = -1
+        int   idxMitig   = -1
         for i = 0 to n - 1
             SMC_Zone zi = array.get(a, i)
             if zi.state == ZS_ACTIVE
@@ -1888,18 +1883,12 @@ f_pushZoneV(array<SMC_Zone> a, SMC_Zone z, int maxN, float curPrice, float atr14
                 if na(minBot) or zi.bottom < minBot
                     minBot := zi.bottom
                     idxMinBot := i
-        int rm = -1
-        // 1) INVALID más viejo (índice bajo = insertado antes ~ más viejo)
-        for i = 0 to n - 1
-            if array.get(a, i).state == ZS_INVALID
-                rm := i
-                break
-        // 2) MITIGATED más viejo
-        if rm < 0
-            for i = 0 to n - 1
-                if array.get(a, i).state == ZS_MITIGATED
-                    rm := i
-                    break
+            if idxInvalid < 0 and zi.state == ZS_INVALID
+                idxInvalid := i
+            if idxMitig < 0 and zi.state == ZS_MITIGATED
+                idxMitig := i
+        // prioridad: INVALID más viejo -> MITIGATED más viejo -> (abajo) menor strength no-extremo
+        int rm = idxInvalid >= 0 ? idxInvalid : idxMitig
         // 3) ACTIVA/PARCIAL de menor strength, excluyendo los extremos protegidos
         if rm < 0
             float minS = na
@@ -1923,26 +1912,26 @@ int MAX_POOLS_CHART = 80
 f_prunePoolsV(array<SMC_Pool> pools, int maxN) =>
     while array.size(pools) > maxN
         int n = array.size(pools)
-        // extremos VIVOS protegidos por lado (mayor level = BSL far / menor level = SSL far)
+        // [S107] 1 sola pasada: extremos VIVOS protegidos (mayor level = BSL far / menor level = SSL far)
+        // + primer barrido (swept más viejo). Antes eran 2 loops separados.
         int   idxHi = -1
         int   idxLo = -1
         float hiL = na
         float loL = na
+        int   idxSwept = -1
         for i = 0 to n - 1
             SMC_Pool pi = array.get(pools, i)
-            if not pi.swept and not na(pi.level)
+            if pi.swept
+                if idxSwept < 0
+                    idxSwept := i
+            else if not na(pi.level)
                 if na(hiL) or pi.level > hiL
                     hiL := pi.level
                     idxHi := i
                 if na(loL) or pi.level < loL
                     loL := pi.level
                     idxLo := i
-        int rm = -1
-        // 1) barrido más viejo
-        for i = 0 to n - 1
-            if array.get(pools, i).swept
-                rm := i
-                break
+        int rm = idxSwept
         // 2) vivo de menor strength, excluyendo extremos protegidos
         if rm < 0
             float minS = na
@@ -2321,18 +2310,9 @@ if barstate.isconfirmed
     if not na(evIR)
         f_pushEvent(SMC_ir, evIR, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
 
-// --- Volume Imbalance [§5.5] · T31 ---
-// Micro-imbalance entre cuerpos con solape de mechas. ARRAY DEDICADO SMC_vi (NO SMC_zones): es muy
-// frecuente y saturaria el cap de zonas reales (OB/FVG). Ciclo de vida propio (misma f_updateZoneMitigation)
-// para no crear su propia maquina. Detecta la vela actual vs la previa; se empuja tras mitigar las vivas.
-var array<SMC_Zone> SMC_vi = array.new<SMC_Zone>()
-if barstate.isconfirmed
-    if array.size(SMC_vi) > 0
-        for i = 0 to array.size(SMC_vi) - 1
-            f_updateZoneMitigation(array.get(SMC_vi, i), i_obMitClose)
-    SMC_Zone viZone = f_detectVolumeImbalance(open, high, low, close[1], high[1], low[1], atr14, i_viThreshold, bar_index, time)
-    if not na(viZone)
-        f_pushZoneV(SMC_vi, viZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
+// [S107] Volume Imbalance [§5.5 · T31] RETIRADO del Visual por presupuesto de tokens (CE10117): micro-concepto
+// off por defecto (i_showVI=false) -> cero impacto visual. f_detectVolumeImbalance sigue en el CORE byte-identico
+// (sin llamar). Re-cablear (detección + array SMC_vi + drawer) si se necesita en Fase 3.
 
 // --- Gaps de apertura NWOG/NDOG/NYMO + Breakaway [§5.10] · T30 ---
 // Fronteras con ta.change CADA barra (fuera del if): semana / dia broker / medianoche NY. Niveles ancla
@@ -3071,66 +3051,42 @@ f_renderScoreV2(float strength, int posRole, int confDegree) =>
 // (banda-1) => <= 39 (40 escalares int por indice + 40 float por score, SET/GET indexado, cero array.push
 // => RE10045-safe). Se rellena en la MISMA pasada islast de las anclas (§2.3). Los drawers comparan su i
 // contra la celda via f_isBandPick -> dibujan aunque f_densOK diga no (un representante por banda por lado).
-// [S106 Paso D] top-3 por celda + clustering. 40 celdas × 3 slots = 120 escalares fijos (array.new fijo,
-// solo set/get -> RE10045-safe, NUNCA push que crece). Por celda, slots ordenados desc por v2 (slot0 = mejor,
-// slot2 = más débil -> el early-out lee slot2). bp3Lvl/Bar guardan nivel y barIdx para el clustering y el
-// tie-break. Poblar la pierna = varios representantes por banda (no 1), colapsando los casi-iguales.
-int SLOTS3 = 3
-var array<int>   bp3Idx   = array.new<int>(120, -1)
-var array<float> bp3Score = array.new<float>(120, -1.0)
-var array<float> bp3Lvl   = array.new<float>(120, na)
-var array<int>   bp3Bar   = array.new<int>(120, na)
+// [S106 Paso D · S107 top-2] top-2 por celda + clustering. 40 celdas × 2 slots = 80 escalares fijos
+// (array.new fijo, solo set/get -> RE10045-safe, NUNCA push que crece). Sin orden entre slots: f_isBandPick
+// checa pertenencia y el early-out lee el mínimo real vía f_cellMinScore. bp3Lvl guarda el nivel para el
+// clustering. Poblar la pierna = 1-2 representantes por banda por lado, colapsando los casi-iguales (§ spec 1-3).
+var array<int>   bp3Idx   = array.new<int>(80, -1)
+var array<float> bp3Score = array.new<float>(80, -1.0)
+var array<float> bp3Lvl   = array.new<float>(80, na)
 // f_bp3Insert: inserta un candidato en las 3 ranuras de su celda. (1) CLUSTERING: si un slot ocupado está a
 // <= tol en nivel, se queda el de mayor v2 (a igualdad, menor barIdx = representante del impulso). (2) si no
 // hay cluster, entra en el slot más débil si supera su v2. (3) reordena la celda desc por v2. Muta los
 // arrays globales por referencia (patrón f_pushZone). tol = CONF_TOL_ATR×atr (= tolConf/labelClusterTol).
-f_bp3Insert(array<int> aIdx, array<float> aScore, array<float> aLvl, array<int> aBar, int cell, int cand, float v2, float lvl, int barIdx, float tol) =>
-    int base = cell * 3
+f_bp3Insert(array<int> aIdx, array<float> aScore, array<float> aLvl, int cell, int cand, float v2, float lvl, float tol) =>
+    int base = cell * 2
     int clus = -1
-    for s = 0 to 2
+    for s = 0 to 1
         int gi = base + s
         if array.get(aIdx, gi) >= 0 and not na(array.get(aLvl, gi)) and math.abs(lvl - array.get(aLvl, gi)) <= tol
             clus := gi
     if clus >= 0
-        float cs = array.get(aScore, clus)
-        int   cb = array.get(aBar, clus)
-        bool better = v2 > cs or (v2 == cs and not na(barIdx) and (na(cb) or barIdx < cb))
-        if better
+        if v2 > array.get(aScore, clus)                                  // [S107] empate -> conserva el existente
             array.set(aIdx, clus, cand)
             array.set(aScore, clus, v2)
             array.set(aLvl, clus, lvl)
-            array.set(aBar, clus, barIdx)
     else
-        int weak = base
-        float weakV = array.get(aScore, base)
-        for s = 1 to 2
-            float sv = array.get(aScore, base + s)
-            if sv < weakV
-                weakV := sv
-                weak := base + s
-        if v2 > weakV
+        int weak = array.get(aScore, base) <= array.get(aScore, base + 1) ? base : base + 1
+        if v2 > array.get(aScore, weak)
             array.set(aIdx, weak, cand)
             array.set(aScore, weak, v2)
             array.set(aLvl, weak, lvl)
-            array.set(aBar, weak, barIdx)
-    for a = 0 to 1
-        for b = a + 1 to 2
-            int ga = base + a
-            int gb = base + b
-            if array.get(aScore, gb) > array.get(aScore, ga)
-                int   ti = array.get(aIdx, ga)
-                float ts = array.get(aScore, ga)
-                float tl = array.get(aLvl, ga)
-                int   tb = array.get(aBar, ga)
-                array.set(aIdx, ga, array.get(aIdx, gb))
-                array.set(aScore, ga, array.get(aScore, gb))
-                array.set(aLvl, ga, array.get(aLvl, gb))
-                array.set(aBar, ga, array.get(aBar, gb))
-                array.set(aIdx, gb, ti)
-                array.set(aScore, gb, ts)
-                array.set(aLvl, gb, tl)
-                array.set(aBar, gb, tb)
+    // [S107] sin reordenamiento: f_isBandPick solo checa pertenencia; el early-out lee el mínimo vía f_cellMinScore.
     array.size(aIdx)
+// f_cellMinScore: menor score de las 2 ranuras de la celda base (umbral exacto del early-out §D).
+f_cellMinScore(array<float> aScore, int base) =>
+    float m = array.get(aScore, base)
+    float s1 = array.get(aScore, base + 1)
+    s1 < m ? s1 : m
 // f_isBandPick: ¿es la instancia i uno de los ≤3 picks de su celda (concepto×lado×banda)? Bandas
 // 1..i_profundidad. Devuelve bool (membership entre los 3 slots) -> los drawers lo usan igual que antes.
 f_isBandPick(int i, int concept, float top, float bottom) =>
@@ -3143,8 +3099,8 @@ f_isBandPick(int i, int concept, float top, float bottom) =>
         float lvl = above ? bottom : top
         int band = f_depthBand(lvl, aPx)
         if band >= 1 and band <= i_profundidad
-            int base = (concept * 10 + side * 5 + (band - 1)) * 3
-            for s = 0 to 2
+            int base = (concept * 10 + side * 5 + (band - 1)) * 2
+            for s = 0 to 1
                 if array.get(bp3Idx, base + s) == i
                     pick := true
     pick
@@ -3158,12 +3114,10 @@ if barstate.islast and array.size(SMC_zones) > 0
     [lhX, llX] = f_computeLegExtremes(aPx)
     legExtHi := lhX
     legExtLo := llX
-    // reset de las 120 ranuras de banda (nueva pasada islast)
-    for c = 0 to 119
-        array.set(bp3Idx, c, -1)
-        array.set(bp3Score, c, -1.0)
-        array.set(bp3Lvl, c, na)
-        array.set(bp3Bar, c, na)
+    // [S107] reset de las 120 ranuras de banda vía array.fill (1 llamada/array vs loop de 360 array.set)
+    array.fill(bp3Idx, -1)
+    array.fill(bp3Score, -1.0)
+    array.fill(bp3Lvl, na)
     if not na(aAtr) and aAtr > 0
         float hiScore = -1.0
         float loScore = -1.0
@@ -3192,11 +3146,11 @@ if barstate.islast and array.size(SMC_zones) > 0
                         // early-out §D: v2 máximo posible (posRole ORIGEN + confDegree 3) = strength×1.0×1.75;
                         // si no supera el slot más débil de la celda, no puede entrar -> evita f_posRole/f_confDegree (caros).
                         float v2max = z.strength * POS_W_ORIGIN * (1.0 + CONF_K * 3)
-                        if v2max > array.get(bp3Score, cell * 3 + 2)
+                        if v2max > f_cellMinScore(bp3Score, cell * 2)
                             int posR = f_posRole(z.top, z.bottom, z.barIdx)
                             int cfg  = f_confDegree(lvl)
                             float v2 = f_renderScoreV2(z.strength, posR, cfg)
-                            f_bp3Insert(bp3Idx, bp3Score, bp3Lvl, bp3Bar, cell, i, v2, lvl, z.barIdx, CONF_TOL_ATR * aAtr)
+                            f_bp3Insert(bp3Idx, bp3Score, bp3Lvl, cell, i, v2, lvl, CONF_TOL_ATR * aAtr)
         // IDM (concepto 3, §7.2.25): top por lado en bandas 1-2 (el que custodia el extremo operativo).
         // Sube de Estudio+ a Operacion por band-pick. Indice apunta a SMC_idm (espacio de celda propio).
         if array.size(SMC_idm) > 0
@@ -3211,14 +3165,20 @@ if barstate.islast and array.size(SMC_zones) > 0
                         if bandI >= 1 and bandI <= 2                                                       // IDM = escenario cercano (bandas 1-2)
                             int cellI = 3 * 10 + sideI * 5 + (bandI - 1)
                             float v2Imax = im.strength * POS_W_ORIGIN * (1.0 + CONF_K * 3)
-                            if v2Imax > array.get(bp3Score, cellI * 3 + 2)
+                            if v2Imax > f_cellMinScore(bp3Score, cellI * 2)
                                 int posRI = f_posRole(im.price, im.price, im.barIdx)
                                 int cfgI  = f_confDegree(im.price)
                                 float v2I = f_renderScoreV2(im.strength, posRI, cfgI)
-                                f_bp3Insert(bp3Idx, bp3Score, bp3Lvl, bp3Bar, cellI, i, v2I, im.price, im.barIdx, CONF_TOL_ATR * aAtr)
+                                f_bp3Insert(bp3Idx, bp3Score, bp3Lvl, cellI, i, v2I, im.price, CONF_TOL_ATR * aAtr)
 
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
+
+// [S107 · RE10026] f_xL: acota el x-origen (bar_index) de cajas/labels/líneas a <=490 barras del bar actual.
+// Con la retención por importancia (Paso B) se conservan zonas MUY viejas; box.new/label.new con xloc.bar_index
+// fallan (RE10026) si el índice está demasiado lejos del actual. La caja se extiende igual a la derecha
+// (right = bar_index) -> visualmente arranca en el borde izquierdo. Zonas recientes (<490 velas): sin efecto.
+f_xL(int bi) => math.max(bi, bar_index - 490)
 
 // === §6.5 · PRESUPUESTO GLOBAL DE TINTA (desalojo determinista) [Eje2 · Paso 6 · S090] ================
 // El budget de labels es GLOBAL por modo (Operación 25 / Estudio 60 / Todo 150). La herencia MTF (§7.1)
@@ -3326,7 +3286,7 @@ f_drawOTE(SMC_Zone z) =>
     col = isGP ? COL_OTE_GP : COL_OTE
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas OTE/GP vivas (KIND_GP/KIND_OTE, no invalidadas).
 var array<box>   SMC_oteBoxes  = array.new<box>()
@@ -3345,7 +3305,7 @@ if i_showOTE and barstate.islast
                 array.push(SMC_oteBoxes, f_drawOTE(z))
                 color oteCol = z.kind == KIND_GP ? COL_OTE_GP : COL_OTE
                 string oteTxt = z.kind == KIND_GP ? "GP" : "OTE"
-                array.push(SMC_oteLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, oteTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = oteCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_oteLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, oteTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = oteCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawPDLine: una linea de nivel del dealing range [T07] (solo Visual). Como LuxAlgo
 // (drawTrailingExtremes :715-732): cada linea se ancla en SU PROPIO extremo via tiempo —
@@ -4004,27 +3964,9 @@ if i_showInsideDay and f_famOK(FAM_EST) and barstate.islast                     
             SMC_Event idv = array.get(SMC_insideDays, i)
             array.push(SMC_idLabels, label.new(idv.barTime, idv.price, "ID", style = label.style_label_down, color = color.new(COL_GHOST, 65), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
 
-// Proyeccion Standard Deviation [T36 · §5.11] (solo Visual): objetivos de CONTINUACION de la pierna
-// dominante (rango operativo trailing). A=origen / B=extremo segun el sesgo dominante (bajista: top->bottom;
-// alcista: bottom->top). Lineas punteadas grises extendidas a la derecha + etiqueta del multiplo. Es una
-// HERRAMIENTA (no confluencia): proyecta TPs. Off por defecto.
-var array<line>  SMC_stdLines  = array.new<line>()
-var array<label> SMC_stdLabels = array.new<label>()
-if i_showStdDev and barstate.islast
-    for l in SMC_stdLines
-        line.delete(l)
-    for lb in SMC_stdLabels
-        label.delete(lb)
-    array.clear(SMC_stdLines)
-    array.clear(SMC_stdLabels)
-    if structMajor.bias != 0 and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
-        float aAnchor = structMajor.bias == DIR_BEAR ? trailing.top : trailing.bottom
-        float bAnchor = structMajor.bias == DIR_BEAR ? trailing.bottom : trailing.top
-        array<float> stdMults = array.from(i_stdMult1, i_stdMult2, i_stdMult3, i_stdMult4)
-        for m in stdMults
-            float lvl = f_projStdDev(aAnchor, bAnchor, m)
-            array.push(SMC_stdLines, line.new(bar_index - 1, lvl, bar_index, lvl, xloc = xloc.bar_index, color = color.new(COL_GHOST, 40), style = line.style_dotted, width = 1, extend = extend.right))
-            array.push(SMC_stdLabels, label.new(bar_index, lvl, "σ" + str.tostring(m), style = label.style_label_left, color = color.new(COL_GHOST, 88), textcolor = COL_GHOST, size = size.tiny, xloc = xloc.bar_index))
+// [S107] Proyeccion Standard Deviation [T36 · §5.11] RETIRADA del Visual por presupuesto de tokens (CE10117):
+// era HERRAMIENTA (no confluencia, §0.9), off por defecto (i_showStdDev=false) -> cero impacto visual. La
+// funcion pura f_projStdDev sigue en el CORE byte-identico (sin llamar). Re-cablear si se necesita en Fase 3.
 // f_drawOB: caja del Order Block coloreada por estado [T05] (solo Visual). Origen =
 // vela del OB; se extiende a la derecha hasta la barra actual (la zona vive; el
 // origen no repinta). Alcista/bajista por TONO del AZUL de familia (§5.2, COL_OB_BULL/BEAR);
@@ -4034,7 +3976,7 @@ f_drawOB(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 75 : z.state == ZS_PARTIAL ? 83 : 90
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas vivas (evita acumulacion por tick).
 // Cajas <= MAX_ZONES. Las zonas mitigadas se muestran tenues; las invalidadas se
@@ -4058,7 +4000,7 @@ if i_showOB and barstate.islast
                 color obCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
                 // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
                 string obTxt = z.propulsion ? "OB⇈" : "OB"
-                array.push(SMC_obLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, obTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_obLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, obTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawBreaker: caja del Breaker [T19 · §2.6] (solo Visual). Un OB invalidado renacido con polaridad
 // invertida. AZUL de familia (§5.2, como el OB) distinguido por borde PUNTEADO + label BRK; borde
@@ -4068,7 +4010,7 @@ f_drawBreaker(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 45), border_width = 1, border_style = f_mitStyle(mit, line.style_dashed), xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 45), border_width = 1, border_style = f_mitStyle(mit, line.style_dashed), xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas de breaker vivas (KIND_BREAKER, no invalidadas).
 var array<box>   SMC_brkBoxes  = array.new<box>()
@@ -4087,7 +4029,7 @@ if i_showBreaker and barstate.islast
                 array.push(SMC_brkBoxes, f_drawBreaker(z))
                 color brkCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
                 string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
-                array.push(SMC_brkLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_brkLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawIFVG: caja del Inversion FVG [T27 · §5.2] (solo Visual). Un FVG invalidado renacido con
 // polaridad invertida. NARANJA de familia (§5.2, como el FVG) con borde PUNTEADO + label IFVG para
@@ -4096,7 +4038,7 @@ f_drawIFVG(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_dashed), xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_dashed), xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas IFVG vivas (KIND_IFVG, no invalidadas).
 var array<box>   SMC_ifvgBoxes  = array.new<box>()
@@ -4114,7 +4056,7 @@ if i_showIFVG and barstate.islast
             if z.kind == KIND_IFVG and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_ifvgBoxes, f_drawIFVG(z))
                 color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                array.push(SMC_ifvgLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = ifvgCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_ifvgLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = ifvgCol, size = size.small, xloc = xloc.bar_index))
 
 // f_drawBPR: caja del Balanced Price Range [T28 · §5.3] (solo Visual). Interseccion de FVG opuestos =
 // zona de reaccion fuerte. NARANJA de familia (§5.2, base; es bidireccional), borde solido + label BPR
@@ -4123,7 +4065,7 @@ f_drawBPR(SMC_Zone z) =>
     col = COL_FVG
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 45), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 45), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas BPR vivas (KIND_BPR, no invalidadas).
 var array<box>   SMC_bprBoxes  = array.new<box>()
@@ -4140,25 +4082,9 @@ if i_showBPR and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_BPR and z.state != ZS_INVALID and ((f_famOK(FAM_EST) and f_densOK(z.strength, false)) or f_confDegree((z.top + z.bottom) / 2.0) >= 2)   // §7.2.18 promocion por confluencia
                 array.push(SMC_bprBoxes, f_drawBPR(z))
-                array.push(SMC_bprLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "BPR", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_FVG, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_bprLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "BPR", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_FVG, size = size.small, xloc = xloc.bar_index))
 
-// Cajas de Volume Imbalance [T31 · §5.5] (solo Visual). Micro -> cajitas finas violeta tenue, solo las
-// i_maxShowVI mas recientes vivas (P4 present-mode, anti-saturacion). Off por defecto (i_showVI false:
-// son muchas; se encienden para inspeccion). Anclado por bar_index.
-var array<box> SMC_viBoxes = array.new<box>()
-if i_showVI and barstate.islast
-    for b in SMC_viBoxes
-        box.delete(b)
-    array.clear(SMC_viBoxes)
-    int nVI = array.size(SMC_vi)
-    if nVI > 0
-        int firstVI = math.max(0, nVI - i_maxShowVI)
-        for i = firstVI to nVI - 1
-            SMC_Zone z = array.get(SMC_vi, i)
-            if z.state != ZS_INVALID and f_famOK(FAM_TODO) and f_densOK(z.strength, false)
-                color vcol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                bool vmit = z.state == ZS_MITIGATED
-                array.push(SMC_viBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(vmit, vcol, 82), border_color = f_mitBorder(vmit, vcol, 60), border_width = 1, border_style = f_mitStyle(vmit, line.style_solid), xloc = xloc.bar_index))
+// [S107] Drawer de Volume Imbalance [T31 · §5.5] RETIRADO con el concepto (ver nota en la sección de detección).
 
 // Niveles de gap de apertura [T30 · §5.10] (solo Visual): NWOG/NDOG/NYMO en NARANJA (familia opening-gaps
 // §5.2, COL_FVG; se distinguen por el label) como lineas S/R desde su ancla hasta ahora. Marcadores Breakaway
@@ -4197,7 +4123,7 @@ f_drawMB(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas de mitigation block vivas (KIND_MITIGATION, no invalidadas).
 var array<box>   SMC_mbBoxes  = array.new<box>()
@@ -4215,7 +4141,7 @@ if i_showMB and barstate.islast
             if z.kind == KIND_MITIGATION and z.state != ZS_INVALID and ((f_famOK(FAM_EST) and f_densOK(z.strength, false)) or f_confDegree((z.top + z.bottom) / 2.0) >= 2)   // §7.2.11 promocion por confluencia (requisito >=2)
                 array.push(SMC_mbBoxes, f_drawMB(z))
                 color mbCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
-                array.push(SMC_mbLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_mbLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_index))
 
 // Cajas de Vacuum Block [T33 · §5.7] (solo Visual). Vacio de apertura (gap grande) = iman de retorno.
 // AZUL de familia (§5.2, base COL_OB), borde punteado. No invalidada. Origen = barra del gap; se extiende a la actual.
@@ -4233,8 +4159,8 @@ if i_showVacuum and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 bool vacMit = z.state == ZS_MITIGATED
-                array.push(SMC_vacBoxes, box.new(left = z.barIdx, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(vacMit, COL_OB, 84), border_color = f_mitBorder(vacMit, COL_OB, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index))
-                array.push(SMC_vacLabels, label.new(math.round((z.barIdx + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_vacBoxes, box.new(left = f_xL(z.barIdx), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(vacMit, COL_OB, 84), border_color = f_mitBorder(vacMit, COL_OB, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index))
+                array.push(SMC_vacLabels, label.new(math.round((f_xL(z.barIdx) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB, size = size.small, xloc = xloc.bar_index))
 
 // Zona IPR vigente [T35 · §5.9] (solo Visual): rango desbalanceado (contexto de bias). Borde fino sin
 // relleno (es contexto, no zona de entrada), color por dir. Solo la actual (currentIpr), repintada-en-islast.
@@ -4245,7 +4171,7 @@ if i_showIPR and barstate.islast
     label.delete(SMC_iprLbl)
     if not na(currentIpr) and f_famOK(FAM_TODO) and f_densOK(currentIpr.strength, false)
         color iprc = currentIpr.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-        SMC_iprBox := box.new(left = currentIpr.barIdx - i_iprWindow, top = currentIpr.top, right = bar_index, bottom = currentIpr.bottom, bgcolor = color.new(iprc, 95), border_color = color.new(iprc, 40), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
+        SMC_iprBox := box.new(left = f_xL(currentIpr.barIdx - i_iprWindow), top = currentIpr.top, right = bar_index, bottom = currentIpr.bottom, bgcolor = color.new(iprc, 95), border_color = color.new(iprc, 40), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_index)
         SMC_iprLbl := label.new(bar_index, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, "IPR", style = label.style_label_left, color = color.new(iprc, 85), textcolor = iprc, size = size.tiny, xloc = xloc.bar_index)
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
@@ -4258,7 +4184,7 @@ f_drawFVG(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barIdx - 1, top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 60), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
+    box.new(left = f_xL(z.barIdx - 1), top = z.top, right = bar_index, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 60), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_index)
 
 // En la ultima barra limpia y repinta las cajas FVG + lineas CE vivas. Las mitigadas se
 // muestran tenues sin CE; las invalidadas se omiten (el gap quedo rellenado por completo).
@@ -4285,11 +4211,11 @@ if i_showFVG and barstate.islast
                 color fvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                 // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
                 string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
-                array.push(SMC_fvgLabels, label.new(math.round((z.barIdx - 1 + bar_index) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
+                array.push(SMC_fvgLabels, label.new(math.round((f_xL(z.barIdx - 1) + bar_index) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_index))
                 if i_showCE and z.state != ZS_MITIGATED
                     float ce = (z.top + z.bottom) / 2.0
                     color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                    array.push(SMC_fvgCELines, line.new(z.barIdx - 1, ce, bar_index, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_index))
+                    array.push(SMC_fvgCELines, line.new(f_xL(z.barIdx - 1), ce, bar_index, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_index))
 
 // --- §6.5 · DESALOJO DETERMINISTA de eventos nativos L3 [Eje2 · Paso 6 · S090] ---
 // Punto unico: todas las familias nativas discrecionales ya estan construidas + top-N'd; la capa MTF
@@ -4674,7 +4600,7 @@ if i_showPanel and barstate.islast
         // dibujado ([S103] no el recorte); Ref = refinamientos Estudio+ ocultos en Operacion; Liq = sweeps > 1; µ = micro
         // (vi/ipr) solo-Todo. Fila unica concatenada (limitacion table, per impl §9).
         int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
-        int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_vi) + array.size(SMC_ipr)
+        int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_ipr)                       // [S107] SMC_vi retirado
         int hidLiq = (f_famOK(FAM_EST) ? 0 : math.max(0, array.size(SMC_sweeps) - 1)) + hidPools
         string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "") + (gEvtCut > 0 ? " · Desalojo " + str.tostring(gEvtCut) : "")
         table.cell(panel, 0, r, "Ocultos", text_color = color.gray, text_size = tsz)
