@@ -1857,6 +1857,105 @@ var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 var array<SMC_Event> SMC_sweeps = array.new<SMC_Event>()
 
+// [S106 Paso B §7 · ADR-016] MAX_ZONES_CHART: cap del set de zonas del CHART. Vive FUERA del CORE
+// byte-idéntico (que termina en L1850); el transporte f_computeTFState sigue a MAX_ZONES=50 -> cero riesgo
+// OOM server-side. 50 compartido por ~9 tipos de zona no alcanza para poblar la pierna arriba Y abajo, así
+// que el chart sube a 120. Fase B lo promueve al CORE (f_pushZone v2 parametrizada + Strategy + re-baseline SHA).
+int MAX_ZONES_CHART = 120
+// f_pushZoneV §7 [S106 Paso B]: wrapper Visual-only de f_pushZone con DESALOJO POR IMPORTANCIA (el CORE
+// f_pushZone desaloja por PURA antigüedad -> expulsaba OB/FVG no mitigados viejos de ambos lados de la
+// pierna; ese era el root-cause). Orden de expulsión: INVALID más viejo -> MITIGATED más viejo -> la de
+// menor strength entre ACTIVA/PARCIAL. GUARDA DE EXTREMOS: nunca expulsa la ACTIVA de mayor top ni la de
+// menor bottom (origen y techo de la pierna conservan siempre un representante por lado). Llave = z.state
+// (tier) + z.strength (ya materializado por el CORE), NUNCA score_render_v2 (caro, reservado a islast).
+// PURA (muta y devuelve size). while (no if) por robustez si algún día se empuja en lote.
+f_pushZoneV(array<SMC_Zone> a, SMC_Zone z, int maxN, float curPrice, float atr14, int biasDir) =>
+    z.strength := f_zoneStrength(z, curPrice, atr14, biasDir)
+    array.push(a, z)
+    while array.size(a) > maxN
+        int n = array.size(a)
+        // extremos ACTIVOS protegidos por lado (mayor top / menor bottom = techo y origen de la pierna)
+        int   idxMaxTop = -1
+        int   idxMinBot = -1
+        float maxTop = na
+        float minBot = na
+        for i = 0 to n - 1
+            SMC_Zone zi = array.get(a, i)
+            if zi.state == ZS_ACTIVE
+                if na(maxTop) or zi.top > maxTop
+                    maxTop := zi.top
+                    idxMaxTop := i
+                if na(minBot) or zi.bottom < minBot
+                    minBot := zi.bottom
+                    idxMinBot := i
+        int rm = -1
+        // 1) INVALID más viejo (índice bajo = insertado antes ~ más viejo)
+        for i = 0 to n - 1
+            if array.get(a, i).state == ZS_INVALID
+                rm := i
+                break
+        // 2) MITIGATED más viejo
+        if rm < 0
+            for i = 0 to n - 1
+                if array.get(a, i).state == ZS_MITIGATED
+                    rm := i
+                    break
+        // 3) ACTIVA/PARCIAL de menor strength, excluyendo los extremos protegidos
+        if rm < 0
+            float minS = na
+            for i = 0 to n - 1
+                SMC_Zone zi = array.get(a, i)
+                if (zi.state == ZS_ACTIVE or zi.state == ZS_PARTIAL) and i != idxMaxTop and i != idxMinBot
+                    if na(minS) or zi.strength < minS
+                        minS := zi.strength
+                        rm := i
+        // 4) fallback anti-loop: el más viejo (solo si todo está protegido)
+        array.remove(a, rm >= 0 ? rm : 0)
+    array.size(a)
+
+// [S106 Paso C §7 · ADR-016] MAX_POOLS_CHART: cap del set de pools del CHART (fuera del CORE; el transporte
+// f_computeTFState sigue a MAX_POOLS=50). Imanes de liquidez (BSL/SSL) a ambos lados de la pierna.
+int MAX_POOLS_CHART = 80
+// f_prunePoolsV §7 [S106 Paso C]: wrapper Visual-only de f_prunePools con desalojo por importancia. El CORE
+// f_prunePools borra el barrido más viejo, luego el más viejo a secas -> podía tirar imanes vivos lejanos.
+// Aquí: barrido más viejo -> vivo de menor strength -> guarda de extremos (nunca el pool vivo de mayor
+// level ni el de menor level = BSL/SSL más lejanos de la pierna). PURA. Fase B lo promueve al CORE.
+f_prunePoolsV(array<SMC_Pool> pools, int maxN) =>
+    while array.size(pools) > maxN
+        int n = array.size(pools)
+        // extremos VIVOS protegidos por lado (mayor level = BSL far / menor level = SSL far)
+        int   idxHi = -1
+        int   idxLo = -1
+        float hiL = na
+        float loL = na
+        for i = 0 to n - 1
+            SMC_Pool pi = array.get(pools, i)
+            if not pi.swept and not na(pi.level)
+                if na(hiL) or pi.level > hiL
+                    hiL := pi.level
+                    idxHi := i
+                if na(loL) or pi.level < loL
+                    loL := pi.level
+                    idxLo := i
+        int rm = -1
+        // 1) barrido más viejo
+        for i = 0 to n - 1
+            if array.get(pools, i).swept
+                rm := i
+                break
+        // 2) vivo de menor strength, excluyendo extremos protegidos
+        if rm < 0
+            float minS = na
+            for i = 0 to n - 1
+                SMC_Pool pi = array.get(pools, i)
+                if not pi.swept and i != idxHi and i != idxLo
+                    if na(minS) or pi.strength < minS
+                        minS := pi.strength
+                        rm := i
+        // 3) fallback anti-loop: el más viejo
+        array.remove(pools, rm >= 0 ? rm : 0)
+    pools
+
 // Snapshot consolidado del bias del TF propio [T04]. Declarado AQUI (antes de los swings) para que
 // su bias -var, persistente- alimente la fuerza de swings/eventos ya en esta vela (usa el valor
 // consolidado de la vela previa; se re-consolida mas abajo con f_updateTFState). Detalle §1.3/§1.4.
@@ -2098,14 +2197,14 @@ if barstate.isconfirmed
                 array.push(SMC_newBreakers, iz)
     if array.size(SMC_newBreakers) > 0
         for i = 0 to array.size(SMC_newBreakers) - 1
-            f_pushZone(SMC_zones, array.get(SMC_newBreakers, i), MAX_ZONES, close, atr14, chartState.bias)
+            f_pushZoneV(SMC_zones, array.get(SMC_newBreakers, i), MAX_ZONES_CHART, close, atr14, chartState.bias)
     if not na(evStructSwing)
         int obOrigin = evStructSwing.dir == DIR_BULL ? structSwing.highBarIdx : structSwing.lowBarIdx
         SMC_Zone obZone = f_detectOB(evStructSwing, obOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_OB)
         if not na(obZone)
             // Propulsion [T34 · §5.8]: ¿anidado en un OB vivo previo mismo-sentido? -> OB de continuacion.
             obZone.propulsion := f_isPropulsion(obZone, SMC_zones, i_propOverlap)
-            f_pushZone(SMC_zones, obZone, MAX_ZONES, close, atr14, chartState.bias)
+            f_pushZoneV(SMC_zones, obZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
     // --- Mitigation Block [§2.8 #24] ---
     // Ultima vela contraria antes de un impulso que rompe estructura INTERNA, SIN sweep previo de un pool
     // (si hubo sweep -> es contexto de breaker/OB, no mitigation block, §2.8). Zona = high/low de esa vela:
@@ -2117,13 +2216,13 @@ if barstate.isconfirmed
         if mbNoSweep
             SMC_Zone mbZone = f_detectOB(evStructInt, mbOrigin, obBufHigh, obBufLow, obBufIdx, obBufTime, obBufVol, i_obHighVolFactor, KIND_MITIGATION)
             if not na(mbZone)
-                f_pushZone(SMC_zones, mbZone, MAX_ZONES, close, atr14, chartState.bias)
+                f_pushZoneV(SMC_zones, mbZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
     // --- Vacuum Block [T33 · §5.7] ---
     // Gap grande de apertura (open vs close previo) -> zona-vacio iman de retorno. Se empuja DESPUES de la
     // mitigacion comun (como OB/FVG) -> no se mitiga en su barra; en FX solo aparece en frontera (fin de semana).
     SMC_Zone vacZone = f_detectVacuumBlock(open, close[1], atr14, i_vacuumFactor, bar_index, time)
     if not na(vacZone)
-        f_pushZone(SMC_zones, vacZone, MAX_ZONES, close, atr14, chartState.bias)
+        f_pushZoneV(SMC_zones, vacZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
     // --- Fair Value Gaps [T06] ---
     // FVG de 3 velas sobre el TF propio (sin request.security: el MTF es T13). Se
     // confirma al cierre de la 3.a vela (este barstate.isconfirmed); offsets fijos
@@ -2154,9 +2253,9 @@ if barstate.isconfirmed
         // BPR [T28 · §5.3]: ¿este FVG nuevo se solapa con un FVG vivo de dir OPUESTO reciente? -> zona de
         // precio balanceado. Se busca ANTES de empujar el FVG (compara contra los previos en SMC_zones).
         SMC_Zone bprZone = f_detectBPR(fvgZone, SMC_zones, close, bar_index, i_bprWindow, i_bprMinOverlap * atr14)
-        f_pushZone(SMC_zones, fvgZone, MAX_ZONES, close, atr14, chartState.bias)
+        f_pushZoneV(SMC_zones, fvgZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
         if not na(bprZone)
-            f_pushZone(SMC_zones, bprZone, MAX_ZONES, close, atr14, chartState.bias)
+            f_pushZoneV(SMC_zones, bprZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
     // --- OTE / Golden Pocket [T22 · §2.5] ---
     // Sobre un BOS confirmado: expira las zonas GP/OTE de la pierna anterior (la regla redibuja con cada
     // impulso) y crea las de la pierna nueva (rango estructural [lowLevel, highLevel]). El ciclo de vida
@@ -2171,9 +2270,9 @@ if barstate.isconfirmed
         int oteOrigin = evStructSwing.dir == DIR_BULL ? structSwing.lowBarIdx : structSwing.highBarIdx
         [gpZone, oteZone] = f_detectOTE(evStructSwing, structSwing.highLevel, structSwing.lowLevel, oteOrigin, time, i_oteR1, i_oteR2, i_oteR3)
         if not na(gpZone)
-            f_pushZone(SMC_zones, gpZone, MAX_ZONES, close, atr14, chartState.bias)
+            f_pushZoneV(SMC_zones, gpZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
         if not na(oteZone)
-            f_pushZone(SMC_zones, oteZone, MAX_ZONES, close, atr14, chartState.bias)
+            f_pushZoneV(SMC_zones, oteZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
 
 // --- MSS — Market Structure Shift [T12] ---
 // Califica el CHoCH swing de ESTA barra como MSS si su vela de ruptura (la barra
@@ -2233,7 +2332,7 @@ if barstate.isconfirmed
             f_updateZoneMitigation(array.get(SMC_vi, i), i_obMitClose)
     SMC_Zone viZone = f_detectVolumeImbalance(open, high, low, close[1], high[1], low[1], atr14, i_viThreshold, bar_index, time)
     if not na(viZone)
-        f_pushZone(SMC_vi, viZone, MAX_ZONES, close, atr14, chartState.bias)
+        f_pushZoneV(SMC_vi, viZone, MAX_ZONES_CHART, close, atr14, chartState.bias)
 
 // --- Gaps de apertura NWOG/NDOG/NYMO + Breakaway [§5.10] · T30 ---
 // Fronteras con ta.change CADA barra (fuera del if): semana / dia broker / medianoche NY. Niveles ancla
@@ -2294,7 +2393,7 @@ if barstate.isconfirmed
     currentIpr := f_detectIPR(SMC_zones, bar_index, time, i_iprWindow, i_iprMinGaps)
     int curIprDir = na(currentIpr) ? 0 : currentIpr.dir
     if curIprDir != 0 and curIprDir != lastIprDir
-        f_pushZone(SMC_ipr, currentIpr, MAX_ZONES, close, atr14, chartState.bias)
+        f_pushZoneV(SMC_ipr, currentIpr, MAX_ZONES_CHART, close, atr14, chartState.bias)
     lastIprDir := curIprDir
 
 // --- Inside Day [§5.12] · T37 ---
@@ -2403,7 +2502,7 @@ if barstate.isconfirmed
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
         evSweepAlert := evSweep
         lastSweepBar := bar_index
-    f_prunePools(SMC_pools, MAX_POOLS)
+    f_prunePoolsV(SMC_pools, MAX_POOLS_CHART)                                                               // [S106 Paso C] chart: cap 80 + desalojo por importancia
     // Fuerza de pools: son DINAMICOS (touches/swept/cercania cambian por f_upsertPool) -> se refresca
     // al cierre en vez de fijarse en un unico sitio de creacion [Eje2 · ADR-014 · §5.5]. Guard de tamano
     // por la semantica de 'for 0 to size-1' de Pine (con size=0 iteraria a -1).
@@ -2752,6 +2851,11 @@ int densMin = i_densidad == "Operación" ? 2 : i_densidad == "Estudio" ? 1 : 0
 // 1-3 del rango vigente (MINIMO doctrinal "3 por lado"); 4/5 piden el 1º/2º rango previo (bandas 4/5,
 // [impl B-4]). Consumido por el bandeo de la seleccion (A-4/B-7). Congelado {3..5} (ADR-002).
 i_profundidad = input.int(3, "Profundidad de proyección (bandas)", minval = 3, maxval = 5, group = GRP_DENS, tooltip = "3 = rango vigente (bandas 1-3). 4/5 = suma rangos previos (más atrás en el tiempo).")
+// i_kLeg §7 [S106 Paso A]: acota el extremo de pierna. El candidato bruto (más lejano entre rango
+// vigente / swing dominante / HTF) se recorta a px ± K×(rango vigente); luego se ANCLA al pool vivo
+// fuerte más lejano DENTRO del clamp. Mata outliers (HH histórico ~1.51 sin significado operativo).
+// Conjetura K=3.0 (Fable) — calibrar EURUSD D1/H1 y XAUJPY antes de congelar (ADR-016 riesgo #4).
+float i_kLeg = input.float(3.0, "K pierna (clamp extremo)", minval = 1.0, maxval = 6.0, step = 0.5, group = GRP_DENS, tooltip = "Extremo de pierna acotado a px ± K×rango vigente y anclado al pool fuerte más lejano dentro del clamp. Mata outliers.")
 // --- Matriz modo×familia §8.2 (curacion por familia, ENCIMA del filtro strength) ---
 // modeIdx 0<1<2: mayor = mas laxo (habilita mas familias). Operacion = solo familias de DECISION
 // (OB/Breaker/FVG/IFVG/OTE + anclas); Estudio suma refinamientos (BPR/Mitigation/Vacuum); Todo suma
@@ -2793,17 +2897,44 @@ if barstate.isconfirmed and not na(chartState.pdHigh) and not na(chartState.pdLo
             pdPrev1Lo := pdLastLo
         pdLastHi := chartState.pdHigh
         pdLastLo := chartState.pdLow
-// f_depthBand §7.0.3 [A-1/A-7]: banda de profundidad {1..5} del retroceso de un nivel. Bandas 1-3 = dentro
-// del dealing range vigente (chartState.pdHigh/pdLow, §2.3), desde el precio hacia el extremo de su lado
-// (cortes CONGELADOS 0.33/0.66/1.0). Bandas 4/5 = fuera del rango vigente, en el 1º/2º rango PREVIO
-// archivado (solo con i_profundidad>=4/5). Devuelve 0 = fuera de todo alcance. Lectura PURA (no dibuja).
+// §7 [S106 Paso A] Extremo de pierna precomputado 1×/vela (islast) y consumido por f_depthBand — antes
+// f_depthBand recomputaba structMajor/d1State/h1State en CADA llamada (caro: se invoca por zona candidata).
+// legExtHi/Lo = extremo YA acotado (clamp K_LEG) y anclado a liquidez fuerte (ver f_updateLegExtremes).
+var float legExtHi = na
+var float legExtLo = na
+// f_depthBand §7.0.3 [A-1/A-7/S106-A]: banda de profundidad {1..5} del retroceso de un nivel. Bandas 1-3 =
+// entre el precio y el extremo de pierna de su lado (legExtHi/Lo precomputado; cortes CONGELADOS
+// 0.33/0.66/1.0). Bandas 4/5 = fuera, en el 1º/2º rango PREVIO archivado (solo i_profundidad>=4/5).
+// Devuelve 0 = fuera de todo alcance. Lectura PURA (no dibuja, no recomputa el extremo).
 f_depthBand(float level, float px) =>
+    // extremo precomputado; fallback al rango vigente si aún no se pobló (barras tempranas / sin islast).
+    float hi = na(legExtHi) ? chartState.pdHigh : legExtHi
+    float lo = na(legExtLo) ? chartState.pdLow  : legExtLo
+    int band = 0
+    if not na(hi) and not na(lo) and hi > lo
+        if level >= px and hi > px
+            float r = (level - px) / (hi - px)
+            band := r <= 0.33 ? 1 : r <= 0.66 ? 2 : r <= 1.0 ? 3 : 0
+        else if level < px and px > lo
+            float r = (px - level) / (px - lo)
+            band := r <= 0.33 ? 1 : r <= 0.66 ? 2 : r <= 1.0 ? 3 : 0
+    if band == 0 and i_profundidad >= 4 and not na(pdPrev1Hi) and level <= pdPrev1Hi and level >= pdPrev1Lo
+        band := 4
+    if band == 0 and i_profundidad >= 5 and not na(pdPrev2Hi) and level <= pdPrev2Hi and level >= pdPrev2Lo
+        band := 5
+    band
+
+// f_updateLegExtremes §7 [S106 Paso A]: puebla legExtHi/Lo (globales) 1×/vela en islast. Tres fases:
+//  (1) BRUTO: el más lejano por lado entre {rango vigente chartState, swing dominante structMajor, HTF
+//      heredado d1State (en H1/M5) y h1State (en M5)} — misma lógica que S105 (poblaba la pierna), pero
+//      ahora acotada.
+//  (2) CLAMP: recorta el bruto a px ± i_kLeg×(rango vigente) -> mata el HH histórico sin significado.
+//  (3) ANCLA A LIQUIDEZ: si hay un pool VIVO fuerte (touches>=2 o strength>=0.5) más lejano por lado
+//      DENTRO del clamp, el extremo se fija en ese nivel (la pierna termina en liquidez real, no en aire).
+// PURA: devuelve [hi, lo]; el call-site las escribe en legExtHi/Lo. Reemplaza el recompute por-llamada.
+f_computeLegExtremes(float px) =>
     float hi = chartState.pdHigh
     float lo = chartState.pdLow
-    // §7 [S105 · visión swing-ideal]: extremo de pierna = el MÁS LEJANO entre {rango vigente,
-    // swing dominante propio (structMajor), rango HTF heredado (D1 en H1/M5, H1 en M5)}. Así las
-    // bandas 1-3 abarcan la pierna COMPLETA hasta el origen del swing (≈ Premium D1 / HH dominante),
-    // no solo el rango estrecho del TF -> los conceptos de arriba de la pierna dejan de caer en banda 0.
     if not na(structMajor.highLevel) and (na(hi) or structMajor.highLevel > hi)
         hi := structMajor.highLevel
     if not na(structMajor.lowLevel) and (na(lo) or structMajor.lowLevel < lo)
@@ -2818,19 +2949,31 @@ f_depthBand(float level, float px) =>
             hi := h1State.pdHigh
         if not na(h1State.pdLow) and (na(lo) or h1State.pdLow < lo)
             lo := h1State.pdLow
-    int band = 0
-    if not na(hi) and not na(lo) and hi > lo
-        if level >= px and hi > px
-            float r = (level - px) / (hi - px)
-            band := r <= 0.33 ? 1 : r <= 0.66 ? 2 : r <= 1.0 ? 3 : 0
-        else if level < px and px > lo
-            float r = (px - level) / (px - lo)
-            band := r <= 0.33 ? 1 : r <= 0.66 ? 2 : r <= 1.0 ? 3 : 0
-    if band == 0 and i_profundidad >= 4 and not na(pdPrev1Hi) and level <= pdPrev1Hi and level >= pdPrev1Lo
-        band := 4
-    if band == 0 and i_profundidad >= 5 and not na(pdPrev2Hi) and level <= pdPrev2Hi and level >= pdPrev2Lo
-        band := 5
-    band
+    // (2) CLAMP al rango vigente escalado por i_kLeg
+    float rng = not na(chartState.pdHigh) and not na(chartState.pdLow) ? chartState.pdHigh - chartState.pdLow : na
+    if not na(rng) and rng > 0
+        float capHi = px + i_kLeg * rng
+        float capLo = px - i_kLeg * rng
+        if not na(hi) and hi > capHi
+            hi := capHi
+        if not na(lo) and lo < capLo
+            lo := capLo
+    // (3) ANCLA A LIQUIDEZ: pool vivo fuerte más lejano por lado dentro del clamp
+    if array.size(SMC_pools) > 0
+        float anchHi = na
+        float anchLo = na
+        for i = 0 to array.size(SMC_pools) - 1
+            SMC_Pool p = array.get(SMC_pools, i)
+            if not p.swept and not na(p.level) and (p.touches >= 2 or p.strength >= 0.5)
+                if p.level > px and (na(hi) or p.level <= hi) and (na(anchHi) or p.level > anchHi)
+                    anchHi := p.level
+                if p.level < px and (na(lo) or p.level >= lo) and (na(anchLo) or p.level < anchLo)
+                    anchLo := p.level
+        if not na(anchHi)
+            hi := anchHi
+        if not na(anchLo)
+            lo := anchLo
+    [hi, lo]
 
 // --- §7.0/§7.1 · Primitivos de proyeccion + llave de render v2 (candidatos CONGELADOS ADR-002) ---
 // Pesos de posRole (wPos), factor de confluencia (kConf) y tolerancias. Fase A: viven en Visual leyendo
@@ -2928,10 +3071,68 @@ f_renderScoreV2(float strength, int posRole, int confDegree) =>
 // (banda-1) => <= 39 (40 escalares int por indice + 40 float por score, SET/GET indexado, cero array.push
 // => RE10045-safe). Se rellena en la MISMA pasada islast de las anclas (§2.3). Los drawers comparan su i
 // contra la celda via f_isBandPick -> dibujan aunque f_densOK diga no (un representante por banda por lado).
-var array<int>   bandPickIdx   = array.new<int>(40, -1)
-var array<float> bandPickScore = array.new<float>(40, -1.0)
-// f_isBandPick: recomputa la celda de una instancia (top/bot/barIdx) para el concepto dado y comprueba si
-// ES el pick de su banda (bandPickIdx[cell]==i). Bandas 1..i_profundidad (A-4: 1-3; A-7 habilita 4/5).
+// [S106 Paso D] top-3 por celda + clustering. 40 celdas × 3 slots = 120 escalares fijos (array.new fijo,
+// solo set/get -> RE10045-safe, NUNCA push que crece). Por celda, slots ordenados desc por v2 (slot0 = mejor,
+// slot2 = más débil -> el early-out lee slot2). bp3Lvl/Bar guardan nivel y barIdx para el clustering y el
+// tie-break. Poblar la pierna = varios representantes por banda (no 1), colapsando los casi-iguales.
+int SLOTS3 = 3
+var array<int>   bp3Idx   = array.new<int>(120, -1)
+var array<float> bp3Score = array.new<float>(120, -1.0)
+var array<float> bp3Lvl   = array.new<float>(120, na)
+var array<int>   bp3Bar   = array.new<int>(120, na)
+// f_bp3Insert: inserta un candidato en las 3 ranuras de su celda. (1) CLUSTERING: si un slot ocupado está a
+// <= tol en nivel, se queda el de mayor v2 (a igualdad, menor barIdx = representante del impulso). (2) si no
+// hay cluster, entra en el slot más débil si supera su v2. (3) reordena la celda desc por v2. Muta los
+// arrays globales por referencia (patrón f_pushZone). tol = CONF_TOL_ATR×atr (= tolConf/labelClusterTol).
+f_bp3Insert(array<int> aIdx, array<float> aScore, array<float> aLvl, array<int> aBar, int cell, int cand, float v2, float lvl, int barIdx, float tol) =>
+    int base = cell * 3
+    int clus = -1
+    for s = 0 to 2
+        int gi = base + s
+        if array.get(aIdx, gi) >= 0 and not na(array.get(aLvl, gi)) and math.abs(lvl - array.get(aLvl, gi)) <= tol
+            clus := gi
+    if clus >= 0
+        float cs = array.get(aScore, clus)
+        int   cb = array.get(aBar, clus)
+        bool better = v2 > cs or (v2 == cs and not na(barIdx) and (na(cb) or barIdx < cb))
+        if better
+            array.set(aIdx, clus, cand)
+            array.set(aScore, clus, v2)
+            array.set(aLvl, clus, lvl)
+            array.set(aBar, clus, barIdx)
+    else
+        int weak = base
+        float weakV = array.get(aScore, base)
+        for s = 1 to 2
+            float sv = array.get(aScore, base + s)
+            if sv < weakV
+                weakV := sv
+                weak := base + s
+        if v2 > weakV
+            array.set(aIdx, weak, cand)
+            array.set(aScore, weak, v2)
+            array.set(aLvl, weak, lvl)
+            array.set(aBar, weak, barIdx)
+    for a = 0 to 1
+        for b = a + 1 to 2
+            int ga = base + a
+            int gb = base + b
+            if array.get(aScore, gb) > array.get(aScore, ga)
+                int   ti = array.get(aIdx, ga)
+                float ts = array.get(aScore, ga)
+                float tl = array.get(aLvl, ga)
+                int   tb = array.get(aBar, ga)
+                array.set(aIdx, ga, array.get(aIdx, gb))
+                array.set(aScore, ga, array.get(aScore, gb))
+                array.set(aLvl, ga, array.get(aLvl, gb))
+                array.set(aBar, ga, array.get(aBar, gb))
+                array.set(aIdx, gb, ti)
+                array.set(aScore, gb, ts)
+                array.set(aLvl, gb, tl)
+                array.set(aBar, gb, tb)
+    array.size(aIdx)
+// f_isBandPick: ¿es la instancia i uno de los ≤3 picks de su celda (concepto×lado×banda)? Bandas
+// 1..i_profundidad. Devuelve bool (membership entre los 3 slots) -> los drawers lo usan igual que antes.
 f_isBandPick(int i, int concept, float top, float bottom) =>
     bool pick = false
     float aPx = close
@@ -2942,8 +3143,10 @@ f_isBandPick(int i, int concept, float top, float bottom) =>
         float lvl = above ? bottom : top
         int band = f_depthBand(lvl, aPx)
         if band >= 1 and band <= i_profundidad
-            int cell = concept * 10 + side * 5 + (band - 1)
-            pick := array.get(bandPickIdx, cell) == i
+            int base = (concept * 10 + side * 5 + (band - 1)) * 3
+            for s = 0 to 2
+                if array.get(bp3Idx, base + s) == i
+                    pick := true
     pick
 
 int anchorHiIdx = -1
@@ -2951,10 +3154,16 @@ int anchorLoIdx = -1
 if barstate.islast and array.size(SMC_zones) > 0
     float aPx  = close
     float aAtr = chartState.atr14
-    // reset de las celdas de banda (nueva pasada islast)
-    for c = 0 to 39
-        array.set(bandPickIdx, c, -1)
-        array.set(bandPickScore, c, -1.0)
+    // [S106 Paso A] precomputa el extremo de pierna acotado 1×/vela -> lo consume f_depthBand.
+    [lhX, llX] = f_computeLegExtremes(aPx)
+    legExtHi := lhX
+    legExtLo := llX
+    // reset de las 120 ranuras de banda (nueva pasada islast)
+    for c = 0 to 119
+        array.set(bp3Idx, c, -1)
+        array.set(bp3Score, c, -1.0)
+        array.set(bp3Lvl, c, na)
+        array.set(bp3Bar, c, na)
     if not na(aAtr) and aAtr > 0
         float hiScore = -1.0
         float loScore = -1.0
@@ -2979,13 +3188,15 @@ if barstate.islast and array.size(SMC_zones) > 0
                     float lvl   = above ? z.bottom : z.top
                     int band    = f_depthBand(lvl, aPx)
                     if band >= 1 and band <= i_profundidad
-                        int posR = f_posRole(z.top, z.bottom, z.barIdx)
-                        int cfg  = f_confDegree(lvl)
-                        float v2 = f_renderScoreV2(z.strength, posR, cfg)
                         int cell = concept * 10 + side * 5 + (band - 1)
-                        if v2 >= array.get(bandPickScore, cell)                                            // >= : a igualdad gana el mas fresco (mayor i)
-                            array.set(bandPickScore, cell, v2)
-                            array.set(bandPickIdx, cell, i)
+                        // early-out §D: v2 máximo posible (posRole ORIGEN + confDegree 3) = strength×1.0×1.75;
+                        // si no supera el slot más débil de la celda, no puede entrar -> evita f_posRole/f_confDegree (caros).
+                        float v2max = z.strength * POS_W_ORIGIN * (1.0 + CONF_K * 3)
+                        if v2max > array.get(bp3Score, cell * 3 + 2)
+                            int posR = f_posRole(z.top, z.bottom, z.barIdx)
+                            int cfg  = f_confDegree(lvl)
+                            float v2 = f_renderScoreV2(z.strength, posR, cfg)
+                            f_bp3Insert(bp3Idx, bp3Score, bp3Lvl, bp3Bar, cell, i, v2, lvl, z.barIdx, CONF_TOL_ATR * aAtr)
         // IDM (concepto 3, §7.2.25): top por lado en bandas 1-2 (el que custodia el extremo operativo).
         // Sube de Estudio+ a Operacion por band-pick. Indice apunta a SMC_idm (espacio de celda propio).
         if array.size(SMC_idm) > 0
@@ -2998,13 +3209,13 @@ if barstate.islast and array.size(SMC_zones) > 0
                         int sideI = aboveI ? 0 : 1
                         int bandI = f_depthBand(im.price, aPx)
                         if bandI >= 1 and bandI <= 2                                                       // IDM = escenario cercano (bandas 1-2)
-                            int posRI = f_posRole(im.price, im.price, im.barIdx)
-                            int cfgI  = f_confDegree(im.price)
-                            float v2I = f_renderScoreV2(im.strength, posRI, cfgI)
                             int cellI = 3 * 10 + sideI * 5 + (bandI - 1)
-                            if v2I >= array.get(bandPickScore, cellI)
-                                array.set(bandPickScore, cellI, v2I)
-                                array.set(bandPickIdx, cellI, i)
+                            float v2Imax = im.strength * POS_W_ORIGIN * (1.0 + CONF_K * 3)
+                            if v2Imax > array.get(bp3Score, cellI * 3 + 2)
+                                int posRI = f_posRole(im.price, im.price, im.barIdx)
+                                int cfgI  = f_confDegree(im.price)
+                                float v2I = f_renderScoreV2(im.strength, posRI, cfgI)
+                                f_bp3Insert(bp3Idx, bp3Score, bp3Lvl, bp3Bar, cellI, i, v2I, im.price, im.barIdx, CONF_TOL_ATR * aAtr)
 
 // === DIBUJO ===
 // f_draw<Concepto>() por concepto, cada uno con su cuota de objetos [PINE-PLAN §5].
@@ -3438,6 +3649,17 @@ if i_showPools and barstate.islast
     int poolBSLIdx = -1
     int poolSSLIdx = -1
     int poolDrawIdx = -1
+    // [S106 Paso C · render LP-Pro] top-2 pools VIVOS de mayor strength por lado (arriba/abajo del precio).
+    // Además del "objetivo más cercano" clásico, se muestran los 2 imanes más fuertes de cada lado (línea +
+    // magnitud=touches + estado swept), estilo Liquidity-Pools-Pro. Arrays fijos de 2 (RE10045-safe).
+    int upS1 = -1
+    int upS2 = -1
+    int loS1 = -1
+    int loS2 = -1
+    float upS1v = -1.0
+    float upS2v = -1.0
+    float loS1v = -1.0
+    float loS2v = -1.0
     if array.size(SMC_pools) > 0 and not f_famOK(FAM_EST)
         float bslD = 1e9
         float sslD = 1e9
@@ -3457,12 +3679,32 @@ if i_showPools and barstate.islast
                 if aligned and distp > drawFar
                     drawFar := distp
                     poolDrawIdx := i
+                // top-2 por strength por lado (LP-Pro)
+                if pp.level >= close
+                    if pp.strength > upS1v
+                        upS2 := upS1
+                        upS2v := upS1v
+                        upS1 := i
+                        upS1v := pp.strength
+                    else if pp.strength > upS2v
+                        upS2 := i
+                        upS2v := pp.strength
+                else
+                    if pp.strength > loS1v
+                        loS2 := loS1
+                        loS2v := loS1v
+                        loS1 := i
+                        loS1v := pp.strength
+                    else if pp.strength > loS2v
+                        loS2 := i
+                        loS2v := pp.strength
     if array.size(SMC_pools) > 0
         for i = 0 to array.size(SMC_pools) - 1
             SMC_Pool p = array.get(SMC_pools, i)
             bool eligible   = p.touches >= i_minTouches and (not p.swept or (i_showSwept and f_famOK(FAM_EST)))   // pools barridos = Estudio+ (§F8)
             bool guardian   = not p.swept and (i == poolDrawIdx or f_confDegree(p.level) >= 2)                    // §7.1 inmune al recorte
-            bool isObjetivo = f_famOK(FAM_EST) or i == poolBSLIdx or i == poolSSLIdx or guardian
+            bool strongLP   = not p.swept and (i == upS1 or i == upS2 or i == loS1 or i == loS2)                  // [S106 Paso C] top-2 fuertes/lado (LP-Pro)
+            bool isObjetivo = f_famOK(FAM_EST) or i == poolBSLIdx or i == poolSSLIdx or guardian or strongLP
             if eligible and not p.swept and not isObjetivo
                 hidPools += 1
             if eligible and isObjetivo
