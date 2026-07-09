@@ -1937,8 +1937,37 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
 [ctxD1_pdH, ctxD1_pdL, ctxD1_atr, ctxD1_k0, ctxD1_t0, ctxD1_b0, ctxD1_d0, ctxD1_ta0, ctxD1_tb0, ctxD1_k1, ctxD1_t1, ctxD1_b1, ctxD1_d1, ctxD1_ta1, ctxD1_tb1, ctxD1_k2, ctxD1_t2, ctxD1_b2, ctxD1_d2, ctxD1_ta2, ctxD1_tb2, ctxD1_k3, ctxD1_t3, ctxD1_b3, ctxD1_d3, ctxD1_ta3, ctxD1_tb3, ctxD1_k4, ctxD1_t4, ctxD1_b4, ctxD1_d4, ctxD1_ta4, ctxD1_tb4, ctxD1_k5, ctxD1_t5, ctxD1_b5, ctxD1_d5, ctxD1_ta5, ctxD1_tb5, ctxD1_k6, ctxD1_t6, ctxD1_b6, ctxD1_d6, ctxD1_ta6, ctxD1_tb6, ctxD1_k7, ctxD1_t7, ctxD1_b7, ctxD1_d7, ctxD1_ta7, ctxD1_tb7] = request.security(syminfo.tickerid, "D", f_tfExtremes(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_kExt, i_extMinStrength), lookahead = barmerge.lookahead_off)
 [ctxH1_pdH, ctxH1_pdL, ctxH1_atr, ctxH1_k0, ctxH1_t0, ctxH1_b0, ctxH1_d0, ctxH1_ta0, ctxH1_tb0, ctxH1_k1, ctxH1_t1, ctxH1_b1, ctxH1_d1, ctxH1_ta1, ctxH1_tb1, ctxH1_k2, ctxH1_t2, ctxH1_b2, ctxH1_d2, ctxH1_ta2, ctxH1_tb2, ctxH1_k3, ctxH1_t3, ctxH1_b3, ctxH1_d3, ctxH1_ta3, ctxH1_tb3, ctxH1_k4, ctxH1_t4, ctxH1_b4, ctxH1_d4, ctxH1_ta4, ctxH1_tb4, ctxH1_k5, ctxH1_t5, ctxH1_b5, ctxH1_d5, ctxH1_ta5, ctxH1_tb5, ctxH1_k6, ctxH1_t6, ctxH1_b6, ctxH1_d6, ctxH1_ta6, ctxH1_tb6, ctxH1_k7, ctxH1_t7, ctxH1_b7, ctxH1_d7, ctxH1_ta7, ctxH1_tb7] = request.security(syminfo.tickerid, "60", f_tfExtremes(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_kExt, i_extMinStrength), lookahead = barmerge.lookahead_off)
 
-// [OPUS · Paso C] Salida de verificacion TEMPORAL (se reemplaza por el dibujo real en Paso E).
+// === REVELADO AL ROMPER ===   [Paso D · F1-CTX-02]
+// DORMANT <=> REVEALED por HTF y por lado, con histeresis (sin ella, un close pegado a la frontera
+// hace parpadear el contexto en cada vela). SOLO close CONFIRMADO (regla dura #1, anti-repaint).
+// La frontera del rango HTF = su Premium/Discount vigente (pdHigh/pdLow). Al romperla, se activan
+// los extremos de ese lado; se re-ocultan solo cuando el precio vuelve i_revealHyst*ATR dentro.
+var bool revD1Up = false
+var bool revD1Dn = false
+var bool revH1Up = false
+var bool revH1Dn = false
+if barstate.isconfirmed and not na(ctxD1_pdH) and not na(ctxD1_pdL) and not na(ctxD1_atr)
+    float hystD1 = i_revealHyst * ctxD1_atr
+    revD1Up := revD1Up ? close > ctxD1_pdH - hystD1 : close > ctxD1_pdH
+    revD1Dn := revD1Dn ? close < ctxD1_pdL + hystD1 : close < ctxD1_pdL
+if barstate.isconfirmed and not na(ctxH1_pdH) and not na(ctxH1_pdL) and not na(ctxH1_atr)
+    float hystH1 = i_revealHyst * ctxH1_atr
+    revH1Up := revH1Up ? close > ctxH1_pdH - hystH1 : close > ctxH1_pdH
+    revH1Dn := revH1Dn ? close < ctxH1_pdL + hystH1 : close < ctxH1_pdL
+// Cascada por chart-TF (§Paso E): el contexto de un HTF solo aplica si el chart esta POR DEBAJO de el
+// (en su propio TF es nativo, no contexto). chart D1 => sin contexto; chart H1 => solo D1; chart M5 => D1+H1.
+int  chartSec    = timeframe.in_seconds(timeframe.period)
+bool ctxD1Applies = chartSec < timeframe.in_seconds("1D")
+bool ctxH1Applies = chartSec < timeframe.in_seconds("60")
+bool showD1Up = i_extOn and ctxD1Applies and (i_ctxAlways or revD1Up)
+bool showD1Dn = i_extOn and ctxD1Applies and (i_ctxAlways or revD1Dn)
+bool showH1Up = i_extOn and ctxH1Applies and (i_ctxAlways or revH1Up)
+bool showH1Dn = i_extOn and ctxH1Applies and (i_ctxAlways or revH1Dn)
+
+// [OPUS · Paso C/D] Salida de verificacion TEMPORAL (se reemplaza por el dibujo real en Paso E).
 plot(ctxD1_pdH, "ctx D1 pdHigh", color = color.new(color.blue, 70))
 plot(ctxH1_pdH, "ctx H1 pdHigh", color = color.new(color.orange, 70))
 plotchar(ctxD1_k0 + ctxD1_k6 + ctxH1_k0 + ctxH1_k6, "chk_kind", "", location.top)
 plotchar(ctxD1_t0 + ctxH1_t0 + ctxD1_atr + ctxH1_atr, "chk_f", "", location.top)
+// Estado del revelado (int para lectura via data window): bit0=D1Up bit1=D1Dn bit2=H1Up bit3=H1Dn
+plot((showD1Up ? 1 : 0) + (showD1Dn ? 2 : 0) + (showH1Up ? 4 : 0) + (showH1Dn ? 8 : 0), "reveal_bits", display = display.data_window)

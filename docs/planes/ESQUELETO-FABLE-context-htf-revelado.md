@@ -359,6 +359,6 @@ Ritual completo (§0.2). Chart OANDA:EURUSD. Matriz mínima:
 | A1 (opc) | ☐ | tokens_HEAD= · headroom= | — |
 | B | ✅ | S110: ADR-017 escrito; check-core-sync.ps1 +`$ContextPath` opcional (verde con 2 archivos SHA `5510361166844bd5`; probado 3-vías OK/DIVERGENT con Context sintético); notas CLAUDE.md (Arquitectura + regla dura #2) y PINE-PLAN.md; slot SMC_Context existe (c098abf3, S109) | (commit S110) |
 | C | ✅ | S110: `pine/SMC-Context.pine` generado (CORE verbatim L143-1842 + `f_tfExtremes`/`f_farthestZone`/`f_farthestPool`/`f_farthestEvent`). check-core-sync ×3 verde (SHA `5510361166844bd5`). pine_check 0/0. **Apply VIVO** (slot SMC_Context id 9rxgph) 22s sin CE10117/OOM, JUNTO al Visual (MQVk7q)+LuxAlgo. Emite real: ctxD1_pdH=1.20831, ctxH1_pdH=1.14730, chk_kind=89 (slots pobladas). Debug plots temporales (se reemplazan en E) | (commit S110) |
-| D | ☐ | | |
+| D | ✅ | S110: sección REVELADO añadida (revD1Up/Dn + revH1Up/Dn con histéresis, solo `barstate.isconfirmed`; cascada por chart-TF: chart D1=sin ctx, H1=solo D1, M5=D1+H1; flags show*). core-sync ×3 OK, pine_check 0/0, apply VIVO 22s sin CE10117/OOM. `reveal_bits=0`=DORMANT correcto (precio dentro rango D1; H1 no aplica en chart H1). Validación REVEALED-al-romper → Paso F | (commit S110) |
 | E | ☐ | | |
 | F | ☐ | matriz 1-7 | |
