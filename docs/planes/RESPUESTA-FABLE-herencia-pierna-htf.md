@@ -3,6 +3,7 @@
 > Estrategia 2.0 · Fase 1 (Pine Visual) · S109 (2026-07-08) · autor: **Fable** (Claude Fable 5)
 > Responde a: [BRIEF-FABLE-herencia-pierna-htf-revelado.md](BRIEF-FABLE-herencia-pierna-htf-revelado.md)
 > Antecedentes: [RESPUESTA-FABLE-retencion-zonas.md](RESPUESTA-FABLE-retencion-zonas.md) · ADR-016 · CLAUDE.md.
+> **Esqueleto ejecutable (para Opus, en frío): [ESQUELETO-FABLE-context-htf-revelado.md](ESQUELETO-FABLE-context-htf-revelado.md).**
 
 ## 0. Veredicto ejecutivo
 
