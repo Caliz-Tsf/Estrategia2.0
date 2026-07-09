@@ -24,12 +24,13 @@ Bot de trading **SMC/ICT** para Forex. Primero un sistema completo y validado en
 - `pine/SMC-Visual.pine` (`indicator`) — dibujo + panel de estado + alertas.
 - `pine/SMC-Strategy.pine` (`strategy`) — scoring direccional + entradas/SL/TP → **Strategy Tester** da el backtesting masivo.
 - **Fase 4:** el EA MQL5 traduce el core función a función (módulos `SMC_*.mqh` + `EA_SMC_ICT.mq5`), con golden tests de paridad construidos desde TradingView.
+- **Consumidor auxiliar opcional** `[ADR-017]`: `pine/SMC-Context.pine` (`indicator`, solo dibuja) — hereda extremos HTF y los revela al romper la frontera. Mismo LIBRARY CORE byte-idéntico (check-core-sync ×3) + 2ª `request.security` con `f_tfExtremes` **fuera** del CORE. No toca Visual/Strategy/SHA. Reversible.
 
 Detalle: [docs/workplan/PINE-PLAN.md](docs/workplan/PINE-PLAN.md) · [docs/workplan/MQL5-PLAN.md](docs/workplan/MQL5-PLAN.md).
 
 ## Reglas duras (innegociables)
 1. **Anti-repaint.** `[D-PINE-03]` Eventos solo en `barstate.isconfirmed`; `request.security(..., lookahead = barmerge.lookahead_off)` SIEMPRE. Nada del futuro.
-2. **Core sincronizado.** La sección LIBRARY CORE de Visual y Strategy es **byte-idéntica**. Tras tocarla → `scripts/check-core-sync.ps1`.
+2. **Core sincronizado.** La sección LIBRARY CORE de Visual, Strategy y —si existe— `SMC-Context.pine` (ADR-017) es **byte-idéntica**. Tras tocarla → `scripts/check-core-sync.ps1` (verifica los 3).
 3. **Umbrales relativos a ATR**, nunca pips fijos. Cada concepto declara qué ATR usa.
 4. **Símbolo-agnóstico.** `[ADR-001]` Nada se hardcodea a EURUSD. Lo por-símbolo va como input/perfil (pip, spread, sessionProfile, pesos). Validación primero en EURUSD (gate Fase 3); cada par nuevo repite Fase 3 abreviada (Fase 5).
 5. **R:R mínimo 1:3** sin excepción. Si no es calculable → no hay señal (no hay "casi señal").

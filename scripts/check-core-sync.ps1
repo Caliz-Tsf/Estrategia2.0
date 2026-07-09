@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Verifica que la seccion "// === LIBRARY CORE ===" sea BYTE-IDENTICA en
-    SMC-Visual.pine y SMC-Strategy.pine (regla dura #2 del proyecto).
+    SMC-Visual.pine, SMC-Strategy.pine y (si existe) SMC-Context.pine
+    (regla dura #2 del proyecto; tercer consumidor = ADR-017).
 
 .DESCRIPTION
     Extrae de cada archivo el bloque desde la linea marcador
@@ -9,6 +10,11 @@
     seccion "// === ... ===" (exclusive), normaliza fin de linea a LF y compara
     por hash SHA-256. Si divergen, imprime el diff linea a linea y sale con
     codigo 1. Si coinciden, sale con 0.
+
+    El tercer consumidor SMC-Context.pine (ADR-017) es OPCIONAL: si el archivo
+    existe, su bloque CORE debe tener el mismo SHA que el Visual; si NO existe,
+    el comportamiento es el mismo de siempre (solo Visual vs Strategy) para no
+    romper Fase 0/CI.
 
     Corre en cada commit de codigo Pine (Fases 1-2) y en el cierre de sesion.
     Tolera que los archivos Pine aun no existan (Fase 0): si AMBOS faltan, no
@@ -28,6 +34,10 @@
 .PARAMETER StrategyPath
     Ruta a SMC-Strategy.pine. Default: pine/SMC-Strategy.pine
 
+.PARAMETER ContextPath
+    Ruta al tercer consumidor SMC-Context.pine (ADR-017). Default:
+    pine/SMC-Context.pine. Opcional: si el archivo no existe, se ignora.
+
 .PARAMETER Quiet
     Solo codigo de salida y una linea de resumen (para hooks/CI).
 
@@ -41,6 +51,7 @@
 param(
     [string]$VisualPath,
     [string]$StrategyPath,
+    [string]$ContextPath,
     [switch]$Quiet
 )
 
@@ -52,6 +63,7 @@ $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyI
 $projectRoot = Split-Path -Parent $scriptDir
 if (-not $VisualPath)   { $VisualPath   = Join-Path $projectRoot 'pine/SMC-Visual.pine' }
 if (-not $StrategyPath) { $StrategyPath = Join-Path $projectRoot 'pine/SMC-Strategy.pine' }
+if (-not $ContextPath)  { $ContextPath  = Join-Path $projectRoot 'pine/SMC-Context.pine' }
 
 # Regex del marcador de inicio y de cualquier encabezado de seccion.
 $startRe   = '^\s*//\s*===\s*LIBRARY\s+CORE\s*===\s*$'
@@ -88,6 +100,7 @@ function Get-Sha256([string]$text) {
 # --- Resolucion de existencia de archivos ---
 $hasV = Test-Path -LiteralPath $VisualPath
 $hasS = Test-Path -LiteralPath $StrategyPath
+$hasC = Test-Path -LiteralPath $ContextPath
 
 if (-not $hasV -and -not $hasS) {
     Write-Info "[i] Ni SMC-Visual.pine ni SMC-Strategy.pine existen aun (Fase 0)."
@@ -126,6 +139,39 @@ $hashS = Get-Sha256 $textS
 if ($hashV -eq $hashS) {
     Write-Info "[OK] LIBRARY CORE identico en Visual y Strategy."
     Write-Info ("     Lineas: {0} | SHA-256: {1}" -f $coreV.Count, $hashV.Substring(0, 16))
+
+    # --- Verificacion opcional del tercer consumidor Context (ADR-017) ---
+    if ($hasC) {
+        $coreC = Get-CoreBlock $ContextPath
+        if ($null -eq $coreC) {
+            Write-Host "[X] ERROR: marcador '// === LIBRARY CORE ===' no encontrado en $ContextPath" -ForegroundColor Red
+            Write-Host "CORE_SYNC=ERROR (sin marcador en Context)"
+            exit 2
+        }
+        $textC = ($coreC -join "`n")
+        $hashC = Get-Sha256 $textC
+        if ($hashC -ne $hashV) {
+            Write-Host "[X] LIBRARY CORE DIVERGENTE entre Visual y Context." -ForegroundColor Red
+            Write-Host ("    Visual:  {0}  ({1} lineas, SHA {2})" -f $VisualPath, $coreV.Count, $hashV.Substring(0, 16))
+            Write-Host ("    Context: {0}  ({1} lineas, SHA {2})" -f $ContextPath, $coreC.Count, $hashC.Substring(0, 16))
+            if (-not $Quiet) {
+                Write-Host ""
+                Write-Host "    --- Diferencias (V = solo Visual, C = solo Context) ---"
+                $diffC = Compare-Object -ReferenceObject $coreV -DifferenceObject $coreC -CaseSensitive
+                foreach ($d in $diffC) {
+                    $tag = if ($d.SideIndicator -eq '<=') { 'V' } else { 'C' }
+                    Write-Host ("    [{0}] {1}" -f $tag, $d.InputObject)
+                }
+            }
+            Write-Host ""
+            Write-Host "CORE_SYNC=DIVERGENT -- ARREGLAR antes de commitear (regla dura #2, ADR-017)."
+            exit 1
+        }
+        Write-Info "[OK] LIBRARY CORE identico tambien en Context (3 consumidores)."
+        Write-Host "CORE_SYNC=OK"
+        exit 0
+    }
+
     Write-Host "CORE_SYNC=OK"
     exit 0
 }

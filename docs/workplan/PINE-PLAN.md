@@ -29,6 +29,8 @@ pine/
 3. Las funciones exportadas no pueden depender de variables globales mutables del consumidor → cada función recibe todo su estado como parámetros (arrays de UDTs pasados por referencia están permitidos).
 4. Publicación: la librería debe publicarse en TradingView (privada/invite-only es válido) para poder importarla. Alternativa durante desarrollo: mantener las funciones en una sección `// === LIBRARY CORE ===` copiada idéntica en ambos consumidores, y migrar a library formal al estabilizar (ver §8, decisión D-PINE-01).
 
+**Consumidor auxiliar opcional `[ADR-017]` (Fase 1, S110):** `SMC-Context.pine` (`indicator`, solo dibuja) es un **tercer consumidor** con el mismo `// === LIBRARY CORE ===` byte-idéntico (`scripts/check-core-sync.ps1` verifica los 3). Nace de un bloqueador doble: el transporte nearest-N del CORE no lleva los extremos HTF lejanos, y el Visual está pegado al techo CE10117. Hace su **2ª `request.security` por HTF** con `f_tfExtremes` (emite el extremo importante por concepto/lado, no nearest-N) **fuera** del CORE — presupuesto de tokens y memoria frescos por-script (viabilidad OOM validada vivo, gates A0/A2/A3 S109). No toca Visual/Strategy/SHA `5510361166844bd5`; reversible. La promoción del mecanismo al CORE (tuple único nearest+farthest que Strategy consuma) queda para **Fase B**. Diseño: `docs/planes/ESQUELETO-FABLE-context-htf-revelado.md`.
+
 ---
 
 ## 2. TIPOS DE DATOS (UDTs exportados por la librería)

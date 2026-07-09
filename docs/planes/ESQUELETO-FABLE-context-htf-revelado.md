@@ -357,7 +357,7 @@ Ritual completo (§0.2). Chart OANDA:EURUSD. Matriz mínima:
 | A2 | ✅ | S109: probe 1712L compila 0/0 server-side; apply VIVO 0 err, sin CE10117/OOM. Visual restaurado (slot v168, T14 vivo). Convivencia A3 pendiente de slot SMC_Context | — |
 | A3 | ✅ | S109: probe en slot SMC_Context aplicado JUNTO al Visual (3 estudios: PROBE gphnPd + Visual MQVk7q + LuxAlgo). 0 err, sin OOM/CE10117; T14 vivo; probe emite d1_pdH=1.20831/h1_pdH=1.14730/chk no-na. VERDE TOTAL → seguir a B. Probe removido del chart, slot SMC_Context conservado (v2, contiene probe; se reemplaza en C) | — |
 | A1 (opc) | ☐ | tokens_HEAD= · headroom= | — |
-| B | ☐ | ADR-017 + sync ×3 | |
+| B | ✅ | S110: ADR-017 escrito; check-core-sync.ps1 +`$ContextPath` opcional (verde con 2 archivos SHA `5510361166844bd5`; probado 3-vías OK/DIVERGENT con Context sintético); notas CLAUDE.md (Arquitectura + regla dura #2) y PINE-PLAN.md; slot SMC_Context existe (c098abf3, S109) | (commit S110) |
 | C | ☐ | 0/0 + SHA idéntico | |
 | D | ☐ | | |
 | E | ☐ | | |
