@@ -102,9 +102,16 @@ open(OUT, "w", encoding="utf-8", newline="\n").write("\n".join(hdr + core + tail
 ```
 
 2. `python scripts/pine_check.py <probe>` → esperar 0/0 (ya validado; si falla, el CORE se movió).
-3. **`pine_new` (indicator)** → tab nuevo SIN slot → `pine_inject.py <probe>` → Ctrl+Enter → 25 s →
-   `pine_get_errors`.
-4. Leer resultado con el Visual TODAVÍA aplicado (eso ES A3):
+3. **⚠️ HALLAZGO S109 (verificado vivo):** `pine_new` NO da un tab sin slot en esta build — el editor
+   sigue vinculado a `SMC_Library`, y `pine_inject`+Ctrl+Enter/Save **sobrescriben el slot del Visual**
+   (el probe reemplaza al Visual, mismo entity_id). Recuperable re-inyectando `pine/SMC-Visual.pine` en
+   `SMC_Library` + save + apply, pero INVALIDA el método de este paso para A3.
+   - **A2 (probe SOLO) sí es medible así** y quedó VERDE (0 err, sin CE10117/OOM): aplicar el probe
+     (sobrescribe Visual temporalmente), leer `pine_get_errors`, luego RESTAURAR el Visual.
+   - **A3 (convivencia) REQUIERE el slot `SMC_Context` ya creado** (Paso B.5). Por eso el orden real es:
+     A0 → A2 (probe solo, restaurar Visual) → **B.5 (usuario crea slot)** → A3 (inyectar probe en
+     `SMC_Context`, con Visual vivo, leer ambos) → resto de B → C…  El resto de gates no cambia.
+4. Leer resultado con el Visual TODAVÍA aplicado (A3 — solo posible con el slot SMC_Context):
    - `chart_get_state` → debe listar `SMC Engine — Visual` + `PROBE Context OOM`.
    - Verificar que el panel T14 del Visual sigue vivo (`data_get_pine_tables`, study_filter="Visual").
    - `capture_screenshot` de evidencia.
@@ -150,7 +157,12 @@ aceptó Ruta 1, puede saltarse. ⚠️ Toca temporalmente el slot Visual — hac
    → comportamiento actual intacto (no romper Fase 0/CI). `[OPUS]` mantener solo-ASCII (PS 5.1).
 4. Nota en `CLAUDE.md` (sección Arquitectura, 1 línea: consumidor visual auxiliar opcional, ADR-017)
    y en `docs/workplan/PINE-PLAN.md`.
-5. **Usuario (manual):** crear slot TV `SMC_Context` (copiar cualquier plantilla, Save As con nombre).
+5. **Slot TV `SMC_Context`** — MÉTODO VERIFICADO S109 (Opus puede casi todo, 1 clic del usuario):
+   abrir el editor Pine (`ui_click` data-name `pine-dialog-button`) → clic en el desplegable del
+   NOMBRE del script → menú → **"Hacer una copia…"** → sale diálogo pidiendo nombre → escribir
+   `SMC_Context` → Guardar. (El único paso manual real es teclear el nombre en el diálogo modal;
+   todo lo demás es `ui_evaluate`/`ui_click`.) Luego `pine_open("SMC_Context")` → inyectar ahí.
+   Crea el slot como COPIA del Visual sin tocar `SMC_Library`.
 - **Gate B:** ADR commiteado, sync-script extendido y verde con 2 archivos, slot existente.
 
 ## PASO C — `pine/SMC-Context.pine` v1: esqueleto + `f_tfExtremes` (1-2 commits)
@@ -180,6 +192,11 @@ i_revealHyst     = input.float(1.0,  "Histeresis re-ocultado (x ATR HTF)",     m
 // Tras copiar: powershell -File scripts/check-core-sync.ps1  → mismo SHA 5510361166844bd5.
 
 // === EXTREMOS HTF (fuera del CORE) ===   ← C.2/C.3
+// [OPUS] ANTES de escribir C.2/C.3: verificar por grep que existen con nombre EXACTO
+//   ZS_MITIGATED, KIND_OB, KIND_FVG, KIND_POOL, KIND_EQH, KIND_EQL y MTF_K en el CORE.
+//   Si alguno difiere, el snippet no compila. (SMC_Zone.bottom / SMC_Pool.level ya verificados.)
+// [OPUS] slots: el probe A2/A3 emite 12 slots/HTF (= MTF_K del Visual, peor-caso de memoria);
+//   f_tfExtremes de PRODUCCION emite 8 conceptos x6 (§X). Son distintos a proposito: no unificar.
 // === REVELADO AL ROMPER ===              ← Paso D
 // === DIBUJO CONTEXTO ===                 ← Paso E
 ```
@@ -206,7 +223,7 @@ f_farthestZone(array<SMC_Zone> src, int kind, float px, bool up, float minStr, f
                 if d > bDist
                     bDist := d
                     bTop  := z.top
-                    bBot  := z.bot   // [OPUS] verificar nombre exacto del campo (top/bottom) en el UDT
+                    bBot  := z.bottom   // campo del UDT es 'bottom' (SMC_Zone L228), NO 'bot'
                     bDir  := z.dir
                     bTA   := z.barTime
     [bTop, bBot, bDir, bTA]
@@ -336,8 +353,9 @@ Ritual completo (§0.2). Chart OANDA:EURUSD. Matriz mínima:
 ## §Z. Registro de ejecución (rellena Opus)
 | Paso | Estado | Evidencia / números | Commit |
 |---|---|---|---|
-| A0 | ☐ | | — |
-| A2/A3 | ☐ | resultado apply + screenshot | — |
+| A0 | ✅ | S109: TV+CDP OK, Visual vivo, Visual 0/0, CORE_SYNC=OK | — |
+| A2 | ✅ | S109: probe 1712L compila 0/0 server-side; apply VIVO 0 err, sin CE10117/OOM. Visual restaurado (slot v168, T14 vivo). Convivencia A3 pendiente de slot SMC_Context | — |
+| A3 | ✅ | S109: probe en slot SMC_Context aplicado JUNTO al Visual (3 estudios: PROBE gphnPd + Visual MQVk7q + LuxAlgo). 0 err, sin OOM/CE10117; T14 vivo; probe emite d1_pdH=1.20831/h1_pdH=1.14730/chk no-na. VERDE TOTAL → seguir a B. Probe removido del chart, slot SMC_Context conservado (v2, contiene probe; se reemplaza en C) | — |
 | A1 (opc) | ☐ | tokens_HEAD= · headroom= | — |
 | B | ☐ | ADR-017 + sync ×3 | |
 | C | ☐ | 0/0 + SHA idéntico | |
