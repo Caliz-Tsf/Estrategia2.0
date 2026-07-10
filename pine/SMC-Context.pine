@@ -15,7 +15,7 @@ i_ctxAlways      = input.bool(false, "Mostrar siempre (Estudio) vs al romper",  
 i_kExt           = input.float(6.0,  "Alcance extremos (x rango dominante HTF)",  minval = 2.0, maxval = 12.0, step = 0.5, group = GRP_CTX)
 i_extMinStrength = input.float(0.5,  "Importancia minima zona extrema (0-1)",     minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_CTX)
 i_revealHyst     = input.float(1.0,  "Histeresis re-ocultado (x ATR HTF)",        minval = 0.25, maxval = 3.0, step = 0.25, group = GRP_CTX)
-i_ctxMitigated   = input.bool(false, "Mostrar traspasadas (frontera gris: mit + barridas)", group = GRP_CTX)
+i_ctxMitigated   = input.bool(false, "Mostrar traspasadas (frontera gris: mit + barridas + EQ tomadas)", group = GRP_CTX)
 // Inputs de deteccion — MISMOS defaults que el Visual (paridad de deteccion; ADR-017).
 i_swingLen       = input.int(5,      "Swing length",                    minval = 2, group = GRP_CTX)
 i_pdSwingLen     = input.int(50,     "Swing P/D (rango dominante)",     minval = 10, group = GRP_CTX)
@@ -1809,28 +1809,47 @@ f_farthestPool(array<SMC_Pool> src, float px, bool up, int minT, float bound, bo
     [useSwept ? sLvl : aLvl, useSwept ? sDir : aDir, useSwept ? sTA : aTA, useSwept]
 
 // f_farthestEvent: EQH/EQL (liquidez per se: sin filtro strength, solo lado+bound) mas lejano.
-// Recorre los buffers de eventos-tramo/marca del cuerpo de deteccion. Devuelve [level, dir, tA, tB].
-f_farthestEvent(array<int> evK, array<float> evL, array<int> evD, array<int> evTA, array<int> evTB, int kind, float px, bool up, float bound) =>
-    float bLvl  = na
-    int   bDir  = 0
-    int   bTA   = int(na)
-    int   bTB   = int(na)
-    float bDist = -1.0
+// Prefiere VIVO (nivel aun en reposo, sin cruzar); si 'inclTaken' y NO hay vivo en el lado, cae al
+// TOMADO/cruzado mas lejano (EQ-tomado-gris §5.4, F1-CTX-06) — el analogo de evento a la mitigada de
+// zonas / barrida de pools. Un EQH esta TOMADO cuando el precio ya lo cruzo por arriba (lvl <= px);
+// un EQL cuando lo cruzo por abajo (lvl >= px): el tomado vive del lado OPUESTO al vivo, acotado por
+// 'boundTaken'. Nunca oculta un EQ vivo por mostrar uno tomado. Devuelve [level, dir, tA, tB, taken].
+f_farthestEvent(array<int> evK, array<float> evL, array<int> evD, array<int> evTA, array<int> evTB, int kind, float px, bool up, float bound, float boundTaken, bool inclTaken) =>
+    float aLvl  = na    // VIVO (en reposo, prioritario)
+    int   aDir  = 0
+    int   aTA   = int(na)
+    int   aTB   = int(na)
+    float aDist = -1.0
+    float tLvl  = na    // TOMADO/cruzado (fallback gris)
+    int   tDir  = 0
+    int   tTA   = int(na)
+    int   tTB   = int(na)
+    float tDist = -1.0
     if array.size(evK) > 0 and not na(bound)
         for i = 0 to array.size(evK) - 1
             if array.get(evK, i) == kind
                 float lvl = array.get(evL, i)
-                bool side = up ? lvl > px : lvl < px
-                bool inB  = up ? lvl <= bound : lvl >= bound
-                if side and inB
-                    float d = math.abs(lvl - px)
-                    if d > bDist
-                        bDist := d
-                        bLvl  := lvl
-                        bDir  := array.get(evD, i)
-                        bTA   := array.get(evTA, i)
-                        bTB   := array.get(evTB, i)
-    [bLvl, bDir, bTA, bTB]
+                float d   = math.abs(lvl - px)
+                bool liveSide = up ? lvl > px : lvl < px
+                bool liveInB  = up ? lvl <= bound : lvl >= bound
+                if liveSide and liveInB
+                    if d > aDist
+                        aDist := d
+                        aLvl  := lvl
+                        aDir  := array.get(evD, i)
+                        aTA   := array.get(evTA, i)
+                        aTB   := array.get(evTB, i)
+                else if inclTaken and not na(boundTaken)
+                    bool takenSide = up ? lvl <= px : lvl >= px
+                    bool takenInB  = up ? lvl >= boundTaken : lvl <= boundTaken
+                    if takenSide and takenInB and d > tDist
+                        tDist := d
+                        tLvl  := lvl
+                        tDir  := array.get(evD, i)
+                        tTA   := array.get(evTA, i)
+                        tTB   := array.get(evTB, i)
+    bool useTaken = na(aLvl) and not na(tLvl)
+    [useTaken ? tLvl : aLvl, useTaken ? tDir : aDir, useTaken ? tTA : aTA, useTaken ? tTB : aTB, useTaken]
 
 // f_tfExtremes: MISMA cadena de deteccion que f_computeTFState (cuerpo copiado verbatim, garantia de
 // paridad) pero la EMISION cambia: en vez de nearest-N, emite el extremo importante por concepto/lado.
@@ -1951,8 +1970,8 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
     [fvDt, fvDb, fvDd, fvDa, fvDm] = f_farthestZone(zonesTf, KIND_FVG, close, false, minStr, loB, inclMit)
     [poUl, poUd, poUa, poUs] = f_farthestPool(poolsTf, close, true,  minTouches, hiB, inclMit)
     [poDl, poDd, poDa, poDs] = f_farthestPool(poolsTf, close, false, minTouches, loB, inclMit)
-    [eqUl, eqUd, eqUa, eqUb] = f_farthestEvent(evK, evL, evD, evTA, evTB, KIND_EQH, close, true,  hiB)
-    [eqDl, eqDd, eqDa, eqDb] = f_farthestEvent(evK, evL, evD, evTA, evTB, KIND_EQL, close, false, loB)
+    [eqUl, eqUd, eqUa, eqUb, eqUx] = f_farthestEvent(evK, evL, evD, evTA, evTB, KIND_EQH, close, true,  hiB, loB, inclMit)
+    [eqDl, eqDd, eqDa, eqDb, eqDx] = f_farthestEvent(evK, evL, evD, evTA, evTB, KIND_EQL, close, false, loB, hiB, inclMit)
     [ st.pdHigh, st.pdLow, st.atr14,
       na(obUt) ? 0 : (obUm ? -KIND_OB : KIND_OB),   obUt, obUb, obUd, obUa, int(na),
       na(obDt) ? 0 : (obDm ? -KIND_OB : KIND_OB),   obDt, obDb, obDd, obDa, int(na),
@@ -1960,8 +1979,8 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
       na(fvDt) ? 0 : (fvDm ? -KIND_FVG : KIND_FVG), fvDt, fvDb, fvDd, fvDa, int(na),
       na(poUl) ? 0 : (poUs ? -KIND_POOL : KIND_POOL), poUl, poUl, poUd, poUa, int(na),
       na(poDl) ? 0 : (poDs ? -KIND_POOL : KIND_POOL), poDl, poDl, poDd, poDa, int(na),
-      na(eqUl) ? 0 : KIND_EQH,  eqUl, eqUl, eqUd, eqUa, eqUb,
-      na(eqDl) ? 0 : KIND_EQL,  eqDl, eqDl, eqDd, eqDa, eqDb ]
+      na(eqUl) ? 0 : (eqUx ? -KIND_EQH : KIND_EQH),  eqUl, eqUl, eqUd, eqUa, eqUb,
+      na(eqDl) ? 0 : (eqDx ? -KIND_EQL : KIND_EQL),  eqDl, eqDl, eqDd, eqDa, eqDb ]
 
 // === CALL-SITES: 2a request.security por HTF (motor de extremos, fuera del CORE) ===
 // Igual que el Visual: se piden D1 y H1 SIEMPRE; la cascada por chart-TF la resuelve el revelado.
@@ -2135,7 +2154,7 @@ if barstate.islast
                 line   ln = array.get(ctxLines, h * 4 + (s - 4))
                 label  lb = array.get(ctxLabels, h * 8 + s)
                 int    kd = isD1 ? array.get(dK, s) : array.get(hK, s)
-                bool   swp = kd < 0                                                                 // pool barrido = traspasado (gris, F1-CTX-05); EQ nunca negativo
+                bool   swp = kd < 0                                                                 // gris: pool barrido/traspasado (F1-CTX-05) o EQ tomado/cruzado (F1-CTX-06)
                 bool isPool = s <= 5
                 color  lfam = swp ? CTX_MIT : CTX_LIQ
                 string nm   = isPool ? (up ? "BSL" : "SSL") : (up ? "EQH" : "EQL")
