@@ -1964,10 +1964,141 @@ bool showD1Dn = i_extOn and ctxD1Applies and (i_ctxAlways or revD1Dn)
 bool showH1Up = i_extOn and ctxH1Applies and (i_ctxAlways or revH1Up)
 bool showH1Dn = i_extOn and ctxH1Applies and (i_ctxAlways or revH1Dn)
 
-// [OPUS · Paso C/D] Salida de verificacion TEMPORAL (se reemplaza por el dibujo real en Paso E).
-plot(ctxD1_pdH, "ctx D1 pdHigh", color = color.new(color.blue, 70))
-plot(ctxH1_pdH, "ctx H1 pdHigh", color = color.new(color.orange, 70))
-plotchar(ctxD1_k0 + ctxD1_k6 + ctxH1_k0 + ctxH1_k6, "chk_kind", "", location.top)
-plotchar(ctxD1_t0 + ctxH1_t0 + ctxD1_atr + ctxH1_atr, "chk_f", "", location.top)
-// Estado del revelado (int para lectura via data window): bit0=D1Up bit1=D1Dn bit2=H1Up bit3=H1Dn
+// === DIBUJO CONTEXTO ===   [Paso E · F1-CTX-03]
+// Estilo §5.4 contexto: hue de familia (COL_OB/COL_FVG/COL_LIQ del Visual, copiados aqui — viven FUERA
+// del CORE), transparencia alta escalonada, borde punteado, tag "D1 ▲ OB" / "D1 ▼ SSL" / "D1 ▲ EQH".
+// Slots de dibujo FIJOS (var, precreados 1x) -> RE10045-safe: en islast solo box.set_*/line.set_*/
+// label.set_* (jamas array.push creciente). REGLA DE SOLAPE MTF (Tarea #2 S108, aprobada por el
+// usuario): (1) el heredado-lejano queda SIEMPRE detras — el Context es un indicador aparte que el
+// usuario apila BAJO el Visual (nativas delante); DENTRO del Context, H1 se crea despues de D1 -> H1
+// renderiza sobre D1. (2) transparencia escalonada nativo < H1 < D1 (D1 = mas transparente, al fondo).
+// (3) si dos cajas solapan >70% del rango de la MENOR -> se dibuja solo la del TF MAYOR (se oculta H1).
+color CTX_OB_BULL  = color.rgb(74, 130, 235)
+color CTX_OB_BEAR  = color.rgb(26, 72, 184)
+color CTX_FVG_BULL = color.rgb(255, 183, 77)
+color CTX_FVG_BEAR = color.rgb(239, 108, 0)
+color CTX_LIQ      = #9C27B0
+
+// f_ctxBox: dibuja u oculta un slot-caja de contexto (OB/FVG heredado). pf=transp fill, pb=transp borde.
+f_ctxBox(box bx, bool vis, float top, float bot, float tA, float tB, color fam, string tag, int pf, int pb, int w) =>
+    if vis and not na(top) and not na(bot) and not na(tA)
+        box.set_left(bx, int(tA))
+        box.set_right(bx, na(tB) ? time : int(tB))
+        box.set_top(bx, top)
+        box.set_bottom(bx, bot)
+        box.set_bgcolor(bx, color.new(fam, pf))
+        box.set_border_color(bx, color.new(fam, pb))
+        box.set_border_width(bx, w)
+        box.set_text(bx, tag)
+        box.set_text_color(bx, fam)
+    else
+        box.set_bgcolor(bx, na)
+        box.set_border_color(bx, na)
+        box.set_text(bx, "")
+
+// f_ctxLine: dibuja u oculta un slot-linea de contexto (POOL/EQ heredado) + su label. Pool = se
+// extiende hasta 'now' (objetivo vivo); EQ = tramo tA->tB (dos pivotes iguales del HTF, patron Visual).
+f_ctxLine(line ln, label lb, bool vis, float lvl, float tA, float tB, bool isPool, color fam, string tag, int pb, int w) =>
+    if vis and not na(lvl) and not na(tA)
+        int rgt = isPool ? time : (na(tB) ? time : int(tB))
+        line.set_xy1(ln, int(tA), lvl)
+        line.set_xy2(ln, rgt, lvl)
+        line.set_color(ln, color.new(fam, pb))
+        line.set_width(ln, w)
+        label.set_x(lb, rgt)
+        label.set_y(lb, lvl)
+        label.set_text(lb, tag)
+        label.set_textcolor(lb, fam)
+        label.set_color(lb, color.new(fam, 90))
+    else
+        line.set_color(ln, na)
+        label.set_text(lb, "")
+        label.set_color(lb, na)
+        label.set_textcolor(lb, na)
+
+// Slots FIJOS precreados 1x. Por HTF: 4 cajas (OB^/OBv/FVG^/FVGv) + 4 lineas (POOL^/POOLv/EQ^/EQv) +
+// 8 labels. Indices: box = h*4+s (s 0-3); line = h*4+(s-4); label = h*8+s. h 0=D1, 1=H1 (H1 tras D1).
+var array<box>   ctxBoxes  = array.new<box>()
+var array<line>  ctxLines  = array.new<line>()
+var array<label> ctxLabels = array.new<label>()
+if barstate.isfirst
+    for h = 0 to 1
+        for s = 0 to 3
+            array.push(ctxBoxes, box.new(time, close, time, close, xloc = xloc.bar_time, bgcolor = na, border_color = na, border_width = 1, border_style = line.style_dotted, text_size = size.tiny, text_halign = text.align_center, text_valign = text.align_center))
+        for s = 0 to 3
+            array.push(ctxLines, line.new(time, close, time, close, xloc = xloc.bar_time, color = na, style = line.style_dotted, width = 1))
+        for s = 0 to 7
+            array.push(ctxLabels, label.new(time, close, "", xloc = xloc.bar_time, color = na, textcolor = na, size = size.tiny, style = label.style_label_left))
+
+if barstate.islast
+    // Ensamblar los 8 slots por HTF desde la tuple plana. Presencia de un slot = not na(top).
+    array<float> dTop = array.from(ctxD1_t0, ctxD1_t1, ctxD1_t2, ctxD1_t3, ctxD1_t4, ctxD1_t5, ctxD1_t6, ctxD1_t7)
+    array<float> dBot = array.from(ctxD1_b0, ctxD1_b1, ctxD1_b2, ctxD1_b3, ctxD1_b4, ctxD1_b5, ctxD1_b6, ctxD1_b7)
+    array<int>   dDir = array.from(ctxD1_d0, ctxD1_d1, ctxD1_d2, ctxD1_d3, ctxD1_d4, ctxD1_d5, ctxD1_d6, ctxD1_d7)
+    array<int>   dTA  = array.from(ctxD1_ta0, ctxD1_ta1, ctxD1_ta2, ctxD1_ta3, ctxD1_ta4, ctxD1_ta5, ctxD1_ta6, ctxD1_ta7)
+    array<int>   dTB  = array.from(ctxD1_tb0, ctxD1_tb1, ctxD1_tb2, ctxD1_tb3, ctxD1_tb4, ctxD1_tb5, ctxD1_tb6, ctxD1_tb7)
+    array<float> hTop = array.from(ctxH1_t0, ctxH1_t1, ctxH1_t2, ctxH1_t3, ctxH1_t4, ctxH1_t5, ctxH1_t6, ctxH1_t7)
+    array<float> hBot = array.from(ctxH1_b0, ctxH1_b1, ctxH1_b2, ctxH1_b3, ctxH1_b4, ctxH1_b5, ctxH1_b6, ctxH1_b7)
+    array<int>   hDir = array.from(ctxH1_d0, ctxH1_d1, ctxH1_d2, ctxH1_d3, ctxH1_d4, ctxH1_d5, ctxH1_d6, ctxH1_d7)
+    array<int>   hTA  = array.from(ctxH1_ta0, ctxH1_ta1, ctxH1_ta2, ctxH1_ta3, ctxH1_ta4, ctxH1_ta5, ctxH1_ta6, ctxH1_ta7)
+    array<int>   hTB  = array.from(ctxH1_tb0, ctxH1_tb1, ctxH1_tb2, ctxH1_tb3, ctxH1_tb4, ctxH1_tb5, ctxH1_tb6, ctxH1_tb7)
+    // Visibilidad base por lado (revelado ya calculado): slots up (0,2,4,6) usan showXUp; down usan showXDn.
+    array<bool> vD1 = array.new<bool>(8, false)
+    array<bool> vH1 = array.new<bool>(8, false)
+    for s = 0 to 7
+        bool up = s % 2 == 0
+        array.set(vD1, s, (up ? showD1Up : showD1Dn) and not na(array.get(dTop, s)))
+        array.set(vH1, s, (up ? showH1Up : showH1Dn) and not na(array.get(hTop, s)))
+    // Colapso solape MTF: H1 (menor) cede ante D1 (mayor). Cajas (0-3): solape vertical > 70% del rango H1.
+    for j = 0 to 3
+        if array.get(vH1, j)
+            float hT  = array.get(hTop, j)
+            float hB  = array.get(hBot, j)
+            float rng = hT - hB
+            if rng > 0
+                for i = 0 to 3
+                    if array.get(vD1, i)
+                        float ov = math.min(hT, array.get(dTop, i)) - math.max(hB, array.get(dBot, i))
+                        if ov > 0 and ov / rng > 0.70
+                            array.set(vH1, j, false)
+                            break
+    // Colapso solape MTF: lineas (4-7) POOL/EQ -> nivel H1 dentro de 0.3*ATR(H1) de una D1 = redundante.
+    float tolC = na(ctxH1_atr) ? na : 0.3 * ctxH1_atr
+    if not na(tolC)
+        for j = 4 to 7
+            if array.get(vH1, j)
+                for i = 4 to 7
+                    if array.get(vD1, i) and math.abs(array.get(hTop, j) - array.get(dTop, i)) <= tolC
+                        array.set(vH1, j, false)
+                        break
+    // Dibujo. D1 primero (fondo, mas transparente, grosor 3), luego H1 (mas opaco, grosor 2).
+    for h = 0 to 1
+        bool   isD1 = h == 0
+        int    pf   = isD1 ? 92 : 90                                                                   // fill escalonado: D1 mas transparente que H1 (nativo<H1<D1)
+        int    pb   = isD1 ? 55 : 45
+        int    w    = isD1 ? 3 : 2                                                                     // grosor codifica TF de procedencia (§7.2)
+        string tf   = isD1 ? "D1" : "H1"
+        for s = 0 to 7
+            bool   up  = s % 2 == 0
+            bool   vis = isD1 ? array.get(vD1, s) : array.get(vH1, s)
+            float  top = isD1 ? array.get(dTop, s) : array.get(hTop, s)
+            float  bot = isD1 ? array.get(dBot, s) : array.get(hBot, s)
+            float  dir = isD1 ? array.get(dDir, s) : array.get(hDir, s)
+            float  tA  = isD1 ? array.get(dTA, s)  : array.get(hTA, s)
+            float  tB  = isD1 ? array.get(dTB, s)  : array.get(hTB, s)
+            string arrow = up ? " ▲ " : " ▼ "
+            if s <= 3
+                box   bx  = array.get(ctxBoxes, h * 4 + s)
+                color fam = s <= 1 ? (dir == DIR_BULL ? CTX_OB_BULL : CTX_OB_BEAR) : (dir == DIR_BULL ? CTX_FVG_BULL : CTX_FVG_BEAR)
+                string nm = s <= 1 ? "OB" : "FVG"
+                f_ctxBox(bx, vis, top, bot, tA, tB, fam, tf + arrow + nm, pf, pb, w)
+            else
+                line   ln = array.get(ctxLines, h * 4 + (s - 4))
+                label  lb = array.get(ctxLabels, h * 8 + s)
+                bool isPool = s <= 5
+                string nm   = isPool ? (up ? "BSL" : "SSL") : (up ? "EQH" : "EQL")
+                f_ctxLine(ln, lb, vis, top, tA, tB, isPool, CTX_LIQ, tf + arrow + nm, pb, w)
+
+// Estado del revelado (int para lectura via data window, apoyo a la matriz del Paso F):
+// bit0=D1Up bit1=D1Dn bit2=H1Up bit3=H1Dn.
 plot((showD1Up ? 1 : 0) + (showD1Dn ? 2 : 0) + (showH1Up ? 4 : 0) + (showH1Dn ? 8 : 0), "reveal_bits", display = display.data_window)
