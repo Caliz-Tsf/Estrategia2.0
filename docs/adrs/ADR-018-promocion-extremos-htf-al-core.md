@@ -1,8 +1,9 @@
 # ADR-018 — Promoción de los extremos HTF al CORE (cierre Fase B de ADR-017)
 
-- **Fecha:** 2026-07-10 (Sesion-114)
-- **Estado:** **Propuesta** — no se ejecuta hasta que el **GATE B (probe)** pase en vivo (token + OOM).
-  Al pasar el probe y promover el código → pasa a **Aceptada** y se re-baseline el SHA.
+- **Fecha:** 2026-07-10 (Sesion-114) · **Aceptada 2026-07-10 (Sesion-115)**
+- **Estado:** **ACEPTADA** — GATE B (probe) pasó en vivo (S115) y el código se promovió al CORE.
+  Ver "Ejecución (S115)" al final. SHA re-baselined `5510361166844bd5` → **`d86bf37aacbd25cf`**
+  (CORE 1700 → **1952 líneas**).
 - **Cierra:** la deuda de **ADR-017** (Fase A): "Fase B promueve `f_tfExtremes` al CORE, replica a
   Strategy, re-baseline del SHA y actualiza `MQL5-PLAN`".
 - **Precisa (no contradice):** ADR-009/010 (transporte nearest-N por buffer aplanado / dibujo
@@ -88,3 +89,28 @@ no-`na`. Fallbacks si falla: extremos solo-D1 (1 security) por token; extremos b
   sacar las funciones del CORE + revertir Strategy + volver al SHA anterior. Los commits por concepto
   lo hacen acotado, pero **no es un borrado limpio** → se ejecuta solo con probe verde + confirmación.
 - **F1-GATE:** Fase B es prerrequisito de cierre, no la firma. La firma sigue siendo humana.
+
+## Ejecución (Sesion-115, 2026-07-10)
+
+**GATE B (mitad viva) → VERDE.** Probe `PROBE-faseB-oom.pine` (4 `request.security`: 2 nearest +
+2 extremos, D1+H1) aplicado en vivo OANDA:EURUSD junto al Visual + LuxAlgo: `pine_get_errors` = 0 a
+~25s, **sin CE10117 (token) ni OOM**; checksums no-`na` (`d1 pdHigh`=`xd1 pdHigh`=1.20831 → las 4
+securities computan). Server-side ya era 0/0 (S114).
+
+**Promoción ejecutada (B2, ratificada por el usuario S115):**
+1. `f_farthestZone/Pool/Event` + `f_tfExtremes` movidas al bloque `// === LIBRARY CORE ===`
+   byte-idéntico en los **3** scripts (en Context se absorbieron sustituyendo su header de sección
+   `// === EXTREMOS HTF (fuera del CORE) ===` por un sub-comentario `// --- ... ---`; en
+   Visual/Strategy se añadieron). `f_computeTFState` (nearest-N, 89) **intacto**.
+2. `check-core-sync.ps1` ×3 → **OK**; re-baseline **`5510361166844bd5` → `d86bf37aacbd25cf`**,
+   CORE **1952 líneas** (1700 + 252).
+3. **Strategy:** +2 `request.security` de extremos (D1 "D" + H1 "60") con `f_tfExtremes`
+   (params compartidos = mismos del nearest; `kExt/minStr/inclMit` = defaults Context 6.0/0.5/false),
+   reconstitución a arrays `xd1e*/xh1e*` (8 slots), enganche de scoring marcado `// TODO Sprint 2.1`.
+4. **Compilación:** `pine_check` **0/0 los 3**. **Apply vivo:** Visual (con las +252 líneas
+   promovidas, no usadas) 0/0; Context 0/0 (slot actualizado). Strategy: su riesgo único (4 securities)
+   quedó cubierto por el probe GATE B + 0/0 server-side (no se forzó on-chart para no pisar el slot
+   `[Strategy]` del usuario; sin slot propio en TV).
+
+**Nota MQL5:** contrato de extremos añadido a `MQL5-PLAN.md` (2º struct espejo, semántica
+farthest-important, `kind<0` = traspasado). Fuera de alcance v1 sigue: MB/Breaker/BOS-CHoCH heredados.

@@ -4,6 +4,11 @@
 > Sesión-114 (2026-07-10). Decisión de arquitectura → se ratifica en **ADR-018** (Propuesta).
 > Regla dura: no se rompe el SHA `5510361166844bd5` hasta que el **probe** (GATE B) pase en vivo.
 
+> **RESUELTO (S115, 2026-07-10):** GATE B pasó en vivo (probe 4 securities 0/0, sin CE10117/OOM).
+> **B2 ratificada** por el usuario y **ejecutada**: extremos promovidos al CORE ×3, Strategy +2
+> security de extremos. SHA re-baselined **`5510361166844bd5` → `d86bf37aacbd25cf`** (CORE 1952
+> líneas). ADR-018 → **Aceptada**. Detalle en ADR-018 §"Ejecución (Sesion-115)".
+
 ---
 
 ## 0. Qué cierra Fase B

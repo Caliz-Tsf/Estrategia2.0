@@ -6,11 +6,12 @@
 ---
 
 ## 0. NOTA DE REFRESCO (2026-07-06, S097) — qué cambió desde 2026-06-10
-Este documento se escribió antes de que el CORE Pine evolucionara. Sincronizado contra el CORE actual (**1700 líneas, SHA `5510361166844bd5`**). Cambios que los structs espejo DEBEN reflejar:
+Este documento se escribió antes de que el CORE Pine evolucionara. Sincronizado contra el CORE actual (**1952 líneas, SHA `d86bf37aacbd25cf`** — re-baseline S115 tras promover los extremos HTF; el SHA previo `5510361166844bd5` fue el CORE de 1700 líneas hasta S114). Cambios que los structs espejo DEBEN reflejar:
 - **`strength` (ADR-014):** propiedad de DETECCIÓN (vive en el CORE byte-idéntico, no en Visual). Todo UDT de zona/evento/swing/pool la lleva. El EA la necesita para jerarquía y para alimentar el scoring. **Añadida abajo.**
 - **KIND hasta 53:** el enum `KIND_*` creció (KIND_GRADIENT=53, breaker/flip/mitigation/rejection/IFVG/BPR, etc.). El struct `SMC_Zone.kind` ya es `int`, pero el enum espejo debe cubrir ≤53.
 - **Gradient Levels (§5.16, KIND_GRADIENT=53):** grid de quadrants/eighths + `gradedFvg` (flag "FVG toca nivel del grid") + confluencia exponencial #52 (multiplicador, ADR-013). Nuevo subsistema a mapear.
 - **Primitivos §7 (`posRole` / `confDegree` / `depthBand`):** capa de proyección/confluencia. **Hoy son Fase A Visual-only** (calculados en `SMC-Visual.pine`). **Fase B los promueve al CORE** con campos UDT nuevos + SHA nuevo + ADR. **Hasta que Fase B cierre, el EA los recalcula igual que el CORE** (son lectura pura de la detección existente). Reservados en los structs abajo como `[Fase B]`.
+- **Extremos HTF (ADR-018, promovidos al CORE en S115):** además del transporte **nearest-N** (`f_computeTFState`, 89 campos, el que ya se mapea abajo), el CORE ahora emite un **2º contrato "farthest-important"** (`f_tfExtremes`, 51 campos = 3 escalares + 8 slots × 6) que da el **extremo IMPORTANTE por concepto/lado** más allá del Premium/Discount vigente (objetivos de liquidez / confluencias de contexto en ambas direcciones, §4.8). Es una **2ª `request.security` por HTF** en el consumidor (en Pine: Strategy D1+H1). El EA lo replica con un **2º struct espejo** (`SMC_TFExtremes`, abajo) y una 2ª pasada de detección por TF con selección farthest (no nearest). **Semántica clave:** `kind < 0` = extremo **traspasado/tomado** (mitigada / pool barrido / EQ cruzado) → contexto histórico, peso reducido; `kind == 0` = ranura vacía. Orden fijo de 8 slots: OB↑, OB↓, FVG↑, FVG↓, POOL↑, POOL↓, EQH↑, EQL↓. **Fuera de alcance v1:** MB/Breaker/BOS-CHoCH como extremos heredados (v2).
 - **Enjambre + debate + cuaderno del EA:** el diseño 2026-06-10 no contemplaba el modelo de decisión del agente (proyección + debate darwiniano). Se especifica en el **DOSSIER-FABLE Fase 4** (`docs/planes/DOSSIER-FABLE-fase4-ea-mt5.md`) → Fable produce el esqueleto. **Este MQL5-PLAN cubre solo el EA determinista;** la capa cognitiva (enjambre) es aditiva y se ancla en Fase 3/4.
 
 ---
@@ -62,6 +63,10 @@ struct SMC_Pool   { double level; int dir; int touches; datetime barTime; bool s
 struct SMC_TFState{ int bias; SMC_Event lastBOS, lastCHoCH; double pdHigh, pdLow, pdEq;
                     double ema20, ema50, ema200; SMC_Zone nearestOB, nearestFVG;
                     double gradTop, gradBottom; int gradSrcKind; /*grid §5.16*/ };
+// [ADR-018 · S115] 2º contrato del CORE: extremos "farthest-important" por HTF (f_tfExtremes, 51
+// campos). 8 slots FIJOS: OB^ OBv FVG^ FVGv POOL^ POOLv EQH^ EQLv. kind<0 = traspasado/tomado.
+struct SMC_ExtremeSlot { int kind; double top, bottom; int dir; datetime tA, tB; }; // kind==0 => vacío
+struct SMC_TFExtremes  { double pdHigh, pdLow, atr14; SMC_ExtremeSlot slot[8]; };    // 3 escalares + 8×6
 struct SMC_Signal { int dir; double score, entry, sl, tp1, tpExt; string confluences; datetime t; };
 // enums KIND_* (≤53, incl. KIND_GRADIENT=53, KIND_BREAKER/FLIP/MITIGATION/REJECTION/IFVG/BPR),
 //       STATE_* (ciclo de vida §5.4), POSROLE_{INTERNO=0,GIRO=1,ORIGEN=2}, + inputs compartidos
