@@ -1730,7 +1730,8 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
       array.get(mk, 10), array.get(mt, 10), array.get(mb, 10), array.get(mdr, 10), array.get(mta, 10), array.get(mtb, 10),
       array.get(mk, 11), array.get(mt, 11), array.get(mb, 11), array.get(mdr, 11), array.get(mta, 11), array.get(mtb, 11) ]
 
-// === EXTREMOS HTF (fuera del CORE) ===
+
+// --- EXTREMOS HTF (promovido al CORE - Fase B / ADR-018) - cierra 4o punto de verdad ADR-017 ---
 // Selectores farthest-important: espejo conceptual de f_nearestN pero eligen el extremo IMPORTANTE
 // (mas lejano de px, dentro de bound = px ± kExt*rango) por concepto y lado. Puros, RE10045-safe.
 
@@ -1981,7 +1982,6 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
       na(poDl) ? 0 : (poDs ? -KIND_POOL : KIND_POOL), poDl, poDl, poDd, poDa, int(na),
       na(eqUl) ? 0 : (eqUx ? -KIND_EQH : KIND_EQH),  eqUl, eqUl, eqUd, eqUa, eqUb,
       na(eqDl) ? 0 : (eqDx ? -KIND_EQL : KIND_EQL),  eqDl, eqDl, eqDd, eqDa, eqDb ]
-
 // === CALL-SITES: 2a request.security por HTF (motor de extremos, fuera del CORE) ===
 // Igual que el Visual: se piden D1 y H1 SIEMPRE; la cascada por chart-TF la resuelve el revelado.
 [ctxD1_pdH, ctxD1_pdL, ctxD1_atr, ctxD1_k0, ctxD1_t0, ctxD1_b0, ctxD1_d0, ctxD1_ta0, ctxD1_tb0, ctxD1_k1, ctxD1_t1, ctxD1_b1, ctxD1_d1, ctxD1_ta1, ctxD1_tb1, ctxD1_k2, ctxD1_t2, ctxD1_b2, ctxD1_d2, ctxD1_ta2, ctxD1_tb2, ctxD1_k3, ctxD1_t3, ctxD1_b3, ctxD1_d3, ctxD1_ta3, ctxD1_tb3, ctxD1_k4, ctxD1_t4, ctxD1_b4, ctxD1_d4, ctxD1_ta4, ctxD1_tb4, ctxD1_k5, ctxD1_t5, ctxD1_b5, ctxD1_d5, ctxD1_ta5, ctxD1_tb5, ctxD1_k6, ctxD1_t6, ctxD1_b6, ctxD1_d6, ctxD1_ta6, ctxD1_tb6, ctxD1_k7, ctxD1_t7, ctxD1_b7, ctxD1_d7, ctxD1_ta7, ctxD1_tb7] = request.security(syminfo.tickerid, "D", f_tfExtremes(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_kExt, i_extMinStrength, i_ctxMitigated), lookahead = barmerge.lookahead_off)
