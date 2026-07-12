@@ -30,7 +30,7 @@ i_showMajor   = input.bool(true,  "Mostrar estructura dominante (50)", group = G
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
 i_swingStructLen = input.int(20, "Swings: sensibilidad estructura (leg)", minval = 10, group = GRP_STRUCT)
 i_swingMaxKeep   = input.int(350, "Swings: máx. retenidos (historial hacia atrás)", minval = 50, maxval = 600, group = GRP_STRUCT)
-i_swingDomAtr    = input.float(1.5, "Swings: amplitud dominante (×ATR) — jerarquía dim-to-focus", minval = 0.0, step = 0.1, group = GRP_STRUCT)
+i_swingDomAtr    = input.float(4.0, "Swings: amplitud dominante (×ATR) — solo se etiquetan pivotes >= este umbral", minval = 0.0, step = 0.1, group = GRP_STRUCT)
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
 i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
@@ -3131,6 +3131,11 @@ i_profundidad = input.int(3, "Profundidad de proyección (bandas)", minval = 3, 
 // fuerte más lejano DENTRO del clamp. Mata outliers (HH histórico ~1.51 sin significado operativo).
 // Conjetura K=3.0 (Fable) — calibrar EURUSD D1/H1 y XAUJPY antes de congelar (ADR-016 riesgo #4).
 float i_kLeg = input.float(3.0, "K pierna (clamp extremo)", minval = 1.0, maxval = 6.0, step = 0.5, group = GRP_DENS, tooltip = "Extremo de pierna acotado a px ± K×rango vigente y anclado al pool fuerte más lejano dentro del clamp. Mata outliers.")
+// i_swingMinorLabels §F1 [S118]: por default SOLO se etiquetan los swings DOMINANTES (amplitud ÷ATR >=
+// i_swingDomAtr), que son las anclas y caben con la estructura BOS/CHoCH bajo el tope de 500 labels.
+// Activar este knob revela también los pivotes MENORES (tenues), pero SOLO en Estudio+. Declarado aquí
+// (final del bloque de inputs) a propósito: mantiene estable el índice in_N de todos los inputs previos.
+i_swingMinorLabels = input.bool(false, "Swings: etiquetar menores (solo Estudio+)", group = GRP_STRUCT, tooltip = "Off (default) = solo pivotes dominantes (anclas), esqueleto limpio. On = añade los menores tenues en Estudio+. Con i_swingMaxKeep alto + modo Todo puede acercarse al tope de 500 labels de Pine.")
 // --- Matriz modo×familia §8.2 (curacion por familia, ENCIMA del filtro strength) ---
 // modeIdx 0<1<2: mayor = mas laxo (habilita mas familias). Operacion = solo familias de DECISION
 // (OB/Breaker/FVG/IFVG/OTE + anclas); Estudio suma refinamientos (BPR/Mitigation/Vacuum); Todo suma
@@ -4644,14 +4649,16 @@ if barstate.islast and (mtfShowD1 or mtfShowH1)
         f_drawMTFState(h1State, "H1", color.new(color.fuchsia, 0), SMC_mtfLines, SMC_mtfLabels)
         f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir, mtfCurate)
 
-// f_pushSwingLabel §F1 [S117]: dibuja la etiqueta HH/HL/LH/LL de un swing (color direccional, fondo
-// transparente, xloc.bar_time) y la apila. Factorizada -> la usan las DOS capas (detalle minor size.small
-// + esqueleto macro size.normal) sin duplicar el switch/label.new (ahorro de tokens, CE10117). Aquí
-// (tras las declaraciones de color COL_BULL/BEAR/GHOST) para que estén declaradas antes de usarse.
-// [S117-B · dim-to-focus §3 rúbrica] jerarquía por AMPLITUD (sw.strength = tramo ÷ATR): pivote DOMINANTE
-// (>= domAtr) -> size.small + textcolor casi pleno (transp 25); pivote MENOR -> size.tiny + más transparente
-// (transp 65) -> se hunde al fondo sin desaparecer (no se elimina, se atenúa). Familia teal/rojo (§2).
-f_pushSwingLabel(array<label> arr, SMC_Swing sw, float domAtr) =>
+// f_pushSwingLabel §F1 [S117 · rediseño S118]: dibuja la etiqueta HH/HL/LH/LL de un swing (color
+// direccional, fondo transparente, xloc.bar_time) y la apila. Aquí (tras las declaraciones de color
+// COL_BULL/BEAR/GHOST) para que estén declaradas antes de usarse.
+// [S118 · colisión swings ⇄ BOS/CHoCH] Los swings son la MISMA familia teal/rojo que la estructura
+// (rúbrica §2, hue correcto) pero deben leerse como NIVEL L3 (§2bis): el EVENTO (BOS/CHoCH, con línea)
+// pesa más que el NOMBRE del punto. Por eso: size.tiny SIEMPRE (antes dominante usaba size.small = choque
+// con la estructura swing L2, también small); transparencia dominante 45 / menor 75 (dim-to-focus §3).
+// atr = ATR14 vigente: se aplica un offset vertical de 0.3×ATR hacia afuera (arriba en highs, abajo en
+// lows) para DESPEGAR el tag del BOS/CHoCH que suele caer en el mismo pivote (anti-solape §2ter).
+f_pushSwingLabel(array<label> arr, SMC_Swing sw, float domAtr, float atr) =>
     bool isHigh = sw.kind == KIND_HH or sw.kind == KIND_LH
     bool dom = sw.strength >= domAtr
     [txt, col] = switch sw.kind
@@ -4660,7 +4667,8 @@ f_pushSwingLabel(array<label> arr, SMC_Swing sw, float domAtr) =>
         KIND_LH => ["LH", COL_BEAR]
         KIND_LL => ["LL", COL_BEAR]
         => ["?", COL_GHOST]
-    array.push(arr, label.new(sw.barTime, sw.price, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.gray, 100), textcolor = color.new(col, dom ? 25 : 65), size = dom ? size.small : size.tiny, xloc = xloc.bar_time))
+    float yAdj = isHigh ? sw.price + atr * 0.3 : sw.price - atr * 0.3
+    array.push(arr, label.new(sw.barTime, yAdj, txt, style = isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.gray, 100), textcolor = color.new(col, dom ? 45 : 75), size = size.tiny, xloc = xloc.bar_time))
 
 // [S117 · esqueleto único] DIBUJO de la ESTRUCTURA de swings — una sola escala (pivotes DOMINANTES a
 // i_majorLen) con los CUATRO tipos HH/HL/LH/LL, para que la secuencia se lea correcta (subida = HH+HL,
@@ -4668,15 +4676,24 @@ f_pushSwingLabel(array<label> arr, SMC_Swing sw, float domAtr) =>
 // 50 en toda la historia) y llegan hasta el origen (HH 2008). AL FINAL de la sección a propósito: en modo
 // "Todo" las familias crean >500 labels y Pine (max_labels_count=500) borra las creadas PRIMERO; dibujar
 // los swings al último los deja en los slots finales -> sobreviven. islast + xloc.bar_time (RE-safe).
+// [S118] El ETIQUETADO se restringe a los pivotes DOMINANTES (amplitud ÷ATR >= i_swingDomAtr): son las
+// anclas y dejan sitio a la estructura BOS/CHoCH bajo el tope de 500 labels (antes ~350 swings ahogaban
+// la estructura). El array SMC_majorSwingsV (retención FIFO i_swingMaxKeep) queda INTACTO -> historia
+// profunda preservada; solo se recorta lo que se DIBUJA. Dominantes visibles en TODOS los modos (anclas,
+// como pools fuertes); menores = opt-in (i_swingMinorLabels) y SOLO en Estudio+ (evita saturar el budget).
 var array<label> SMC_majorSwingLabels = array.new<label>()
-if i_showSwings and f_famOK(FAM_EST) and barstate.islast
+if i_showSwings and barstate.islast
     for lb in SMC_majorSwingLabels
         label.delete(lb)
     array.clear(SMC_majorSwingLabels)
     int nMj = array.size(SMC_majorSwingsV)
     if nMj > 0
         for i = 0 to nMj - 1
-            f_pushSwingLabel(SMC_majorSwingLabels, array.get(SMC_majorSwingsV, i), i_swingDomAtr)
+            SMC_Swing sw = array.get(SMC_majorSwingsV, i)
+            bool domSw = sw.strength >= i_swingDomAtr
+            bool showSw = domSw or (i_swingMinorLabels and f_famOK(FAM_EST))
+            if showSw
+                f_pushSwingLabel(SMC_majorSwingLabels, sw, i_swingDomAtr, sAtr14)
 
 // --- Helpers de panel [adelanto parcial de PINE-PLAN §5 / T14] (Visual-only) ---
 // Buscan el evento/zona/pool mas relevante para mostrar en el panel. Son de PRESENTACION:
