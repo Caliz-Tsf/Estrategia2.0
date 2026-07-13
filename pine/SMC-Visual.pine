@@ -3261,6 +3261,13 @@ f_renderScoreV2(float strength, int posRole, int confDegree) =>
     float wPos = posRole == 2 ? POS_W_ORIGIN : posRole == 1 ? POS_W_GIRO : POS_W_INT
     strength * wPos * (1.0 + CONF_K * math.min(confDegree, 3))
 
+// f_ySlot §6 curacion S120: cuantiza un nivel Y a una ranura de ~0.5×ATR para el anti-solape de labels
+// (dedup por cercania vertical con string acumulador, patron `seen` §6.5 -> RE10045-safe, sin arrays nuevos).
+// "" cuando no hay ATR/nivel (nunca deduplica en ese caso). Cada sub-familia lleva su propio acumulador.
+f_ySlot(float y) =>
+    float atr = chartState.atr14
+    na(atr) or atr <= 0 or na(y) ? "" : "|" + str.tostring(math.round(y / (0.5 * atr))) + "|"
+
 // --- Anclas estructurales §2.3 (Primarias SIEMPRE, independiente del strength) ---
 // "Zona activa mas cercana por lado": 1 arriba + 1 abajo del precio, la de mayor score_render, sobre
 // OB/FVG/Breaker activos (no mitigados/invalidados). Se precomputan los INDICES en SMC_zones; cada loop
@@ -3501,6 +3508,16 @@ f_mitBg(bool mit, color col, int transp)     => mit ? color(na) : color.new(col,
 f_mitBorder(bool mit, color col, int transp) => mit ? color.new(color.gray, 55) : color.new(col, transp)
 f_mitStyle(bool mit, string st)              => mit ? line.style_dotted : st
 
+// f_zBox / f_zLbl §6 refactor S121 (dieta CE10117): base comun de las familias de zona (OTE/OB/Breaker/
+// IFVG/BPR/MB/Vacuum/FVG/IPR). Comparten el mismo esqueleto de box.new (right = time, border_width = 1,
+// xloc = bar_time) y de label.new centrado (fondo gris invisible, size.small, ancla por tiempo); solo
+// varian bg/borde/estilo/left y x/y/texto/color. Unifican el boilerplate SIN cambiar el render. Devuelven
+// el objeto -> el array.push queda en el top-level (RE10045-safe, no crece arrays dentro de la funcion).
+f_zBox(int leftT, float top, float bottom, color bg, color bc, string bs) =>
+    box.new(left = leftT, top = top, right = time, bottom = bottom, bgcolor = bg, border_color = bc, border_width = 1, border_style = bs, xloc = xloc.bar_time)
+f_zLbl(int x, float y, string txt, color tc) =>
+    label.new(x, y, txt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = tc, size = size.small, xloc = xloc.bar_time)
+
 // f_drawOTE: caja de la zona fib OTE/GP [T22 · §2.5] (solo Visual). GP (Golden Pocket, 50-61.8%) en
 // DORADO; OTE (61.8-79%, mas profunda) en AMBAR mas oscuro -> ambos distintos del OB/FVG. Origen = barra
 // del origen de la pierna; se extiende a la derecha hasta la barra actual. Transparencia por estado; la
@@ -3510,7 +3527,7 @@ f_drawOTE(SMC_Zone z) =>
     col = isGP ? COL_OTE_GP : COL_OTE
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_time)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 50), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas OTE/GP vivas (KIND_GP/KIND_OTE, no invalidadas).
 var array<box>   SMC_oteBoxes  = array.new<box>()
@@ -3529,7 +3546,7 @@ if i_showOTE and barstate.islast
                 array.push(SMC_oteBoxes, f_drawOTE(z))
                 color oteCol = z.kind == KIND_GP ? COL_OTE_GP : COL_OTE
                 string oteTxt = z.kind == KIND_GP ? "GP" : "OTE"
-                array.push(SMC_oteLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, oteTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = oteCol, size = size.small, xloc = xloc.bar_time))
+                array.push(SMC_oteLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, oteTxt, oteCol))
 
 // f_drawPDLine: una linea de nivel del dealing range [T07] (solo Visual). Como LuxAlgo
 // (drawTrailingExtremes :715-732): cada linea se ancla en SU PROPIO extremo via tiempo —
@@ -4188,7 +4205,7 @@ f_drawOB(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 45 : z.state == ZS_PARTIAL ? 62 : 78
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 25), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_time)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 25), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas vivas (evita acumulacion por tick).
 // Cajas <= MAX_ZONES. Las zonas mitigadas se muestran tenues; las invalidadas se
@@ -4202,17 +4219,24 @@ if i_showOB and barstate.islast
         label.delete(lb)
     array.clear(SMC_obBoxes)
     array.clear(SMC_obLabels)
+    string obSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_OB and z.state != ZS_INVALID and (f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx) or f_isBandPick(i, 0, z.top, z.bottom))
-                array.push(SMC_obBoxes, f_drawOB(z))
-                // Nombre del OB (pref. usuario): texto CENTRADO dentro de la caja (medio
-                // horizontal entre origen y barra actual, medio vertical), sin recuadro.
-                color obCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
-                // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
-                string obTxt = z.propulsion ? "OB⇈" : "OB"
-                array.push(SMC_obLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_time))
+            if z.kind == KIND_OB and z.state != ZS_INVALID
+                bool obAnchor = i == anchorHiIdx or i == anchorLoIdx
+                bool obBP     = f_isBandPick(i, 0, z.top, z.bottom)
+                if f_densOK(z.strength, obAnchor) or obBP
+                    array.push(SMC_obBoxes, f_drawOB(z))
+                    // §6 curacion S120 (anti-solape): el IMPORTANTE (band-pick/ancla) se rotula SIEMPRE y marca su
+                    // ranura Y; el resto llena la pierna pero cede el nombre si colisiona con uno ya puesto (<0.5×ATR).
+                    string obKey = f_ySlot((z.top + z.bottom) / 2.0)
+                    if obBP or obAnchor or (obKey != "" and not str.contains(obSeenY, obKey))
+                        obSeenY := obSeenY + obKey
+                        color obCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
+                        // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
+                        string obTxt = z.propulsion ? "OB⇈" : "OB"
+                        array.push(SMC_obLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, obCol))
 
 // f_drawBreaker: caja del Breaker [T19 · §2.6] (solo Visual). Un OB invalidado renacido con polaridad
 // invertida. AZUL de familia (§5.2, como el OB) distinguido por borde PUNTEADO + label BRK; borde
@@ -4223,7 +4247,7 @@ f_drawBreaker(SMC_Zone z) =>
     color glow = z.dir == DIR_BULL ? COL_OB_GLOW_BULL : COL_OB_GLOW_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = color.new(glow, 45), border_width = 1, border_style = line.style_dashed, xloc = xloc.bar_time)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), color.new(glow, 45), line.style_dashed)
 
 // En la ultima barra limpia y repinta las cajas de breaker vivas (KIND_BREAKER, no invalidadas).
 var array<box>   SMC_brkBoxes  = array.new<box>()
@@ -4235,14 +4259,21 @@ if i_showBreaker and barstate.islast
         label.delete(lb)
     array.clear(SMC_brkBoxes)
     array.clear(SMC_brkLabels)
+    string brkSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_BREAKER and z.state != ZS_INVALID and (f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx) or f_isBandPick(i, 2, z.top, z.bottom))
-                array.push(SMC_brkBoxes, f_drawBreaker(z))
-                color brkCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
-                string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
-                array.push(SMC_brkLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_time))
+            if z.kind == KIND_BREAKER and z.state != ZS_INVALID
+                bool brkAnchor = i == anchorHiIdx or i == anchorLoIdx
+                bool brkBP     = f_isBandPick(i, 2, z.top, z.bottom)
+                if f_densOK(z.strength, brkAnchor) or brkBP
+                    array.push(SMC_brkBoxes, f_drawBreaker(z))
+                    string brkKey = f_ySlot((z.top + z.bottom) / 2.0)                                            // §6 curacion S120 anti-solape
+                    if brkBP or brkAnchor or (brkKey != "" and not str.contains(brkSeenY, brkKey))
+                        brkSeenY := brkSeenY + brkKey
+                        color brkCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
+                        string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
+                        array.push(SMC_brkLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, brkCol))
 
 // f_drawIFVG: caja del Inversion FVG [T27 · §5.2] (solo Visual). Un FVG invalidado renacido con
 // polaridad invertida. NARANJA de familia (§5.2, como el FVG) con borde PUNTEADO + label IFVG para
@@ -4251,7 +4282,7 @@ f_drawIFVG(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_dashed), xloc = xloc.bar_time)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 50), f_mitStyle(mit, line.style_dashed))
 
 // En la ultima barra limpia y repinta las cajas IFVG vivas (KIND_IFVG, no invalidadas).
 var array<box>   SMC_ifvgBoxes  = array.new<box>()
@@ -4263,13 +4294,19 @@ if i_showIFVG and barstate.islast
         label.delete(lb)
     array.clear(SMC_ifvgBoxes)
     array.clear(SMC_ifvgLabels)
+    string ifvgSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_IFVG and z.state != ZS_INVALID and f_densOK(z.strength, false)
                 array.push(SMC_ifvgBoxes, f_drawIFVG(z))
-                color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                array.push(SMC_ifvgLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = ifvgCol, size = size.small, xloc = xloc.bar_time))
+                // §6 curacion S120 (anti-solape): IFVG no participa en band-pick -> IMPORTANTE = confluencia >=2
+                // familias apiladas (§7.0.2); el resto llena la pierna pero cede el nombre si colisiona (<0.5×ATR).
+                string ifvgKey = f_ySlot((z.top + z.bottom) / 2.0)
+                if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (ifvgKey != "" and not str.contains(ifvgSeenY, ifvgKey))
+                    ifvgSeenY := ifvgSeenY + ifvgKey
+                    color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
+                    array.push(SMC_ifvgLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", ifvgCol))
 
 // f_drawBPR: caja del Balanced Price Range [T28 · §5.3] (solo Visual). Interseccion de FVG opuestos =
 // zona de reaccion fuerte. NARANJA de familia (§5.2, base; es bidireccional), borde solido + label BPR
@@ -4278,7 +4315,7 @@ f_drawBPR(SMC_Zone z) =>
     col = COL_FVG
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 45), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_time)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 45), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas BPR vivas (KIND_BPR, no invalidadas).
 var array<box>   SMC_bprBoxes  = array.new<box>()
@@ -4290,12 +4327,18 @@ if i_showBPR and barstate.islast
         label.delete(lb)
     array.clear(SMC_bprBoxes)
     array.clear(SMC_bprLabels)
+    string bprSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_BPR and z.state != ZS_INVALID and ((f_famOK(FAM_EST) and f_densOK(z.strength, false)) or f_confDegree((z.top + z.bottom) / 2.0) >= 2)   // §7.2.18 promocion por confluencia
-                array.push(SMC_bprBoxes, f_drawBPR(z))
-                array.push(SMC_bprLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_FVG, size = size.small, xloc = xloc.bar_time))
+            if z.kind == KIND_BPR and z.state != ZS_INVALID
+                int bprCfg = f_confDegree((z.top + z.bottom) / 2.0)
+                if (f_famOK(FAM_EST) and f_densOK(z.strength, false)) or bprCfg >= 2                             // §7.2.18 promocion por confluencia
+                    array.push(SMC_bprBoxes, f_drawBPR(z))
+                    string bprKey = f_ySlot((z.top + z.bottom) / 2.0)                                            // §6 curacion S120 anti-solape
+                    if bprCfg >= 2 or (bprKey != "" and not str.contains(bprSeenY, bprKey))
+                        bprSeenY := bprSeenY + bprKey
+                        array.push(SMC_bprLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", COL_FVG))
 
 // [S107] Drawer de Volume Imbalance [T31 · §5.5] RETIRADO con el concepto (ver nota en la sección de detección).
 
@@ -4338,7 +4381,7 @@ f_drawMB(SMC_Zone z) =>
     bool mit = z.state == ZS_MITIGATED
     // Bull (#0C3A14 verde muy oscuro) se difumina mas con el fondo -> mas opaco que bear (#7A1212, ok tal cual).
     int transp = z.dir == DIR_BULL ? (z.state == ZS_ACTIVE ? 50 : z.state == ZS_PARTIAL ? 65 : 80) : (z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92)
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = color.new(glow, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_time)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), color.new(glow, 45), line.style_dotted)
 
 // En la ultima barra limpia y repinta las cajas de mitigation block vivas (KIND_MITIGATION, no invalidadas).
 var array<box>   SMC_mbBoxes  = array.new<box>()
@@ -4350,13 +4393,19 @@ if i_showMB and barstate.islast
         label.delete(lb)
     array.clear(SMC_mbBoxes)
     array.clear(SMC_mbLabels)
+    string mbSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID and ((f_famOK(FAM_EST) and f_densOK(z.strength, false)) or f_confDegree((z.top + z.bottom) / 2.0) >= 2)   // §7.2.11 promocion por confluencia (requisito >=2)
-                array.push(SMC_mbBoxes, f_drawMB(z))
-                color mbCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
-                array.push(SMC_mbLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_time))
+            if z.kind == KIND_MITIGATION and z.state != ZS_INVALID
+                int mbCfg = f_confDegree((z.top + z.bottom) / 2.0)
+                if (f_famOK(FAM_EST) and f_densOK(z.strength, false)) or mbCfg >= 2                              // §7.2.11 promocion por confluencia (requisito >=2)
+                    array.push(SMC_mbBoxes, f_drawMB(z))
+                    string mbKey = f_ySlot((z.top + z.bottom) / 2.0)                                             // §6 curacion S120 anti-solape
+                    if mbCfg >= 2 or (mbKey != "" and not str.contains(mbSeenY, mbKey))
+                        mbSeenY := mbSeenY + mbKey
+                        color mbCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
+                        array.push(SMC_mbLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", mbCol))
 
 // Cajas de Vacuum Block [T33 · §5.7] (solo Visual). Vacio de apertura (gap grande) = iman de retorno.
 // AZUL de familia (§5.2, base COL_OB), borde punteado. No invalidada. Origen = barra del gap; se extiende a la actual.
@@ -4369,13 +4418,17 @@ if i_showVacuum and barstate.islast
         label.delete(lb)
     array.clear(SMC_vacBoxes)
     array.clear(SMC_vacLabels)
+    string vacSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 bool vacMit = z.state == ZS_MITIGATED
-                array.push(SMC_vacBoxes, box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(vacMit, COL_OB, 84), border_color = f_mitBorder(vacMit, COL_OB, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_time))
-                array.push(SMC_vacLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB_TXT_BULL, size = size.small, xloc = xloc.bar_time))
+                array.push(SMC_vacBoxes, f_zBox(z.barTime, z.top, z.bottom, f_mitBg(vacMit, COL_OB, 84), f_mitBorder(vacMit, COL_OB, 45), line.style_dotted))
+                string vacKey = f_ySlot((z.top + z.bottom) / 2.0)                                               // §6 curacion S120 anti-solape
+                if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (vacKey != "" and not str.contains(vacSeenY, vacKey))
+                    vacSeenY := vacSeenY + vacKey
+                    array.push(SMC_vacLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", COL_OB_TXT_BULL))
 
 // Zona IPR vigente [T35 · §5.9] (solo Visual): rango desbalanceado (contexto de bias). Borde fino sin
 // relleno (es contexto, no zona de entrada), color por dir. Solo la actual (currentIpr), repintada-en-islast.
@@ -4386,7 +4439,7 @@ if i_showIPR and barstate.islast
     label.delete(SMC_iprLbl)
     if not na(currentIpr) and f_famOK(FAM_TODO) and f_densOK(currentIpr.strength, false)
         color iprc = currentIpr.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-        SMC_iprBox := box.new(left = currentIpr.barTime - i_iprWindow * barMs, top = currentIpr.top, right = time, bottom = currentIpr.bottom, bgcolor = color.new(iprc, 95), border_color = color.new(iprc, 40), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_time)
+        SMC_iprBox := f_zBox(currentIpr.barTime - i_iprWindow * barMs, currentIpr.top, currentIpr.bottom, color.new(iprc, 95), color.new(iprc, 40), line.style_dotted)
         SMC_iprLbl := label.new(time, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, "IPR", style = label.style_label_left, color = color.new(iprc, 85), textcolor = iprc, size = size.tiny, xloc = xloc.bar_time)
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
@@ -4399,7 +4452,7 @@ f_drawFVG(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barTime - barMs, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 60), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_time)
+    f_zBox(z.barTime - barMs, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 60), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas FVG + lineas CE vivas. Las mitigadas se
 // muestran tenues sin CE; las invalidadas se omiten (el gap quedo rellenado por completo).
@@ -4416,21 +4469,28 @@ if i_showFVG and barstate.islast
     array.clear(SMC_fvgBoxes)
     array.clear(SMC_fvgCELines)
     array.clear(SMC_fvgLabels)
+    string fvgSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
-            if z.kind == KIND_FVG and z.state != ZS_INVALID and (f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx) or f_isBandPick(i, 1, z.top, z.bottom))
-                array.push(SMC_fvgBoxes, f_drawFVG(z))
-                // Nombre del FVG (pref. usuario): texto CENTRADO dentro de la caja (medio
-                // horizontal entre origen y barra actual, medio vertical), sin recuadro.
-                color fvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
-                string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
-                array.push(SMC_fvgLabels, label.new(math.round((z.barTime - barMs + time) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = fvgCol, size = size.small, xloc = xloc.bar_time))
-                if i_showCE and z.state != ZS_MITIGATED
-                    float ce = (z.top + z.bottom) / 2.0
-                    color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                    array.push(SMC_fvgCELines, line.new(z.barTime - barMs, ce, time, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_time))
+            if z.kind == KIND_FVG and z.state != ZS_INVALID
+                bool fvgAnchor = i == anchorHiIdx or i == anchorLoIdx
+                bool fvgBP     = f_isBandPick(i, 1, z.top, z.bottom)
+                if f_densOK(z.strength, fvgAnchor) or fvgBP
+                    array.push(SMC_fvgBoxes, f_drawFVG(z))
+                    // §6 curacion S120 (anti-solape): el IMPORTANTE (band-pick/ancla) se rotula SIEMPRE; el resto
+                    // llena la pierna pero cede el nombre si colisiona con uno ya puesto (<0.5×ATR) -> mata la pila cerca del precio.
+                    string fvgKey = f_ySlot((z.top + z.bottom) / 2.0)
+                    if fvgBP or fvgAnchor or (fvgKey != "" and not str.contains(fvgSeenY, fvgKey))
+                        fvgSeenY := fvgSeenY + fvgKey
+                        color fvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
+                        // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
+                        string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
+                        array.push(SMC_fvgLabels, f_zLbl(math.round((z.barTime - barMs + time) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, fvgCol))
+                    if i_showCE and z.state != ZS_MITIGATED
+                        float ce = (z.top + z.bottom) / 2.0
+                        color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
+                        array.push(SMC_fvgCELines, line.new(z.barTime - barMs, ce, time, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_time))
 
 // --- §6.5 · DESALOJO DETERMINISTA de eventos nativos L3 [Eje2 · Paso 6 · S090] ---
 // Punto unico: todas las familias nativas discrecionales ya estan construidas + top-N'd; la capa MTF
