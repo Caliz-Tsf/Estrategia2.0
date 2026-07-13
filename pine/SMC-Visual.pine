@@ -3090,12 +3090,20 @@ color COL_SSL     = color.rgb(94, 196, 112) // liquidez SSL (bajo lows, para com
 color COL_PREM    = color.red               // Premium (zona de venta del dealing range)
 color COL_DISC    = color.green             // Discount (zona de compra)
 // --- Familias, hue por familia (§5.2); tono claro=alcista / oscuro=bajista ---
-color COL_OB_BULL = color.rgb(74, 130, 235) // OB/Breaker/MB/Vacuum (azul) alcista
-color COL_OB_BEAR = color.rgb(26, 72, 184)  // azul bajista
-color COL_OB      = #2962FF                 // azul base (neutro, p.ej. Vacuum/BPR-azul)
-color COL_FVG_BULL= color.rgb(255, 183, 77) // FVG/IFVG/BPR/IR/VI/IPR/opening-gaps (naranja) alcista
-color COL_FVG_BEAR= color.rgb(239, 108, 0)  // naranja bajista
-color COL_FVG     = #FF9800                 // naranja base (neutro/bidireccional)
+// Direccion por FAMILIA verde/rojo (pedido usuario S119): bloque(OB/Breaker/MB/Vacuum) tono OSCURO;
+// imbalance(FVG/IFVG/BPR/IR/IPR/gaps) tono CLARO/neon (el borde fosforescente sale del col con transp menor).
+color COL_OB_BULL = #0C3A14                 // OB/Breaker/MB/Vacuum ALCISTA: verde muy oscuro
+color COL_OB_BEAR = #7A1212                 // OB/Breaker/MB/Vacuum BAJISTA: rojo muy oscuro
+color COL_OB      = #2E7D32                 // bloque base (neutro, p.ej. Vacuum): verde medio
+color COL_FVG_BULL= #00E676                 // FVG/IFVG/BPR/IR/IPR/gaps ALCISTA: verde neon (claro)
+color COL_FVG_BEAR= #FFC400                 // FVG/IFVG/BPR/IR/IPR/gaps BAJISTA: amarillo-naranja claro
+color COL_FVG     = #FFC400                 // imbalance base (neutro/bidireccional)
+// Texto de etiqueta legible sobre relleno OSCURO de bloque (OB/Breaker/MB/Vacuum)
+color COL_OB_TXT_BULL = #81C784             // label verde claro (legible sobre verde oscuro)
+color COL_OB_TXT_BEAR = #EF9A9A             // label rojo claro (legible sobre rojo oscuro)
+// Borde FOSFORESCENTE de re-rol bloque (Breaker rayas / MB puntos) — brilla en ambas direcciones
+color COL_OB_GLOW_BULL = #39FF14            // borde neon alcista
+color COL_OB_GLOW_BEAR = #FF3131            // borde neon bajista
 color COL_LIQ     = #9C27B0                 // liquidez-evento: sweeps ctx / IDM / Judas / EQH-EQL (violeta)
 color COL_OTE_GP  = color.rgb(212, 175, 55) // Golden Pocket (ambar claro)
 color COL_OTE     = color.rgb(150, 110, 20) // OTE profundo (ambar oscuro)
@@ -4040,15 +4048,17 @@ if i_showIR and f_famOK(FAM_EST) and barstate.islast                            
     for lb in SMC_irLabels
         label.delete(lb)
     array.clear(SMC_irLabels)
-    int irOffMs = 3 * (time - time[1])
     int nIR = array.size(SMC_ir)
     if nIR > 0
-        int firstIR = math.max(0, nIR - i_maxShowIR)
-        for i = firstIR to nIR - 1
+        // Poblar hacia atras: recorre TODOS los IR pero SOLO dibuja los que importan (confluencia >= 2 familias
+        // activas apiladas §7.0.2). Un IR suelto a mitad de rango (deg 0-1) = ruido -> se descarta. Es un EVENTO
+        // terciario, no zona: marca = triangulo direccional SIN texto (verde alcista / rojo bajista, tono OB).
+        for i = 0 to nIR - 1
             SMC_Event ir = array.get(SMC_ir, i)
-            bool bullIr = ir.dir == DIR_BULL
-            string irtxt = bullIr ? "IR ↑" : "IR ↓"
-            array.push(SMC_irLabels, label.new(ir.barTime + irOffMs, ir.price, irtxt, style = label.style_label_left, color = color.new(COL_FVG, 70), textcolor = COL_FVG, size = size.tiny, xloc = xloc.bar_time))
+            if f_confDegree(ir.price) >= 2
+                bool bullIr = ir.dir == DIR_BULL
+                // Evento terciario: glifo triangulo pequeño (▲/▼ a size.tiny) FUERA de la vela (alcista debajo / bajista encima).
+                array.push(SMC_irLabels, label.new(ir.barTime, ir.price, bullIr ? "▲" : "▼", yloc = bullIr ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = bullIr ? #00C853 : #FF1744, size = size.tiny, xloc = xloc.bar_time))
 
 // Marcadores de CISD [T32 · §5.6]. Mismo patron repintado-en-islast (acotado a i_maxShowCISD). Cambio de
 // estado de entrega anclado al origen del run roto. Direccional teal/rojo (familia estructura, §5.2), flecha por dir.
@@ -4263,8 +4273,8 @@ if i_showInsideDay and f_famOK(FAM_EST) and barstate.islast                     
 f_drawOB(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
     bool mit = z.state == ZS_MITIGATED
-    int transp = z.state == ZS_ACTIVE ? 75 : z.state == ZS_PARTIAL ? 83 : 90
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_time)
+    int transp = z.state == ZS_ACTIVE ? 45 : z.state == ZS_PARTIAL ? 62 : 78
+    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 25), border_width = 1, border_style = f_mitStyle(mit, line.style_solid), xloc = xloc.bar_time)
 
 // En la ultima barra limpia y repinta las cajas vivas (evita acumulacion por tick).
 // Cajas <= MAX_ZONES. Las zonas mitigadas se muestran tenues; las invalidadas se
@@ -4285,7 +4295,7 @@ if i_showOB and barstate.islast
                 array.push(SMC_obBoxes, f_drawOB(z))
                 // Nombre del OB (pref. usuario): texto CENTRADO dentro de la caja (medio
                 // horizontal entre origen y barra actual, medio vertical), sin recuadro.
-                color obCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
+                color obCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                 // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
                 string obTxt = z.propulsion ? "OB⇈" : "OB"
                 array.push(SMC_obLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = obCol, size = size.small, xloc = xloc.bar_time))
@@ -4296,9 +4306,10 @@ if i_showOB and barstate.islast
 // left = origen del OB padre (se conserva en barIdx); se extiende a la derecha hasta la barra actual.
 f_drawBreaker(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
+    color glow = z.dir == DIR_BULL ? COL_OB_GLOW_BULL : COL_OB_GLOW_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 45), border_width = 1, border_style = f_mitStyle(mit, line.style_dashed), xloc = xloc.bar_time)
+    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = color.new(glow, 45), border_width = 1, border_style = line.style_dashed, xloc = xloc.bar_time)
 
 // En la ultima barra limpia y repinta las cajas de breaker vivas (KIND_BREAKER, no invalidadas).
 var array<box>   SMC_brkBoxes  = array.new<box>()
@@ -4315,7 +4326,7 @@ if i_showBreaker and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_BREAKER and z.state != ZS_INVALID and (f_densOK(z.strength, i == anchorHiIdx or i == anchorLoIdx) or f_isBandPick(i, 2, z.top, z.bottom))
                 array.push(SMC_brkBoxes, f_drawBreaker(z))
-                color brkCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
+                color brkCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                 string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
                 array.push(SMC_brkLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = brkCol, size = size.small, xloc = xloc.bar_time))
 
@@ -4409,9 +4420,11 @@ if i_showOpenGaps and barstate.islast
 // se extiende a la derecha hasta la barra actual. Transparencia por estado; la invalidada no se dibuja.
 f_drawMB(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
+    color glow = z.dir == DIR_BULL ? COL_OB_GLOW_BULL : COL_OB_GLOW_BEAR
     bool mit = z.state == ZS_MITIGATED
-    int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = f_mitBorder(mit, col, 50), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_time)
+    // Bull (#0C3A14 verde muy oscuro) se difumina mas con el fondo -> mas opaco que bear (#7A1212, ok tal cual).
+    int transp = z.dir == DIR_BULL ? (z.state == ZS_ACTIVE ? 50 : z.state == ZS_PARTIAL ? 65 : 80) : (z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92)
+    box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(mit, col, transp), border_color = color.new(glow, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_time)
 
 // En la ultima barra limpia y repinta las cajas de mitigation block vivas (KIND_MITIGATION, no invalidadas).
 var array<box>   SMC_mbBoxes  = array.new<box>()
@@ -4428,7 +4441,7 @@ if i_showMB and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_MITIGATION and z.state != ZS_INVALID and ((f_famOK(FAM_EST) and f_densOK(z.strength, false)) or f_confDegree((z.top + z.bottom) / 2.0) >= 2)   // §7.2.11 promocion por confluencia (requisito >=2)
                 array.push(SMC_mbBoxes, f_drawMB(z))
-                color mbCol = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
+                color mbCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                 array.push(SMC_mbLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = mbCol, size = size.small, xloc = xloc.bar_time))
 
 // Cajas de Vacuum Block [T33 · §5.7] (solo Visual). Vacio de apertura (gap grande) = iman de retorno.
@@ -4448,7 +4461,7 @@ if i_showVacuum and barstate.islast
             if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 bool vacMit = z.state == ZS_MITIGATED
                 array.push(SMC_vacBoxes, box.new(left = z.barTime, top = z.top, right = time, bottom = z.bottom, bgcolor = f_mitBg(vacMit, COL_OB, 84), border_color = f_mitBorder(vacMit, COL_OB, 45), border_width = 1, border_style = line.style_dotted, xloc = xloc.bar_time))
-                array.push(SMC_vacLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB, size = size.small, xloc = xloc.bar_time))
+                array.push(SMC_vacLabels, label.new(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", style = label.style_label_center, color = color.new(color.gray, 100), textcolor = COL_OB_TXT_BULL, size = size.small, xloc = xloc.bar_time))
 
 // Zona IPR vigente [T35 · §5.9] (solo Visual): rango desbalanceado (contexto de bias). Borde fino sin
 // relleno (es contexto, no zona de entrada), color por dir. Solo la actual (currentIpr), repintada-en-islast.
