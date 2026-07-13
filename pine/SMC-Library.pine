@@ -258,12 +258,6 @@ export f_pushSwing(array<SMC_Swing> a, SMC_Swing s, int maxN, int biasDir) =>
         array.shift(a)
     array.size(a)
 
-export f_pushPool(array<SMC_Pool> a, SMC_Pool p, int maxN, float curPrice, float atr14) =>
-    p.strength := f_poolStrength(p, curPrice, atr14)
-    array.push(a, p)
-    if array.size(a) > maxN
-        array.shift(a)
-    array.size(a)
 
 // --- Swings + clasificacion HH/HL/LH/LL [reglas-smc-ict §1.1/§1.2] · T02 ---
 // f_detectSwings: pivote simetrico estricto. high[len] > high de las len velas a
@@ -622,15 +616,6 @@ export f_detectImmediateRebalance(float o1, float h1, float l1, float c1, float 
 // f_detectVolumeImbalance: micro-gap entre cuerpos de velas consecutivas CON solape de mechas (vs FVG,
 // hueco entre extremos). BIVI: open>close previo (gap>=viThreshold*ATR) y low<=high previo. SIVI
 // simetrico. Zona micro [close_previo, open_actual]. 1 familia ([FIX P-05]). PURA. Devuelve KIND_VI o na.
-export f_detectVolumeImbalance(float o0, float h0, float l0, float cPrev, float hPrev, float lPrev, float atr14, float viThreshold, int barIdx, int barTime) =>
-    SMC_Zone z = na
-    if not na(atr14)
-        float thr = viThreshold * atr14
-        if o0 > cPrev and (o0 - cPrev) >= thr and l0 <= hPrev
-            z := SMC_Zone.new(o0, cPrev, DIR_BULL, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
-        else if o0 < cPrev and (cPrev - o0) >= thr and h0 >= lPrev
-            z := SMC_Zone.new(cPrev, o0, DIR_BEAR, barIdx, barTime, ZS_ACTIVE, 0.0, "", KIND_VI)
-    z
 
 // --- Gaps de apertura — NWOG/NDOG/NYMO + Breakaway [reglas-smc-ict §5.10] · T30 ---
 // f_classifyOpenGap: clasifica el salto cierre_previo -> open_nuevo en la frontera. [measurable, dir]:
@@ -733,8 +718,6 @@ export f_detectSMT(bool chartNewSH, float chSHcur, float chSHprev, bool chartNew
 // f_projStdDev: HERRAMIENTA de proyeccion (NO confluencia). Rango ancla [a=origen, b=extremo]; proyecta
 // nivel = b + n*(b - a) (continuacion, n=1/2/2.5/4 = multiplos estandar ICT). Insumo de f_computeSLTP,
 // no scoring. PURA. Devuelve el nivel proyectado.
-export f_projStdDev(float a, float b, float n) =>
-    b + n * (b - a)
 
 // --- CISD — Change in State of Delivery [reglas-smc-ict §5.6] · T32 ---
 // f_detectCISD: cierre que cruza el ORIGEN (open de la 1a vela) del ultimo run de delivery (>= cisdMinRun
@@ -1015,19 +998,6 @@ export f_computeGradientLevels(float top, float bottom, bool includeEighths) =>
 // f_gradientZone: clasifica 'price' contra un grid ya calculado. Devuelve [idxMasCercano,
 // distEnATR]: indice del nivel mas cercano en 'levels' y |price-level|/atr. PURA.
 // Grid vacio o atr invalido -> [na, na].
-export f_gradientZone(float price, array<float> levels, float atr) =>
-    int   idx  = na
-    float dist = na
-    int n = array.size(levels)
-    if n > 0 and not na(price) and not na(atr) and atr > 0
-        float best = na
-        for i = 0 to n - 1
-            float d = math.abs(price - array.get(levels, i))
-            if na(best) or d < best
-                best := d
-                idx  := i
-        dist := best / atr
-    [idx, dist]
 
 // f_nearGradientLevel: test booleano "price toca/esta sobre un gradient level". 'tol' en
 // PRECIO (el consumidor pasa gradTol*ATR14). Consumido por T42 (confluencia) y T43
@@ -1072,11 +1042,6 @@ export f_bodyRespectsLevel(array<float> recentOpens, array<float> recentCloses, 
 // scoreDir_raw en Fase 2 (F2-T01). Forma creciente saturante: (gradMultMax-1)*(1-e^(-k*n));
 // n=0 -> 0 (neutro), n->inf -> gradMultMax-1 (tope). gradMultMax y k = calibracion Fase 3
 // (ADR-002). PURA -> golden test MQL5 directo. n<=0 o params invalidos -> 0.
-export f_gradientConfluenceBonus(int nSobreQuadrant, float gradMultMax, float k) =>
-    float bonus = 0.0
-    if nSobreQuadrant > 0 and gradMultMax > 1.0 and k > 0
-        bonus := (gradMultMax - 1.0) * (1.0 - math.exp(-k * nSobreQuadrant))
-    bonus
 
 // f_selectGradientSource: politica de rango-fuente (regla §5.16). P1 (dealing range) es la
 // fuente por defecto; P2 (suspension diario) la desafia SOLO cuando P1 es "stale" (swing
@@ -1132,57 +1097,6 @@ export f_detectEQHL(bool isHigh, float curPrice, int curBarIdx, int curBarTime, 
 // aporta 1. Cluster con touches >= minTouches -> SMC_Pool (level = promedio, dir = +1 BSL /
 // -1 SSL, touches = suma, barTime = mas reciente, swept = false; el sweep es T10). Diseño
 // propio (LuxAlgo no tiene pools). PURA -> golden tests MQL5 (ADR-002).
-export f_buildPools(array<SMC_Event> eqhl, array<SMC_Swing> swings, float tolPrice, int minTouches) =>
-    array<SMC_Pool> pools = array.new<SMC_Pool>()
-    for side = 0 to 1
-        bool isHigh = side == 0
-        array<float> lv = array.new<float>()
-        array<int>   wt = array.new<int>()
-        array<int>   tm = array.new<int>()
-        if array.size(eqhl) > 0
-            for j = 0 to array.size(eqhl) - 1
-                SMC_Event e = array.get(eqhl, j)
-                if (isHigh and e.kind == KIND_EQH) or (not isHigh and e.kind == KIND_EQL)
-                    array.push(lv, e.price)
-                    array.push(wt, 2)
-                    array.push(tm, e.barTime)
-        if array.size(swings) > 0
-            for m = 0 to array.size(swings) - 1
-                SMC_Swing s = array.get(swings, m)
-                bool hi = s.kind == KIND_HH or s.kind == KIND_LH
-                bool lo = s.kind == KIND_HL or s.kind == KIND_LL
-                if not s.swept and ((isHigh and hi) or (not isHigh and lo))
-                    array.push(lv, s.price)
-                    array.push(wt, 1)
-                    array.push(tm, s.barTime)
-        int n = array.size(lv)
-        if n > 0
-            array<int> ord = array.sort_indices(lv, order.ascending)
-            float clSum   = na
-            int   clCount = 0
-            int   clTouch = 0
-            int   clTime  = 0
-            for k = 0 to n - 1
-                int   idx   = array.get(ord, k)
-                float level = array.get(lv, idx)
-                int   w     = array.get(wt, idx)
-                int   t     = array.get(tm, idx)
-                float clMean = clCount > 0 ? clSum / clCount : na
-                if clCount > 0 and math.abs(level - clMean) <= tolPrice
-                    clSum   := clSum + level
-                    clCount := clCount + 1
-                    clTouch := clTouch + w
-                    clTime  := t > clTime ? t : clTime
-                else
-                    if clCount > 0 and clTouch >= minTouches
-                        array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
-                    clSum   := level
-                    clCount := 1
-                    clTouch := w
-                    clTime  := t
-            if clCount > 0 and clTouch >= minTouches
-                array.push(pools, SMC_Pool.new(clSum / clCount, isHigh ? DIR_BULL : DIR_BEAR, clTouch, clTime, false, ""))
-    pools
 
 // --- Ciclo de vida de pools: upsert + barrido (sweep) [reglas-smc-ict §3.1/§3.2] · T09b/T10 ---
 // Modelo PERSISTENTE: el consumidor mantiene el set de pools entre velas y lo actualiza incremental
