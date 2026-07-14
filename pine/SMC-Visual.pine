@@ -3518,6 +3518,43 @@ f_zBox(int leftT, float top, float bottom, color bg, color bc, string bs) =>
 f_zLbl(int x, float y, string txt, color tc) =>
     label.new(x, y, txt, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = tc, size = size.small, xloc = xloc.bar_time)
 
+// f_evLbl §6 refactor + anti-solape S122 (misma dieta CE10117 que f_zBox/f_zLbl): base comun de las familias
+// de EVENTO (sweep/disp/IDM/CISD/SMT/Judas/Rej/flip/EMA bounce-cross-stack/FB/leg/ID/bag). Todas comparten el
+// mismo esqueleto de label.new (size.tiny, xloc = bar_time, fondo color.new(bg, transp)); solo varian ancla,
+// estilo, texto y color. Unifica el boilerplate SIN cambiar el render.
+// FUERA: el triangulo de IR (yloc.abovebar/belowbar + style_none, sin fondo) no comparte el esqueleto; la
+// columna del borde derecho (pools/P-D/gradient en bar_index+2) vive en otro espacio X.
+//
+// ANTI-SOLAPE: las zonas comparten franja horizontal y les basta el dedup por Y (f_ySlot); un evento vive en
+// un PUNTO (x, precio) -> dos solo se pisan si estan cerca en AMBOS ejes. Deduplicar un evento solo por Y
+// borraria eventos legitimos separados en el tiempo (dos "Rej" al mismo precio con meses de distancia no se
+// tapan). Ranura 2D = 3 velas x 0.5xATR (misma cuantizacion Y que f_ySlot).
+// Acumulador COMPARTIDO por todas las familias (un "IDM" y un "Rej" en el mismo punto SI se pisan entre si):
+// vive en un array<string> de tamano 1 porque Pine no deja mutar un string global dentro de una funcion, pero
+// los arrays van por REFERENCIA. Tamano FIJO, solo get/set, nunca push -> RE10045-safe.
+// Prioridad = ORDEN DE DIBUJO: las familias de mas senal (sweep/disp/IDM) se dibujan antes y se quedan el
+// nombre; las auxiliares (EMA/ID) ceden. Cede el NOMBRE, nunca la marca del concepto. Aplica en TODOS los
+// modos: "Todo" muestra todos los conceptos, no dos nombres en el mismo pixel.
+// Devuelve na si la ranura ya esta tomada -> la label NO se crea: ademas de no pisar, libera presupuesto del
+// tope max_labels_count = 500 (que ya mordia: ~501 labels en Todo, y Pine desaloja los MAS VIEJOS = los de
+// mas senal). array.push de un na y label.delete(na) son no-op seguros.
+// evXq/evYq: cuantizadores precomputados 1x por vela (fuera del cuerpo, que se paga por cada call-site).
+// La clave empaqueta ambas ranuras en UN solo numero (x*1e5 + y) -> un str.tostring en vez de dos. El bucket
+// Y ronda las centenas (1.14 / 0.004 ~ 285) y el X los millares, muy por debajo del 1e5 -> sin colision.
+int   evXq = 3 * barMs
+float evYq = 0.5 * chartState.atr14
+var array<string> evSeen = array.new<string>(1, "")
+f_evLbl(int x, float y, string st, string txt, color bg, int transp, color tc) =>
+    string k = na(evYq) or evYq <= 0 ? "" : "|" + str.tostring(math.round(x / evXq) * 100000.0 + math.round(y / evYq)) + "|"
+    label lb = na
+    if k == "" or not str.contains(array.get(evSeen, 0), k)
+        array.set(evSeen, 0, array.get(evSeen, 0) + k)
+        lb := label.new(x, y, txt, style = st, color = color.new(bg, transp), textcolor = tc, size = size.tiny, xloc = xloc.bar_time)
+    lb
+// Reset por pasada de dibujo: los drawers de evento corren todos en islast por debajo de esta linea.
+if barstate.islast
+    array.set(evSeen, 0, "")
+
 // f_drawOTE: caja de la zona fib OTE/GP [T22 · §2.5] (solo Visual). GP (Golden Pocket, 50-61.8%) en
 // DORADO; OTE (61.8-79%, mas profunda) en AMBAR mas oscuro -> ambos distintos del OB/FVG. Origen = barra
 // del origen de la pierna; se extiende a la derecha hasta la barra actual. Transparencia por estado; la
@@ -3926,7 +3963,7 @@ if i_showSweeps and barstate.islast
             // de rango) / sweep simple. El texto distingue los tres; el color sigue el sesgo del sweep.
             string sbase = sw.kind == KIND_RAID ? "⚡ Raid" : sw.kind == KIND_SPRING ? "⇧ Spring" : "✗ Sweep"
             string stxt = sbase + (bearTrap ? " ↓" : " ↑")
-            array.push(SMC_sweepLabels, label.new(sw.barTime, sw.price, stxt, style = bearTrap ? label.style_label_down : label.style_label_up, color = color.new(scol, 70), textcolor = scol, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_sweepLabels, f_evLbl(sw.barTime, sw.price, bearTrap ? label.style_label_down : label.style_label_up, stxt, scol, 70, scol))
 
 // Marcadores de Displacement [T16 · §4.1]. Mismo patron repintado-en-islast que los sweeps
 // (objetos acotados a i_maxShowDisp). Naranja: lo distingue del teal/rojo de estructura y del
@@ -3947,7 +3984,7 @@ if i_showDisp and f_famOK(FAM_EST) and barstate.islast                          
             SMC_Event dp = array.get(SMC_displacements, i)
             bool bull = dp.dir == DIR_BULL
             string dtxt = bull ? "⚡ Disp ↑" : "⚡ Disp ↓"
-            array.push(SMC_dispLabels, label.new(dp.barTime + dispOffMs, dp.price, dtxt, style = label.style_label_left, color = color.new(COL_FVG, 75), textcolor = COL_FVG, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_dispLabels, f_evLbl(dp.barTime + dispOffMs, dp.price, label.style_label_left, dtxt, COL_FVG, 75, COL_FVG))
 
 // Marcadores de IDM [T17 · §3.6]. Mismo patron repintado-en-islast (acotado a i_maxShowIDM).
 // VIOLETA (familia liquidez, §5.2, COL_LIQ). Direccion en la
@@ -3969,7 +4006,7 @@ if i_showIDM and barstate.islast
             if f_famOK(FAM_EST) or f_isBandPick(i, 3, im.price, im.price)
                 bool bullIdm = im.dir == DIR_BULL
                 string itxt = bullIdm ? "IDM ↑" : "IDM ↓"
-                array.push(SMC_idmLabels, label.new(im.barTime + idmOffMs, im.price, itxt, style = label.style_label_left, color = color.new(COL_LIQ, 75), textcolor = COL_LIQ, size = size.tiny, xloc = xloc.bar_time))
+                array.push(SMC_idmLabels, f_evLbl(im.barTime + idmOffMs, im.price, label.style_label_left, itxt, COL_LIQ, 75, COL_LIQ))
 
 // Marcadores de Immediate Rebalance [T29 · §5.4]. Mismo patron repintado-en-islast (acotado a
 // i_maxShowIR). NARANJA (familia imbalance, §5.2, COL_FVG). Anclado al 50% de la vela de impulso rebalanceada;
@@ -4005,7 +4042,7 @@ if i_showCISD and f_famOK(FAM_EST) and barstate.islast                          
             SMC_Event ce = array.get(SMC_cisd, i)
             bool bullC = ce.dir == DIR_BULL
             string ctxt = bullC ? "CISD ↑" : "CISD ↓"
-            array.push(SMC_cisdLabels, label.new(ce.barTime, ce.price, ctxt, style = bullC ? label.style_label_up : label.style_label_down, color = color.new(bullC ? COL_BULL : COL_BEAR, 65), textcolor = bullC ? COL_BULL : COL_BEAR, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_cisdLabels, f_evLbl(ce.barTime, ce.price, bullC ? label.style_label_up : label.style_label_down, ctxt, bullC ? COL_BULL : COL_BEAR, 65, bullC ? COL_BULL : COL_BEAR))
 
 // Marcadores de SMT Divergence [T38 · §5.13]. Mismo patron repintado-en-islast (acotado a i_maxShowSMT).
 // Divergencia con el par correlacionado (senal de calidad alta). NARANJA fuerte, flecha por dir real.
@@ -4021,7 +4058,7 @@ if i_smtEnable and barstate.islast
             SMC_Event se = array.get(SMC_smt, i)
             bool bullS = se.dir == DIR_BULL
             string stxt = bullS ? "SMT ↑" : "SMT ↓"
-            array.push(SMC_smtLabels, label.new(se.barTime, se.price, stxt, style = bullS ? label.style_label_up : label.style_label_down, color = color.new(bullS ? COL_BULL : COL_BEAR, 55), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_smtLabels, f_evLbl(se.barTime, se.price, bullS ? label.style_label_up : label.style_label_down, stxt, bullS ? COL_BULL : COL_BEAR, 55, color.white))
 
 // Marcadores de Judas [T18 · §3.5]. Mismo patron repintado-en-islast (acotado a i_maxShowJudas).
 // Fucsia: lo distingue del naranja (displacement), amarillo (IDM) y verde/rojo (sweep). La trampa de
@@ -4041,7 +4078,7 @@ if i_showJudas and f_famOK(FAM_EST) and barstate.islast                         
             SMC_Event jd = array.get(SMC_judas, i)
             bool bullJudas = jd.dir == DIR_BULL
             string jtxt = bullJudas ? "Judas ↑" : "Judas ↓"
-            array.push(SMC_judasLabels, label.new(jd.barTime + judasOffMs, jd.price, jtxt, style = label.style_label_left, color = color.new(COL_LIQ, 70), textcolor = COL_LIQ, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_judasLabels, f_evLbl(jd.barTime + judasOffMs, jd.price, label.style_label_left, jtxt, COL_LIQ, 70, COL_LIQ))
 
 // Marcadores de Rejection [T20 · §2.7]. Mismo patron repintado-en-islast (acotado a i_maxShowRej).
 // AQUA: lo distingue del naranja (disp), amarillo (IDM), fucsia (Judas) y verde/rojo (sweep). Anclado
@@ -4059,7 +4096,7 @@ if i_showRej and f_famOK(FAM_EST) and barstate.islast                           
             SMC_Event rj = array.get(SMC_rejections, i)
             bool bullRej = rj.dir == DIR_BULL
             string rtxt = bullRej ? "Rej ↑" : "Rej ↓"
-            array.push(SMC_rejLabels, label.new(rj.barTime, rj.price, rtxt, style = bullRej ? label.style_label_up : label.style_label_down, color = color.new(COL_LIQ, 70), textcolor = COL_LIQ, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_rejLabels, f_evLbl(rj.barTime, rj.price, bullRej ? label.style_label_up : label.style_label_down, rtxt, COL_LIQ, 70, COL_LIQ))
 
 // Marcadores de Flip [T21 · §2.8]. Mismo patron repintado-en-islast (acotado a i_maxShowFlip). Nivel
 // confirmado de cambio de rol (soporte<->resistencia). Linea horizontal corta al nivel + etiqueta
@@ -4089,7 +4126,7 @@ if i_showFlip and barstate.islast
                 color fcol = color.new(bullFlip ? COL_BULL : COL_BEAR, 35)
                 array.push(SMC_flipLines, line.new(fp.barTime, fp.price, fp.barTime + flipOffMs, fp.price, xloc = xloc.bar_time, color = fcol, style = line.style_solid, width = 1))
                 string ftxt = bullFlip ? "FLIP ↑" : "FLIP ↓"
-                array.push(SMC_flipLabels, label.new(fp.barTime + flipOffMs, fp.price, ftxt, style = label.style_label_left, color = color.new(bullFlip ? COL_BULL : COL_BEAR, 80), textcolor = bullFlip ? COL_BULL : COL_BEAR, size = size.tiny, xloc = xloc.bar_time))
+                array.push(SMC_flipLabels, f_evLbl(fp.barTime + flipOffMs, fp.price, label.style_label_left, ftxt, bullFlip ? COL_BULL : COL_BEAR, 80, bullFlip ? COL_BULL : COL_BEAR))
 
 // Marcadores de rebote en EMA [T23 · §4.3 #41]. Mismo patron repintado-en-islast (acotado a
 // i_maxShowRej por reuso del cap de eventos puntuales). El precio toco una EMA y cerro de vuelta con
@@ -4106,7 +4143,7 @@ if i_showEmaBounce and f_famOK(FAM_EST) and barstate.islast                     
             SMC_Event bo = array.get(SMC_emaBounces, i)
             bool bullBo = bo.dir == DIR_BULL
             string botxt = bullBo ? "↩ EMA ↑" : "↩ EMA ↓"
-            array.push(SMC_emaBounceLabels, label.new(bo.barTime, bo.price, botxt, style = bullBo ? label.style_label_up : label.style_label_down, color = color.new(bullBo ? COL_BULL : COL_BEAR, 70), textcolor = bullBo ? COL_BULL : COL_BEAR, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_emaBounceLabels, f_evLbl(bo.barTime, bo.price, bullBo ? label.style_label_up : label.style_label_down, botxt, bullBo ? COL_BULL : COL_BEAR, 70, bullBo ? COL_BULL : COL_BEAR))
 
 // Marcadores de cruce de EMA por par [T23 · §4.3]. Punto pequeno con la etiqueta del par (la dir va en
 // color: ↑ azul claro / ↓ gris-azul). Todos los cruces dejan seña para verlos y contabilizarlos.
@@ -4122,7 +4159,7 @@ if i_showEmaCross and f_famOK(FAM_EST) and barstate.islast                      
             SMC_Event xe = array.get(SMC_emaCrosses, i)
             bool bx = xe.dir == DIR_BULL
             color xcol = color.new(COL_GHOST, 55)
-            array.push(SMC_emaCrossLabels, label.new(xe.barTime, xe.price, "× " + xe.tf, style = label.style_label_center, color = color.new(color.gray, 100), textcolor = xcol, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_emaCrossLabels, f_evLbl(xe.barTime, xe.price, label.style_label_center, "× " + xe.tf, color.gray, 100, xcol))
 
 // Marcadores de Stack Flip [T23 · §4.3]. Evento de cambio de regimen (20 y 50 cruzan la 200): seña
 // reforzada. Verde (alcista) / rojo (bajista), recuadro visible para distinguirlo del cruce de par.
@@ -4139,7 +4176,7 @@ if i_showEmaStack and f_famOK(FAM_EST) and barstate.islast                      
             bool bs = se.dir == DIR_BULL
             color scol2 = bs ? COL_BULL : COL_BEAR
             string stxt2 = bs ? "⊗ Stack ↑" : "⊗ Stack ↓"
-            array.push(SMC_emaStackLabels, label.new(se.barTime, se.price, stxt2, style = bs ? label.style_label_up : label.style_label_down, color = color.new(scol2, 60), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_emaStackLabels, f_evLbl(se.barTime, se.price, bs ? label.style_label_up : label.style_label_down, stxt2, scol2, 60, color.white))
 
 // Marcadores de False Breakout [T24 · §3.7 #14]. Mismo patron repintado-en-islast (acotado a i_maxShowFB).
 // La direccion es la REVERSION (la real): FB alcista (rompio abajo y volvio) marca abajo; bajista marca
@@ -4156,7 +4193,7 @@ if i_showFalseBreak and f_famOK(FAM_EST) and barstate.islast                    
             SMC_Event fbe = array.get(SMC_fbreakEvents, i)
             bool bullFB = fbe.dir == DIR_BULL
             string fbtxt = bullFB ? "FB ↑" : "FB ↓"
-            array.push(SMC_fbLabels, label.new(fbe.barTime, fbe.price, fbtxt, style = bullFB ? label.style_label_up : label.style_label_down, color = color.new(bullFB ? COL_BULL : COL_BEAR, 70), textcolor = bullFB ? COL_BULL : COL_BEAR, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_fbLabels, f_evLbl(fbe.barTime, fbe.price, bullFB ? label.style_label_up : label.style_label_down, fbtxt, bullFB ? COL_BULL : COL_BEAR, 70, bullFB ? COL_BULL : COL_BEAR))
 
 // Marcadores de tramo Impulsivo/Correctivo [T25 · §4.4]. Mismo patron repintado-en-islast (acotado a
 // i_maxShowLegs). IMP = expansion (displacement + ruptura alineada/MSS) -> verde/rojo segun dir, fuerte;
@@ -4177,7 +4214,7 @@ if i_showLegs and f_famOK(FAM_EST) and barstate.islast                          
             bool bullLeg = lg.dir == DIR_BULL
             color lcol = impulsive ? (bullLeg ? COL_BULL : COL_BEAR) : COL_GHOST
             string ltxt = (impulsive ? "IMP " : "CORR ") + (bullLeg ? "↑" : "↓")
-            array.push(SMC_legLabels, label.new(lg.barTime + legOffMs, lg.price, ltxt, style = label.style_label_left, color = color.new(lcol, 75), textcolor = lcol, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_legLabels, f_evLbl(lg.barTime + legOffMs, lg.price, label.style_label_left, ltxt, lcol, 75, lcol))
 
 // Marcadores de Inside Day [T37 · §5.12]. Compresion D1 -> etiqueta gris "ID" en el medio del rango
 // interior, anclada al dia. Acotado a i_maxShowID, repintado-en-islast.
@@ -4191,7 +4228,7 @@ if i_showInsideDay and f_famOK(FAM_EST) and barstate.islast                     
         int firstID = math.max(0, nID - i_maxShowID)
         for i = firstID to nID - 1
             SMC_Event idv = array.get(SMC_insideDays, i)
-            array.push(SMC_idLabels, label.new(idv.barTime, idv.price, "ID", style = label.style_label_down, color = color.new(COL_GHOST, 65), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_idLabels, f_evLbl(idv.barTime, idv.price, label.style_label_down, "ID", COL_GHOST, 65, color.white))
 
 // [S107] Proyeccion Standard Deviation [T36 · §5.11] RETIRADA del Visual por presupuesto de tokens (CE10117):
 // era HERRAMIENTA (no confluencia, §0.9), off por defecto (i_showStdDev=false) -> cero impacto visual. La
@@ -4356,13 +4393,13 @@ if i_showOpenGaps and barstate.islast
     array.clear(SMC_ogLabels)
     if not na(nwogLvl)
         array.push(SMC_ogLines, line.new(nwogT, nwogLvl, time, nwogLvl, xloc = xloc.bar_time, color = color.new(COL_FVG, 30), style = line.style_dashed, width = 1))
-        array.push(SMC_ogLabels, label.new(time, nwogLvl, "NWOG", style = label.style_label_left, color = color.new(COL_FVG, 85), textcolor = COL_FVG, size = size.tiny, xloc = xloc.bar_time))
+        array.push(SMC_ogLabels, f_evLbl(time, nwogLvl, label.style_label_left, "NWOG", COL_FVG, 85, COL_FVG))
     if not na(ndogLvl)
         array.push(SMC_ogLines, line.new(ndogT, ndogLvl, time, ndogLvl, xloc = xloc.bar_time, color = color.new(COL_FVG, 30), style = line.style_dashed, width = 1))
-        array.push(SMC_ogLabels, label.new(time, ndogLvl, "NDOG", style = label.style_label_left, color = color.new(COL_FVG, 85), textcolor = COL_FVG, size = size.tiny, xloc = xloc.bar_time))
+        array.push(SMC_ogLabels, f_evLbl(time, ndogLvl, label.style_label_left, "NDOG", COL_FVG, 85, COL_FVG))
     if not na(nymoLvl)
         array.push(SMC_ogLines, line.new(nymoT, nymoLvl, time, nymoLvl, xloc = xloc.bar_time, color = color.new(COL_FVG, 30), style = line.style_dashed, width = 1))
-        array.push(SMC_ogLabels, label.new(time, nymoLvl, "NYMO", style = label.style_label_left, color = color.new(COL_FVG, 85), textcolor = COL_FVG, size = size.tiny, xloc = xloc.bar_time))
+        array.push(SMC_ogLabels, f_evLbl(time, nymoLvl, label.style_label_left, "NYMO", COL_FVG, 85, COL_FVG))
     int nBag = array.size(SMC_bag)
     if nBag > 0 and f_famOK(FAM_EST)                                                                        // Breakaway BAG = Estudio+ (§F4); las lineas NWOG/NDOG/NYMO (gaps-P) SI van en Operacion
         int firstBag = math.max(0, nBag - i_maxShowBag)
@@ -4370,7 +4407,7 @@ if i_showOpenGaps and barstate.islast
             SMC_Event bg = array.get(SMC_bag, i)
             bool bullBag = bg.dir == DIR_BULL
             string bagtxt = bullBag ? "BAG ↑" : "BAG ↓"
-            array.push(SMC_ogLabels, label.new(bg.barTime, bg.price, bagtxt, style = bullBag ? label.style_label_up : label.style_label_down, color = color.new(COL_FVG, 65), textcolor = color.white, size = size.tiny, xloc = xloc.bar_time))
+            array.push(SMC_ogLabels, f_evLbl(bg.barTime, bg.price, bullBag ? label.style_label_up : label.style_label_down, bagtxt, COL_FVG, 65, color.white))
 
 // f_drawMB: caja del Mitigation Block [T-mb · §2.8] (solo Visual). Relleno de desequilibrio sin barrido.
 // AZUL de familia (§5.2, como OB) distinguido por borde PUNTEADO + label MB. Origen = vela del bloque;
@@ -4440,7 +4477,7 @@ if i_showIPR and barstate.islast
     if not na(currentIpr) and f_famOK(FAM_TODO) and f_densOK(currentIpr.strength, false)
         color iprc = currentIpr.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
         SMC_iprBox := f_zBox(currentIpr.barTime - i_iprWindow * barMs, currentIpr.top, currentIpr.bottom, color.new(iprc, 95), color.new(iprc, 40), line.style_dotted)
-        SMC_iprLbl := label.new(time, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, "IPR", style = label.style_label_left, color = color.new(iprc, 85), textcolor = iprc, size = size.tiny, xloc = xloc.bar_time)
+        SMC_iprLbl := f_evLbl(time, currentIpr.dir == DIR_BULL ? currentIpr.top : currentIpr.bottom, label.style_label_left, "IPR", iprc, 85, iprc)
 
 // f_drawFVG: caja del Fair Value Gap coloreada por estado [T06] (solo Visual). left =
 // vela media (z.barIdx-1, cf. LuxAlgo lastTime=time[1]) para cubrir el desplazamiento
