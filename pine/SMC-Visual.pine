@@ -30,7 +30,7 @@ i_showMajor   = input.bool(true,  "Mostrar estructura dominante (50)", group = G
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
 i_swingStructLen = input.int(20, "Swings: sensibilidad estructura (leg)", minval = 10, group = GRP_STRUCT)
 i_swingMaxKeep   = input.int(350, "Swings: máx. retenidos (historial hacia atrás)", minval = 50, maxval = 600, group = GRP_STRUCT)
-i_swingDomAtr    = input.float(8.0, "Swings: amplitud dominante (×ATR) — solo se etiquetan pivotes >= este umbral", minval = 0.0, step = 0.1, group = GRP_STRUCT)
+i_swingDomAtr    = input.float(8.0, "Swings: amplitud dominante (×ATR) — pivotes >= este umbral se pintan fuertes", minval = 0.0, step = 0.1, group = GRP_STRUCT)
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
 i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
@@ -3058,6 +3058,7 @@ float i_kLeg = input.float(3.0, "K pierna (clamp extremo)", minval = 1.0, maxval
 // Activar este knob revela también los pivotes MENORES (tenues), pero SOLO en Estudio+. Declarado aquí
 // (final del bloque de inputs) a propósito: mantiene estable el índice in_N de todos los inputs previos.
 i_swingMinorLabels = input.bool(false, "Swings: etiquetar menores (solo Estudio+)", group = GRP_STRUCT, tooltip = "Off (default) = solo pivotes dominantes (anclas), esqueleto limpio. On = añade los menores tenues en Estudio+. Con i_swingMaxKeep alto + modo Todo puede acercarse al tope de 500 labels de Pine.")
+i_swingTopN = input.int(12, "Swings: max. por tipo (HH/HL/LH/LL)", minval = 1, maxval = 60, group = GRP_STRUCT, tooltip = "Cuantos pivotes de CADA tipo se etiquetan. Reemplaza el umbral de amplitud como criterio de QUIEN se dibuja: el umbral mataba HL/LH (pullbacks, poca amplitud) y dejaba solo HH/LL -> se rompia la alternancia H-L. i_swingDomAtr sigue decidiendo la INTENSIDAD del tag, no su existencia.")
 // --- Matriz modo×familia §8.2 (curacion por familia, ENCIMA del filtro strength) ---
 // modeIdx 0<1<2: mayor = mas laxo (habilita mas familias). Operacion = solo familias de DECISION
 // (OB/Breaker/FVG/IFVG/OTE + anclas); Estudio suma refinamientos (BPR/Mitigation/Vacuum); Todo suma
@@ -3439,23 +3440,6 @@ f_mtfLblYield(array<int> kinds, array<int> dirs, array<float> tops, bool curate)
                 seen := seen + key
                 n += 1
     n
-// f_capLbls: recorta un array de labels (con sus lineas 1:1) al budget restante borrando las MAS VIEJAS
-// (array.shift) hasta que gCount + size <= cap. Devuelve [nuevoGCount, cortadas]. Solo actua cuando el
-// presupuesto aprieta (Operacion/M5); en Estudio+/Todo el cap holgado deja el while inactivo.
-f_capLbls(array<label> lbls, array<line> lns, int gCount, int cap) =>
-    int cut = 0
-    while array.size(lbls) > 0 and gCount + array.size(lbls) > cap
-        label.delete(array.shift(lbls))
-        if array.size(lns) > 0
-            line.delete(array.shift(lns))
-        cut += 1
-    [gCount + array.size(lbls), cut]
-f_capLblsOnly(array<label> lbls, int gCount, int cap) =>
-    int cut = 0
-    while array.size(lbls) > 0 and gCount + array.size(lbls) > cap
-        label.delete(array.shift(lbls))
-        cut += 1
-    [gCount + array.size(lbls), cut]
 // Reserva MTF + presupuesto de eventos nativos. mtfShow* se recomputa aqui (los flags viven mas abajo).
 bool budMtfD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
 bool budMtfH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
@@ -3465,9 +3449,6 @@ int FRAME_RESERVE = 8                                                           
 // BOS/CHoCH); EQH/EQL y sweeps HTF se sueltan. H1 conserva la herencia D1 completa (timeframe==H1 -> false).
 bool mtfCurate = i_densidad == "Operación" and timeframe.in_seconds() < timeframe.in_seconds("60")
 int mtfReserve = (budMtfD1 ? f_mtfLblYield(d1Kind, d1Dir, d1Top, mtfCurate) + 2 : 0) + (budMtfH1 ? f_mtfLblYield(h1Kind, h1Dir, h1Top, mtfCurate) + 2 : 0)
-int eventCap = math.max(0, budgetLbl - mtfReserve - FRAME_RESERVE)                                          // labels que quedan para eventos nativos L3
-int gEvtLbl = 0                                                                                             // contador de labels de eventos nativos ya emitidos (orden de dibujo)
-int gEvtCut = 0                                                                                             // §10-#8: desalojados -> panel T14 (nada desaparece en silencio)
 
 // === L0 · FONDO TEMPORAL [Eje2 · Paso 5 · ESQUELETO-FABLE §3/§F9/§6.3] ================================
 // Contexto de TIEMPO (Kill Zones, macros, RTH/ETH). Regla "un solo fondo de area" (§6.3): la KZ se rinde
@@ -4534,25 +4515,13 @@ if i_showFVG and barstate.islast
                         color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                         array.push(SMC_fvgCELines, line.new(z.barTime - barMs, ce, time, ce, color = color.new(ceCol, 20), style = line.style_dotted, width = 1, xloc = xloc.bar_time))
 
-// --- §6.5 · DESALOJO DETERMINISTA de eventos nativos L3 [Eje2 · Paso 6 · S090] ---
-// Punto unico: todas las familias nativas discrecionales ya estan construidas + top-N'd; la capa MTF
-// (mandatoria §7.1) aun NO dibuja. Se recorta el excedente de labels al presupuesto restante (eventCap =
-// budget - reservaMTF - marco). PRIORIDAD de conservacion: EQHL > pools > sweep > flip > gaps; dentro de
-// cada familia caen primero las MAS VIEJAS. En M5 (doble MTF) eventCap≈0 -> el ruido nativo cede a la
-// herencia; en H1 (una MTF) sobra sitio para ~8 nativos; en D1 (sin MTF) se conservan todos. Sin arrays
-// nuevos. Los desalojados se cuentan (gEvtCut) y afloran en la fila "Ocultos" del panel T14 (§10-#8).
-if barstate.islast
-    [g1, c1] = f_capLbls(SMC_eqLabels, SMC_eqLines, gEvtLbl, eventCap)
-    gEvtLbl := g1
-    [g2, c2] = f_capLblsOnly(SMC_poolLabels, gEvtLbl, eventCap)
-    gEvtLbl := g2
-    [g3, c3] = f_capLblsOnly(SMC_sweepLabels, gEvtLbl, eventCap)
-    gEvtLbl := g3
-    [g4, c4] = f_capLbls(SMC_flipLabels, SMC_flipLines, gEvtLbl, eventCap)
-    gEvtLbl := g4
-    [g5, c5] = f_capLbls(SMC_ogLabels, SMC_ogLines, gEvtLbl, eventCap)
-    gEvtLbl := g5
-    gEvtCut := c1 + c2 + c3 + c4 + c5
+// --- §6.5 · ELIMINADA [S125] ---
+// Aqui vivia el desalojo determinista de eventos nativos L3 (f_capLbls/f_capLblsOnly + eventCap/gEvtLbl/
+// gEvtCut, S090). Borraba labels DESPUES de crearlas, y para entonces Pine YA habia desalojado las mas
+// viejas dentro del propio label.new (S123 Hallazgo 4) -> nunca pudo funcionar. Medido S125: era token
+// MUERTO, y su remocion es lo que financia el cap top-N por tipo de los swings (sin ella, +345 sobre el
+// techo CE10117). Verificado que no hay regresion: total de labels 501 -> 502, panel "Ocultos" identico.
+// El cobro REAL del presupuesto tiene que ser AT-CREATION (deuda viva, ver DISENO-presupuesto-labels-S124).
 
 // --- Mapa MTF: niveles heredados de HTF en cascada [T13a · ESQUELETO-P3 §2.5] (Visual-only) ---
 // Dibujo DIFERENCIADO: lineas P/D del HTF punteadas + tenues con prefijo de TF, para no
@@ -4705,21 +4674,37 @@ f_pushSwingLabel(array<label> arr, SMC_Swing sw, float domAtr, float atr) =>
 // 50 en toda la historia) y llegan hasta el origen (HH 2008). AL FINAL de la sección a propósito: en modo
 // "Todo" las familias crean >500 labels y Pine (max_labels_count=500) borra las creadas PRIMERO; dibujar
 // los swings al último los deja en los slots finales -> sobreviven. islast + xloc.bar_time (RE-safe).
-// [S118] El ETIQUETADO se restringe a los pivotes DOMINANTES (amplitud ÷ATR >= i_swingDomAtr): son las
-// anclas y dejan sitio a la estructura BOS/CHoCH bajo el tope de 500 labels (antes ~350 swings ahogaban
-// la estructura). El array SMC_majorSwingsV (retención FIFO i_swingMaxKeep) queda INTACTO -> historia
-// profunda preservada; solo se recorta lo que se DIBUJA. Dominantes visibles en TODOS los modos (anclas,
-// como pools fuertes); menores = opt-in (i_swingMinorLabels) y SOLO en Estudio+ (evita saturar el budget).
+// [S118] El ETIQUETADO se recorta para dejar sitio a la estructura BOS/CHoCH bajo el tope de 500 labels
+// (antes ~350 swings la ahogaban). El array SMC_majorSwingsV (retención FIFO i_swingMaxKeep) queda INTACTO
+// -> historia profunda preservada; solo se recorta lo que se DIBUJA. Menores = opt-in (i_swingMinorLabels)
+// y SOLO en Estudio+ (evita saturar el budget).
+// [S125 · cap top-N por tipo] El recorte de S118 era un UMBRAL DE AMPLITUD (strength >= i_swingDomAtr), y
+// eso filtraba de forma ASIMÉTRICA: los HH/LL son extremos de impulso (mucha amplitud) y los HL/LH son
+// pullbacks (poca) -> censo D1 "Todo" HH 31 / LL 19 / HL 11 / LH 4, que rompe justo la alternancia H-L-H-L
+// que hace legible la pierna (el objetivo de S117). Ahora el criterio es RANGO, no amplitud: los ÚLTIMOS
+// i_swingTopN de CADA tipo (12/12/12/12 medido). La primera pasada va HACIA ATRÁS y solo calcula el índice
+// de corte por tipo; el dibujo sigue yendo HACIA ADELANTE para conservar el orden de creación (los más
+// recientes se crean al final = sobreviven al desalojo de Pine). i_swingDomAtr ya NO decide QUIÉN se
+// dibuja, solo la INTENSIDAD del tag dentro de f_pushSwingLabel (fuerte 45 / tenue 75).
 var array<label> SMC_majorSwingLabels = array.new<label>()
 if i_showSwings and barstate.islast
     for lb in SMC_majorSwingLabels
         label.delete(lb)
     array.clear(SMC_majorSwingLabels)
     int nMj = array.size(SMC_majorSwingsV)
+    array<int> swCnt = array.new<int>(4, 0)
+    array<int> swCut = array.new<int>(4, 0)
     if nMj > 0
+        for i = nMj - 1 to 0
+            int kb = array.get(SMC_majorSwingsV, i).kind - KIND_HH
+            if kb >= 0 and kb < 4
+                array.set(swCnt, kb, array.get(swCnt, kb) + 1)
+                if array.get(swCnt, kb) == i_swingTopN
+                    array.set(swCut, kb, i)
         for i = 0 to nMj - 1
             SMC_Swing sw = array.get(SMC_majorSwingsV, i)
-            bool domSw = sw.strength >= i_swingDomAtr
+            int ki = sw.kind - KIND_HH
+            bool domSw = ki >= 0 and ki < 4 and i >= array.get(swCut, ki)
             bool showSw = domSw or (i_swingMinorLabels and f_famOK(FAM_EST))
             if showSw
                 f_pushSwingLabel(SMC_majorSwingLabels, sw, i_swingDomAtr, sAtr14)
@@ -4965,7 +4950,7 @@ if i_showPanel and barstate.islast
         int hidRef = f_famOK(FAM_EST) ? 0 : array.size(SMC_displacements) + array.size(SMC_emaBounces) + array.size(SMC_emaCrosses) + array.size(SMC_fbreakEvents) + array.size(SMC_insideDays) + array.size(SMC_bag) + array.size(SMC_idm) + array.size(SMC_ir) + array.size(SMC_cisd) + array.size(SMC_legs) + array.size(SMC_judas) + array.size(SMC_rejections) + array.size(SMC_emaStacks)
         int hidMicro = f_famOK(FAM_TODO) ? 0 : array.size(SMC_ipr)                       // [S107] SMC_vi retirado
         int hidLiq = (f_famOK(FAM_EST) ? 0 : math.max(0, array.size(SMC_sweeps) - 1)) + hidPools
-        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "") + (gEvtCut > 0 ? " · Desalojo " + str.tostring(gEvtCut) : "")
+        string ocultosTxt = "Est " + str.tostring(hidStruct) + " · EQ " + str.tostring(hidEq) + " · Liq " + str.tostring(hidLiq) + " · Ref " + str.tostring(hidRef) + (hidGrad > 0 ? " · Grad " + str.tostring(hidGrad) : "") + (hidMicro > 0 ? " · µ " + str.tostring(hidMicro) : "")
         table.cell(panel, 0, r, "Ocultos", text_color = color.gray, text_size = tsz)
         table.cell(panel, 1, r, ocultosTxt, text_color = color.gray, text_size = tsz)
 
