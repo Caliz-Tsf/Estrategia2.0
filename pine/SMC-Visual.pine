@@ -30,7 +30,7 @@ i_showMajor   = input.bool(true,  "Mostrar estructura dominante (50)", group = G
 i_showSwings  = input.bool(true, "Mostrar swings (HH/HL/LH/LL)", group = GRP_STRUCT)
 i_swingStructLen = input.int(20, "Swings: sensibilidad estructura (leg)", minval = 10, group = GRP_STRUCT)
 i_swingMaxKeep   = input.int(350, "Swings: máx. retenidos (historial hacia atrás)", minval = 50, maxval = 600, group = GRP_STRUCT)
-i_swingDomAtr    = input.float(4.0, "Swings: amplitud dominante (×ATR) — solo se etiquetan pivotes >= este umbral", minval = 0.0, step = 0.1, group = GRP_STRUCT)
+i_swingDomAtr    = input.float(8.0, "Swings: amplitud dominante (×ATR) — solo se etiquetan pivotes >= este umbral", minval = 0.0, step = 0.1, group = GRP_STRUCT)
 i_showStruct  = input.bool(true,  "Mostrar BOS/CHoCH (swing)",   group = GRP_STRUCT)
 i_showInternal = input.bool(false, "Mostrar BOS/CHoCH interno",  group = GRP_STRUCT)
 i_showMSS      = input.bool(true,  "Mostrar MSS (CHoCH + displacement)", group = GRP_STRUCT)
