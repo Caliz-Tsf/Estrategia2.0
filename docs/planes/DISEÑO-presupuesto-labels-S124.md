@@ -209,3 +209,38 @@ sea tarde; verificar que quitarla no empeora antes de commitear.
 ### 7.4 ADR
 En pausa. Un ADR describe una decisión tomada; esto es un diseño **medido y rechazado por presupuesto**.
 Cuando (a)/(b)/(c) den los 194, se retoma como candidato ADR-021.
+
+## 8. S125 · La Opción 1 medida: el "~2 tokens" era fantasía (y la §6.5 la paga)
+
+El §7.3 daba la Opción 1 por barata ("~2 tokens"). **Medido en vivo D1 "Todo", es falso**, y por el mismo
+motivo que S124 ya había aprendido y que aquí se repite: *los tokens de Pine no se predicen, se miden.*
+
+| Variante (arnés `scripts/gen_probe_swingtopn.py`) | Tokens | vs. 100256 |
+|---|---|---|
+| A — top-N por **fuerza** (helper nuevo `f_swThr` + `array.sort`) | 100615 | ❌ +359 |
+| B — últimos-N por tipo (**sin** función nueva, bucle inline) | 100601 | ❌ +345 |
+| **B + remoción de la §6.5** | cabe | ✅ **aplica y dibuja** |
+
+### 8.1 El hallazgo que corrige la sospecha de S124
+A y B se diferencian en **14 tokens**. La variante A mete una **función nueva de 6 sentencias con
+`array.sort`** y la B no mete ninguna: si el coste dependiera de la *forma* del código (la sospecha
+"Pine trata distinto las funciones de una sola expresión", S124 §7.2/deuda #4), la diferencia sería
+enorme, no 14. **Lo caro no es la forma: es tocar el bloque.** La sospecha de S124 no queda confirmada
+por esta medición — queda **debilitada**, y sigue sin ser doctrina.
+
+### 8.2 La §6.5 confirmada como financiación real
+Predicho en §7.1-1 y ahora **medido**: quitarla libera ≥345 tokens (de +345 sobre el techo a compilar y
+dibujar). Verificado que **no hay regresión** (el §7.3 pedía comprobarlo antes de commitear): total de
+labels 501 → 502 y la fila "Ocultos" del panel idéntica (`Est 0 · EQ 0 · Liq 0 · Ref 0`). Es coherente con
+S123 H4: no recortaba nada porque no podía.
+
+### 8.3 Resultado de la Opción 1
+Censo D1 "Todo" tras el apply: **HH 12 / HL 12 / LH 12 / LL 12** (antes 31 / 11 / 4 / 19), alternancia
+H-L-H-L restaurada. Criterio nuevo = **rango, no amplitud**: los últimos `i_swingTopN` de cada tipo.
+`i_swingDomAtr` deja de decidir QUIÉN se dibuja y pasa a decidir solo la INTENSIDAD del tag.
+
+### 8.4 Lo que NO arregla (y confirma la prioridad del usuario)
+`total_labels` sigue en **502 ≥ 500**: la estructura histórica se sigue desalojando. La Opción 1 arregla la
+LEGIBILIDAD del esqueleto, no el presupuesto. **Se confirma el juicio de S124: mientras la estructura ocupe
+~404/500, lo demás es cosmética.** El cobro at-creation sigue siendo la deuda viva, ahora con la §6.5 ya
+gastada como financiación — los ~194 de `f_zLbl` hay que buscarlos en otro lado (§7.2 b/c/d).
