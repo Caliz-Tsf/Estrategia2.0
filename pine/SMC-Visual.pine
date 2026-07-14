@@ -4021,7 +4021,12 @@ if i_showIR and f_famOK(FAM_EST) and barstate.islast                            
         // Poblar hacia atras: recorre TODOS los IR pero SOLO dibuja los que importan (confluencia >= 2 familias
         // activas apiladas §7.0.2). Un IR suelto a mitad de rango (deg 0-1) = ruido -> se descarta. Es un EVENTO
         // terciario, no zona: marca = triangulo direccional SIN texto (verde alcista / rojo bajista, tono OB).
-        for i = 0 to nIR - 1
+        // Del mas reciente hacia atras: i_maxShowIR cuenta los DIBUJADOS (no los recorridos) y corta en cuanto
+        // se llena -> respeta "poblar hacia atras" y ahorra las llamadas caras a f_confDegree. El propio array
+        // hace de contador (sin variable extra: el script vive pegado al techo de tokens CE10117).
+        for i = nIR - 1 to 0
+            if array.size(SMC_irLabels) >= i_maxShowIR
+                break
             SMC_Event ir = array.get(SMC_ir, i)
             if f_confDegree(ir.price) >= 2
                 bool bullIr = ir.dir == DIR_BULL
