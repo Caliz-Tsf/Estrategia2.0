@@ -92,7 +92,15 @@ i_showIPR      = input.bool(true,  "Mostrar IPR (rango desbalanceado, §5.9)", g
 i_iprWindow    = input.int(10,     "IPR: ventana (velas)", minval = 2, group = GRP_FVG)
 i_iprMinGaps   = input.int(3,      "IPR: FVG mín. mismo lado", minval = 2, group = GRP_FVG)
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
-i_pdSwingLen   = input.int(50,     "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
+// [S130] 50 -> 1000: con 50 el "rango D1" era el de 50 velas (~2.5 meses) = 758 pips, MENOR que el
+// rango nativo de H1 (1905) -> el P/D vivia en una esquina del grafico. Con 1000 el rango D1 es
+// [0.95360, 1.60389] (6503 pips), suelo = pivote real de 2022 (NO es el min/max de la ventana:
+// ese es [0.90275, 1.60389], difiere 508 pips) -> sigue siendo estructural (§2.3) y Opcion A
+// (paridad LuxAlgo intacta). Medido en vivo D1 OANDA:EURUSD, S130. PROVISIONAL: el mismo len va a
+// los 3 request.security (D/60/5) -> en H1 son 41 dias y en M5 3.5. La regla definitiva (rango de
+// pool a pool por escala, modelo del usuario S130) esta en docs/planes/DISENO-cascada-pd-anidada-S130.md §9.
+// OJO: >= ~4000 revienta con RE10008 (max_bars_back) -> techo entre 1000 y 4000, sin calibrar.
+i_pdSwingLen   = input.int(1000,   "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
 i_showGradient = input.bool(true,  "Mostrar Gradient Levels (grid del rango §5.16)", group = GRP_GRAD)
 i_gradEighths  = input.bool(true,  "Incluir eighths (0.125/0.375/0.625/0.875)", group = GRP_GRAD)

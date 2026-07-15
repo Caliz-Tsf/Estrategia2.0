@@ -158,6 +158,54 @@ Medido, 5 símbolos, misma ventana disponible por TF (D1 n≈5623-6284, H1 n≈9
 - **CAE:** derivar del mercado **qué nivel corresponde a cada TF**. Hay que **decidirlo** (input,
   amplitud objetivo declarada, etc.), no medirlo.
 
+## 9. LA REGLA CORRECTA — modelo del usuario (S130, al final de la sesión). **Sustituye a §2.**
+
+> **El escalón lo pone la ESTRUCTURA (pool/pivote), no la aritmética.** La cascada de mitades (§2) era
+> la versión mala de esto. El usuario describía esto desde el principio; el error fue nuestro.
+
+**Cómo se destapó.** El usuario marcó en H1 el suelo en **1.01854 = el `SSL -3`** (pool sell-side con 3
+toques, dibujado por el propio sistema) y el techo en **1.39972** — y en S128 había dicho 1.39970.
+**Clavado, no aproximado.** Estaba leyendo **pools de liquidez**, con precisión, mientras nosotros
+medíamos si coincidía con pivotes de lookback y con mitades. Ninguna de las dos podía coincidir jamás.
+
+**Y ata el cabo suelto de §7.3:** 1.39972 está **por encima del techo del feed H1** (1.20831). No es que
+H1 no tenga esa historia: **ese pool vive en D1**, y el usuario lo lee en H1 porque *la liquidez no
+pertenece a una temporalidad, es un nivel del mercado*. Eso es **herencia de pools**, no cálculo nativo.
+
+### La regla
+
+1. **El rango de cada TF va de pool/pivote a pool/pivote, a su escala.** D1 = el macro. **H1 no
+   recalcula desde cero ni parte D1 por la mitad: busca el SIGUIENTE pivote/pool DENTRO del rango de
+   D1.** M5 hace lo mismo dentro del de H1. El anidamiento sale solo (cada uno se ancla en estructura
+   que ya está dentro del de arriba) — no hay que forzarlo con cortes.
+2. **El rango NO se mueve porque aparezca un pivote nuevo** (pregunta literal del usuario). Se mueve
+   cuando el precio **CONSUME** el extremo → salta al siguiente pool/pivote en esa dirección. Por eso
+   M5 rota constantemente, H1 aguanta, D1 casi nunca.
+3. **La cascada de rupturas:** el precio se come el premium de M5 → M5 salta al siguiente pivote arriba
+   → sigue → se come el de H1 → H1 salta al siguiente pool → puede que **nunca** llegue al premium de
+   D1, pero llega a un pool donde retrocede, **y ese pool es el nuevo premium de H1**. Un extremo
+   consumido no es el fin del rango: es el aviso de que el siguiente objetivo es el pool que sigue.
+
+### Por qué esto explica el fracaso de la Opción C (S129)
+
+La idea de C era **correcta** (el extremo se queda hasta ser violado). El fallo: al ser violado
+**reanclaba a un pivote de `i_pdSwingLen`** — un número arbitrario. En este modelo reancla **al
+siguiente pool**, que es una referencia real. El error era de implementación, no del usuario.
+
+### Lo que ya existe (no hay que inventarlo)
+
+Detección de pools con fuerza por toques (`i_minTouches`, `i_poolTol`) — `SSL -3` / `BSL -7` se dibujan
+hoy. Y `f_computeLegExtremes` **ya sabe anclar a liquidez** (fase 3, "ancla a liquidez", con
+`LEG_ANCH_TOL_ATR` de S127).
+
+### Lo que hay que MEDIR antes de implementar (no improvisar)
+
+1. **Qué fuerza mínima** debe tener un pool para poder anclar un extremo (¿`-3`? ¿por TF?).
+2. **Qué pasa cuando no hay pool a un lado** — es justo lo que midió el censo de S127: el lado de abajo
+   estaba vacío ([[censo-s127-el-lado-de-abajo-esta-vacio]]). El fallback no puede ser arbitrario.
+3. **Si el anidamiento se sostiene** (D1 ⊇ H1 ⊇ M5) o se rompe cuando el pool de H1 cae fuera de D1.
+4. **Qué pools se heredan** y cuáles no (1.39972 vive en D1 y se usa en H1).
+
 ## 8. Lo que falta antes de un ADR (no medido)
 
 1. **Decidir el mapeo nivel→TF** — ya no es medible (ver §7.3). Opciones: nº de niveles como input;

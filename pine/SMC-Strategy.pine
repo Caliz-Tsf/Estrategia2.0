@@ -32,7 +32,11 @@ i_gradEighths      = input.bool(true, "Gradient: incluir eighths §5.16", group 
 i_gradStaleBars    = input.int(150, "Gradient: dealing range 'stale' (velas, P2) §5.16", minval = 10, group = GRP_FVG)
 i_gradBodyLookback = input.int(5,   "Gradient: desempate cuerpos-vs-nivel (velas) §5.16", minval = 1, maxval = 50, group = GRP_FVG)
 i_gradPersistDays  = input.int(5,   "Gradient: persistencia grids P3 (cuota) §5.16", minval = 0, maxval = 20, group = GRP_FVG)
-i_pdSwingLen  = input.int(50, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
+// [S130] 50 -> 1000: alineado con Visual (mismo parametro, misma doctrina §2.3). Con 50 el "rango D1"
+// era el de 2.5 meses (758 pips); con 1000 es [0.95360, 1.60389] estructural. MEDIDO en Visual, NO en
+// Strategy (aqui solo se alinea el default para no dejar dos verdades distintas). Ver
+// docs/planes/DISENO-cascada-pd-anidada-S130.md.
+i_pdSwingLen  = input.int(1000, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
 i_pdEqBand    = input.float(5.0, "Banda equilibrium P/D (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_SCORE)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
 i_eqThreshold = input.float(0.1, "Umbral igualdad EQH/EQL (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_SCORE)
