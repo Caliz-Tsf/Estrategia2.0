@@ -112,16 +112,58 @@ Toca el **LIBRARY CORE** (`f_premiumDiscount` consumida por `f_computeTFState`) 
 re-baseline ×3, contrato MQL5 → **ADR obligatorio**. Rompe la paridad LuxAlgo (la Opción A *es* su
 `trailingExtremes`). Requiere rederivar los casos de prueba de §2.3 (validados al 5.º decimal).
 
-## 7. Lo que falta antes de un ADR (no medido en S130)
+## 7. DISCRIMINACIÓN DE P-G1 — MEDIDA (probe v6, marker 1302): **el modelo de mitades NO se sostiene**
 
-1. **Discriminar P-G1** (la reserva de §4bis): repetir en otros símbolos y otras fechas. Si la amplitud
-   del nivel 1 sigue cayendo cerca de la lectura a ojo del usuario en casos independientes, el modelo de
-   mitades se sostiene; si solo pasó en EURUSD hoy, fue casualidad.
-2. **Decidir el flapping.** `nFlip5`=1536 (salta cada ~4 velas) es el modo de fallo. ¿Se acepta, o se
-   añade histéresis? La histéresis cuesta parámetros nuevos, que es justo lo que la Opción C prometía
-   evitar.
-3. **Decidir el mapeo nivel→TF.** L1 = H1 y L5 = M5 es una hipótesis derivada de amplitudes, no medida
-   contra el comportamiento real de esos TF.
-4. **La doctrina (§3.3).** Un P/D aritmético por TF no tiene contenido estructural. Es una decisión del
+**El agujero del test obvio.** La referencia de P-G1 es el **ojo del usuario**, y solo existe para
+EURUSD. No se puede repetir contra el H1 **nativo**: S129 ya midió que el nativo no reproduce la lectura
+del usuario (1905 vs 3780 pips). Lo que sí es falsable es la afirmación estructural que sostiene el
+mapeo "nivel 1 = H1": que el rango de H1 sea **sistemáticamente ~la mitad** del de D1.
+
+Medido, 5 símbolos, misma ventana disponible por TF (D1 n≈5623-6284, H1 n≈9036-9537), marker 1302:
+
+| Símbolo | amp D1 | amp H1 | **ratio H1/D1** |
+|---------|--------|--------|-----------------|
+| OANDA:EURUSD | 0.70114 | 0.19052 | **0.272** |
+| OANDA:GBPUSD | 1.08024 | 0.17703 | **0.164** |
+| OANDA:USDJPY | 87.285 | 22.951 | **0.263** |
+| OANDA:AUDUSD | 0.58015 | 0.13637 | **0.235** |
+| OANDA:NAS100USD | 29757.1 | 14438.1 | **0.485** |
+
+| ID | Veredicto | Medido |
+|----|-----------|--------|
+| **P-H1** | ✅ VIVA (pero fácil) | EURUSD ratio 0.2717 vs 0.27 predicho. Era aritmética sobre un número ya medido en S129 (1905.2 = idéntico por otra vía → valida el método). |
+| **P-H2** | ❌ **FALSA — LA QUE DECIDÍA** | Recorrido de ratios = 0.485 − 0.164 = **0.321** > 0.20. **No se agrupan.** |
+| **P-H3** | ❌ FALSA | NAS100USD = 0.485, dentro de 0.5 ± 0.05. |
+| **P-H4** | ❌ FALSA, **y con el signo invertido** | Predicho: NAS100 el ratio más BAJO por su tendencia secular. Salió el **más ALTO**. El razonamiento estaba al revés: en unidades absolutas, un índice exponencial mueve en ~1.5 años (ventana H1) casi la mitad de lo que movió en 24 (ventana D1). |
+
+### Conclusiones
+
+1. **El mapeo nivel→TF NO tiene base estructural.** No existe constante "H1 = tal fracción de D1": va de
+   0.164 a 0.485 según el símbolo. **P-G1 queda refutada: el 7.3% de EURUSD fue casualidad.**
+2. **Ni en EURUSD el nivel 1 es H1.** Los 4 pares de forex agrupan cerca de **0.23** → eso apunta al
+   **nivel 2** (25%), no al nivel 1 (50%). *(Que los 4 forex agrupen y NAS100 sea outlier es observación
+   POST-HOC, no predicción — y viene de quien acaba de predecir el signo al revés en P-H4. No usar como
+   explicación sin medirla aparte.)*
+3. **HALLAZGO CONCEPTUAL (lo que más importa):** la lectura del usuario en H1 (3780 pips, 54% de D1) y el
+   H1 nativo (1905, 27%) **son dos objetos distintos**. No es un error del ojo: el usuario lee un rango
+   que incluye el extremo de 2014, que **el feed H1 no contiene** (necesitaría ~75.000 barras, TV da
+   9.535). Lo que llama "rango de H1" es **el rango macro mirado en H1** — es más D1 que H1. Por eso
+   ninguna medición nativa de H1 podía coincidir nunca con él, y por eso **"¿qué nivel es H1?" no tiene
+   respuesta empírica**: depende de qué se DEFINA como rango de H1. Es una **definición, no un hecho**.
+
+### Qué sobrevive y qué cae
+
+- **SOBREVIVE:** la cascada **rota y anida** (medido, §4bis) — resuelve el problema real que planteó el
+  usuario (el macro D1 no rota → no es operable).
+- **CAE:** derivar del mercado **qué nivel corresponde a cada TF**. Hay que **decidirlo** (input,
+  amplitud objetivo declarada, etc.), no medirlo.
+
+## 8. Lo que falta antes de un ADR (no medido)
+
+1. **Decidir el mapeo nivel→TF** — ya no es medible (ver §7.3). Opciones: nº de niveles como input;
+   amplitud objetivo declarada por TF; o abandonar el mapeo a TFs y exponer la cascada como tal.
+2. **Decidir el flapping.** `nFlip5`=1536 (salta cada ~4 velas) es el modo de fallo. ¿Se acepta o se
+   añade histéresis? La histéresis cuesta parámetros nuevos — justo lo que la Opción C prometía evitar.
+3. **La doctrina (§3.3).** Un P/D aritmético por TF no tiene contenido estructural. Decisión del
    usuario, no técnica.
-5. La otra mitad de P-C3 de S129 (censo S127 en banda 1-3) y P-C4 (anidamiento D1⊇H1⊇M5) siguen sin medir.
+4. La otra mitad de P-C3 de S129 (censo S127 en banda 1-3) y P-C4 siguen sin medir.
