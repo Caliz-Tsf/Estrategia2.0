@@ -3105,6 +3105,12 @@ if barstate.isconfirmed and not na(chartState.pdHigh) and not na(chartState.pdLo
 // legExtHi/Lo = extremo YA acotado (clamp K_LEG) y anclado a liquidez fuerte (ver f_updateLegExtremes).
 var float legExtHi = na
 var float legExtLo = na
+// LEG_ANCH_TOL_ATR §7 [S127]: cuán cerca del extremo bruto debe caer un pool para que la pierna termine
+// EN ÉL (fase 3 de f_computeLegExtremes). Relativo a ATR (regla dura 3). PROVISIONAL — calibrar en vivo
+// D1/H1 antes de congelar; si el A/B pide moverlo seguido, promoverlo a input al FINAL del bloque (no
+// corre los in_N, patrón S125). Bajo => la pierna casi siempre termina en el bruto; alto => reaparece la
+// amputación de S126.
+float LEG_ANCH_TOL_ATR = 1.0
 // f_depthBand §7.0.3 [A-1/A-7/S106-A]: banda de profundidad {1..5} del retroceso de un nivel. Bandas 1-3 =
 // entre el precio y el extremo de pierna de su lado (legExtHi/Lo precomputado; cortes CONGELADOS
 // 0.33/0.66/1.0). Bandas 4/5 = fuera, en el 1º/2º rango PREVIO archivado (solo i_profundidad>=4/5).
@@ -3133,7 +3139,9 @@ f_depthBand(float level, float px) =>
 //      ahora acotada.
 //  (2) CLAMP: recorta el bruto a px ± i_kLeg×(rango vigente) -> mata el HH histórico sin significado.
 //  (3) ANCLA A LIQUIDEZ: si hay un pool VIVO fuerte (touches>=2 o strength>=0.5) más lejano por lado
-//      DENTRO del clamp, el extremo se fija en ese nivel (la pierna termina en liquidez real, no en aire).
+//      DENTRO del clamp Y a <= LEG_ANCH_TOL_ATR×ATR del extremo, el extremo se fija en ese nivel (la
+//      pierna termina en liquidez real, no en aire). El gate de tolerancia [S127] es lo que la hace un
+//      SNAP y no una sustitución: sin él, un pool cualquiera por dentro amputaba la pierna entera.
 // PURA: devuelve [hi, lo]; el call-site las escribe en legExtHi/Lo. Reemplaza el recompute por-llamada.
 f_computeLegExtremes(float px) =>
     float hi = chartState.pdHigh
@@ -3172,9 +3180,16 @@ f_computeLegExtremes(float px) =>
                     anchHi := p.level
                 if p.level < px and (na(lo) or p.level >= lo) and (na(anchLo) or p.level < anchLo)
                     anchLo := p.level
-        if not na(anchHi)
+        // El ancla SNAPEA el extremo a liquidez real, NO lo sustituye: solo vale si el pool cae CERCA del
+        // extremo legítimo (<= LEG_ANCH_TOL_ATR×ATR). Sin este gate [S127] un único pool vivo por dentro
+        // amputaba la pierna entera (medido D1: 1.20831 -> 1.14730, pierna = 6% del rango) y todo lo que
+        // quedaba más allá caía en banda 0 = invisible. Búsqueda acotada a [px,hi] => el ancla solo puede
+        // encoger; si el pool no llega a la tolerancia, el extremo bruto se queda (termina en aire, honesto).
+        // atr14 na => tol na => comparación false => se conserva el bruto (fallback seguro).
+        float tol = LEG_ANCH_TOL_ATR * chartState.atr14
+        if not na(anchHi) and not na(hi) and hi - anchHi <= tol
             hi := anchHi
-        if not na(anchLo)
+        if not na(anchLo) and not na(lo) and anchLo - lo <= tol
             lo := anchLo
     [hi, lo]
 
