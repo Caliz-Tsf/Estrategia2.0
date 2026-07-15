@@ -138,6 +138,16 @@ histórico no puede tener 2 toques, porque si los tuviera no sería el máximo. 
 
 ### 3bis.4 Lo que SÍ distingue sus niveles (y el motor no registra)
 
+> ⚠️ **CORREGIDO EN S132 — ESTA SECCIÓN CONTIENE UNA PREMISA FABRICADA.** La afirmación "6 pools que
+> el usuario NO considera pisos / no los descarta por toques sino por ser swings pequeños" **NUNCA la
+> dijo el usuario**. Preguntado en S132: *"yo no descarto nada, todo lo que he dicho es observación"*.
+> S132 midió la amplitud de swing en 5 escalas contra este contraste A-vs-B ficticio y gastó la sesión.
+> **Su observación real es otra:** dónde marca el indicador el premium/discount **de cada temporalidad**
+> ahora mismo, y que no da (causa medida en S132: `i_pdSwingLen` es un contador de barras compartido por
+> los 3 TF ⇒ 1000 barras = 4 años en D1 pero 41 días en H1).
+> Ver [DISENO-amplitud-de-swing-S132.md](DISENO-amplitud-de-swing-S132.md) §5quater.
+> **Norma nueva: ninguna medición arranca sin citar la frase literal del usuario que la motiva.**
+
 Entre 1.02108 y el precio hay **6 pools vivos** (1.036, 1.0733, 1.10654, 1.12105, 1.13246, 1.1473) que el
 usuario NO considera pisos. No los descarta por toques ni por edad: son **swings pequeños**. `SMC_Pool`
 guarda `level/dir/touches/barTime/swept/barIdx` — **no la amplitud del swing que lo creó**. Esa es la
