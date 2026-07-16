@@ -10,9 +10,15 @@
 
 ## 1. Veredicto en una línea
 
-**El criterio de abandono pre-comprometido de Fable se dispara: P1 y P2 fallan AMBAS, en las DOS escalas
-medidas.** Y la causa no es la parametrización: es que **el componente C3 del propio esqueleto ("expansión
-intacta") anula al componente C2 ("relatch por evento")**. El latch propone; la expansión dispone.
+**El criterio de abandono pre-comprometido de Fable se dispara en las 4 configuraciones medidas**
+(2 escalas de evento × 2 lecturas del diseño): P1 y P2 fallan siempre. Y la causa **no** es la
+parametrización ni la ambigüedad del doc: es que **el "origen de la pierna" no es el nivel que el
+usuario marca**. El techo latcheado sale a **9.2×ATR** de su 1.23697 en las 4 corridas.
+
+> **Corrección importante a la primera lectura de esta sesión (§4):** el diagnóstico inicial fue
+> *"C3 (expansión) anula a C2 (latch)"*. **Medido en §2bis: es incompleto.** Al quitar la expansión del
+> lado strong (lectura L2), los números salen **idénticos** ⇒ la expansión **no era** la causa
+> determinante. Ver §4bis.
 
 ---
 
@@ -55,6 +61,43 @@ intacta") anula al componente C2 ("relatch por evento")**. El latch propone; la 
 
 ---
 
+## 2bis. La ambigüedad del diseño de Fable — medida, y resulta IRRELEVANTE
+
+Tras las 2 primeras corridas se detectó que **el doc de Fable es ambiguo en el punto que decide**, con
+dos lecturas incompatibles:
+
+- **(L1)** §3 C3: *"`f_updateTrailing` **no se toca**"* ⇒ expande **ambos** lados. ← lo medido en §2.
+- **(L2)** §2: *"Lado **weak** := el opuesto al último evento; es el trailing extreme (expansión vela a
+  vela)"* ⇒ expande **solo el weak**; el strong queda congelado por definición.
+
+Es el mismo tipo de ambigüedad que la §3 de S128, **que costó la sesión S129 entera** midiendo la lectura
+equivocada. Así que se midió L2 antes de declarar nada (corrida `weak`, marker **1332**, escala 50 — aísla
+una sola variable contra la corrida `major`, que ya midió L1 con esa misma escala):
+
+| Lectura | `sHi` | `sLo` | amplitud | `nRelatch` | `nOutRange` |
+|---|---|---|---|---|---|
+| **L1** (`major`, 1331) | 1.18492 | 1.13246 | 524.6 pips | 41 | 0 |
+| **L2** (`weak`, 1332) | **1.18492** | **1.13246** | **524.6 pips** | 41 | **5** |
+
+**IDÉNTICOS.** Lo único que cambia es `nOutRange` (0 → 5): el precio sí se sale del rango en L2, como se
+esperaba. `P_sBias` = **−1** (bias bajista) explica la coincidencia:
+
+- **Lado bajo:** con bias bajista el low **es el weak** ⇒ expande **por definición de Fable** ⇒ suelo =
+  mínimo reciente = 1.13246 **en las dos lecturas**. Congelar el strong no protege este lado, porque este
+  lado **no es** el strong.
+- **Lado alto:** en L2 está congelado; en L1 tampoco se movía, porque el precio no sube. Coinciden.
+
+**Predicciones de la corrida `weak`** (escritas antes, en el arnés):
+
+| # | Predicción | Resultado |
+|---|---|---|
+| P-N1 | **LA QUE DECIDE:** `sHi` ≤ 1.0×ATR de 1.23697 | ❌ **FALSA** — 9.2×ATR, idéntico a L1 |
+| P-N2 | `sLo` ≠ 1.13246 (el latch sobrevive al quitar la expansión) | ❌ **FALSA** — reaparece 1.13246 |
+| P-N3 | `nOutRange` > 0 (el precio se sale) | ✅ VERDE — 5 barras |
+| P-N4 | amplitud > 758 pips | ❌ **FALSA** — 524.6 |
+
+---
+
 ## 3. Anti-humo (el probe mide lo que dice medir)
 
 - **Cross-check de fechas que exigió Fable:** `lastRelHiT` de la corrida `swing` = **2026-06-17** = exactamente
@@ -78,7 +121,11 @@ dependen de `i_pdSwingLen`. Las conclusiones sólo usan estos últimos.
 
 ---
 
-## 4. EL HALLAZGO: C3 anula a C2 (la expansión y el latch son incompatibles)
+## 4. Primer diagnóstico: C3 anula a C2 — ⚠️ PARCIALMENTE REFUTADO por §2bis, se conserva como registro
+
+> **Léase con §4bis.** Lo que sigue se escribió con solo las corridas L1 (markers 1330/1331) sobre la mesa.
+> La corrida L2 (1332) demostró que **quitar la expansión del lado strong no cambia ni un dígito** ⇒ la
+> expansión **no es** la causa determinante. El mecanismo descrito aquí es real, pero **no explica el fallo**.
 
 **`sLo` = 1.13246 en las DOS escalas.** Ese número es el mínimo reciente del precio — y es *exactamente* el
 ancla que la predicción P2 de Fable marcaba como señal de fallo (*"o si reaparece 1.13246 como ancla"*).
@@ -110,6 +157,32 @@ S129 lo encontró por el lado del *disparador*; S133 lo encuentra por el lado de
 
 ---
 
+## 4bis. EL HALLAZGO REAL: el "origen de la pierna" no es el nivel que el usuario marca
+
+Con las 4 configuraciones medidas (escala 5 y 50 × lecturas L1 y L2), el techo latcheado sale
+**1.16445 / 1.18492 / 1.18492**, siempre a **9-13×ATR** del 1.23697 que el usuario anota en rojo. Ese es
+el fallo, y no depende de ninguna de las dos variables que se creían candidatas:
+
+- **La escala no lo mueve** (5 vs 50 → 1.16445 vs 1.18492; ambos lejísimos).
+- **La expansión no lo mueve** (L1 vs L2 → idénticos al quinto decimal).
+
+**Por qué falla, mecánicamente:** el lado alto acumula **18 relatches** (escala 50). Cada evento bajista
+re-fija el techo en el `max(high)` de la pierna que acaba de romper. En una tendencia bajista cada pierna
+nace más abajo que la anterior ⇒ **el techo baja escalonadamente, caminando hacia el precio**. El 1.23697
+del usuario es un máximo de una pierna **muy anterior**, que el relatch descartó hace 17 eventos.
+
+**Y ese es el síntoma exacto que el usuario reporta desde S057:** *"el rango P/D camina hacia el precio en
+tendencia bajista"*. **El esqueleto de Fable reproduce el defecto que venía a corregir** — por otra vía
+(eventos en vez de pivotes), pero con el mismo resultado observable. Cambia *cuándo* y *a qué nivel* se
+reancla; no cambia que **se reancle hacia donde va el precio**.
+
+**El corolario que importa:** "strong es relacional — lo que la pierna rompió después" (§2 de Fable) es
+un principio correcto **cuya operacionalización como "origen de la última pierna" es demasiado local**.
+El nivel que el usuario marca sobrevive a docenas de piernas. Cualquier regla que se re-fije en *cada*
+evento estructural — sea cual sea la escala o el lado que expanda — **no puede** producirlo.
+
+---
+
 ## 5. Lo que esto le hace a la propuesta de Fable
 
 **Muere tal como está especificada** (su propio criterio: P1 ∧ P2 falsas). Pero muere de forma informativa,
@@ -123,9 +196,12 @@ y hay que decir qué sobrevive:
   doctrinal sigue abierto y sigue siendo real.
 - **SOBREVIVE — "strong es relacional, no local":** el principio que explica por qué murieron toques,
   amplitud y tolerancia (hipótesis #6/#7/#9) sigue en pie. Esta medición no lo toca.
-- **MUERE — C3 "expansión intacta":** es incompatible con C1+C2. Cualquier rediseño tiene que elegir.
+- **MUERE — "origen de la última pierna" como definición de strong high/low:** refutado en 4 configuraciones.
+  Reproduce el "camina hacia el precio" de S057 (§4bis). Este es el veredicto principal.
 - **MUERE — la escala como palanca:** medida en 5 y en 50. Ninguna salva P1/P2. (Cuarta vez que la escala se
   propone como causa y no lo es: S130 `pdLen`, S132 amplitud, y ahora las dos escalas de evento.)
+- **NO ERA LA CAUSA — la expansión (C3):** candidata del primer diagnóstico (§4), **refutada** por L2 (§2bis).
+  Sigue siendo cierto que borra el latch del lado weak; simplemente **no es lo que rompe P1**.
 
 ---
 
@@ -159,6 +235,10 @@ literal delante** (norma S132), no inferirlo.
 - **`pine/` intacto**, CORE SHA `752b4083a7db419d`, `pine_check` 0/0 ×2.
 - **NO medido** (requería pasar el gate, que no se pasó): P3 (rotación entre TF), P5 (los 9 niveles anotados),
   P6 (NAS100/ADR-001).
+- **Configuraciones medidas: 4** — escala {5, 50} × lectura {L1, L2}. Markers 1330 / 1331 / 1332
+  (L2×escala 5 no se corrió: L1 y L2 ya coinciden en escala 50, y la escala 5 ya falla más lejos).
+- **Predicciones S133: 4 vivas de 8** (P4-major, P7 ×2, P-R1 *declarada fácil*, P-R4, P-N3 verdes;
+  P1, P2, P-R2, P-R3, P-N1, P-N2, P-N4 falsas). Acumulado del proyecto ≈ **28 de 52**.
 - **Coste de implementación que el probe destapó** (si algún día se implementa algo así): el bloque P/D
   (`:2261-2265`) corre **antes** que la estructura (`:2276`), así que el relatch tendría que reordenarse o
   usaría el evento de la barra anterior. El probe lo esquiva yendo al final del archivo.

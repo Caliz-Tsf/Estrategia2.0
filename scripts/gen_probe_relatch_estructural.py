@@ -88,15 +88,47 @@ Por eso este arnes parametriza la escala en vez de hardcodearla:
 
   python scripts/gen_probe_relatch_estructural.py swing   -> evStructSwing (escala 5)  · marker 1330
   python scripts/gen_probe_relatch_estructural.py major   -> evStructMajor (escala 50) · marker 1331
+
+EL DISENO DE FABLE ES AMBIGUO EN EL PUNTO QUE DECIDE (hallazgo S133, tras las 2 corridas de arriba).
+Dos lecturas incompatibles del mismo doc:
+  (L1) §3 C3: "f_updateTrailing NO SE TOCA"                      -> expande AMBOS lados. <- medido (1330/1331)
+  (L2) §2:    "Lado WEAK := el opuesto al ultimo evento; es el
+              trailing extreme (expansion vela a vela)"          -> expande SOLO EL WEAK. <- sin medir
+Es el MISMO tipo de ambiguedad que la §3 de S128, que costo la sesion S129 entera midiendo la lectura
+equivocada. L1 borra el latch (medido: sLo=1.13246 en las 2 escalas). L2 no puede borrarlo, porque el
+lado strong queda congelado por definicion. Hay que medir L2 antes de declarar muerta la propuesta.
+
+  python scripts/gen_probe_relatch_estructural.py weak    -> L2: expansion solo en el weak · marker 1332
+
+L2, mecanica: el bias del ultimo evento decide QUE lado es strong.
+  ultimo evento ALCISTA -> strong = LOW  (latcheado, NO expande) · weak = HIGH (expande)
+  ultimo evento BAJISTA -> strong = HIGH (latcheado, NO expande) · weak = LOW  (expande)
+Si el precio rompe el strong low en bias alcista, eso mismo genera el evento bajista que convierte ese
+lado en weak -> vuelve a expandir. El coste: puede haber un intervalo con pct fuera de [0,1] (S129 midio
+pctC=1.1 en NAS100). Eso NO es un bug nuevo: decisiones-pd-rango.md:105 ya registra el pulido diferido
+"bajo rango"/"sobre rango" => pct en [0,1] es DECISION DE DISENO, no ley.
+
+PREDICCIONES corrida `weak` (escritas ANTES de medir, S133):
+  P-N1  *** LA QUE DECIDE *** sHi(weak) cae a <= 1.0 x ATR_D1 de 1.23697 (el rojo de Freddy).
+        FALSA si > 1 ATR. Si falla, "origen de pierna" NO es lo que Freddy marca, y entonces si que
+        se acabaron las variantes de esta familia.
+  P-N2  sLo(weak) != 1.13246 (deja de ser el minimo reciente) => el latch SOBREVIVE al quitar la
+        expansion del lado strong. FALSA si vuelve a salir 1.13246.
+  P-N3  nOutRange > 0 (el precio SE SALE del rango en alguna barra) = el precio conocido de quitar la
+        expansion. FALSA si sale 0 (seria sospechoso: significaria que el latch tampoco muerde).
+  P-N4  ampL(weak) > 758 pips (el rango doctrinal de A con pdLen=50). FALSA si <= 758.
 """
 import sys, os, pathlib
 
 ESCALA = (sys.argv[1] if len(sys.argv) > 1 else "swing").lower()
-if ESCALA not in ("swing", "major"):
-    print(f"[FALLO] escala desconocida: {ESCALA!r} (usar: swing | major)")
+if ESCALA not in ("swing", "major", "weak"):
+    print(f"[FALLO] escala desconocida: {ESCALA!r} (usar: swing | major | weak)")
     sys.exit(1)
+# `weak` mide la lectura L2 con la escala DOMINANTE (50), la del dealing range: aisla UNA variable
+# (la expansion) contra la corrida `major`, que ya midio L1 con esa misma escala.
 EV     = "evStructSwing" if ESCALA == "swing" else "evStructMajor"
-MARKER = 1330 if ESCALA == "swing" else 1331
+MARKER = {"swing": 1330, "major": 1331, "weak": 1332}[ESCALA]
+SOLO_WEAK = ESCALA == "weak"
 
 SRC = pathlib.Path(__file__).resolve().parent.parent / "pine" / "SMC-Visual.pine"
 OUT = pathlib.Path(os.environ.get("TEMP", ".")) / f"PROBE-relatch-{ESCALA}-S133.pine"
@@ -125,6 +157,34 @@ lineas_antes = len(s.splitlines())
 s = s[:s.index(MARK)]
 print(f"[truncado] render eliminado en {MARK!r}: {lineas_antes} -> {len(s.splitlines())} lineas")
 
+# --- C3: EL PUNTO EXACTO DONDE LAS DOS LECTURAS DEL DOC DE FABLE DIVERGEN. Unica variable que cambia.
+C3_L1 = """    // C3 (L1) — EXPANSION INTACTA: "f_updateTrailing no se toca" => expande AMBOS lados.
+    // Es lo que garantiza pct en [0,1]... y lo que borra el latch cada barra (MEDIDO: sLo=1.13246 en 5 y 50).
+    if na(sHi)
+        nSeed += 1
+    if na(sHi) or high > sHi
+        sHi := high
+    if na(sLo)
+        nSeed += 1
+    if na(sLo) or low < sLo
+        sLo := low"""
+
+C3_L2 = """    // C3 (L2) — EXPANSION SOLO EN EL LADO WEAK: "el lado weak es el trailing extreme" (Fable §2).
+    // El lado STRONG queda congelado por definicion => el latch NO puede ser borrado por el precio.
+    // Semilla: antes del 1.er evento (sBias=0) ambos lados expanden (no hay strong todavia).
+    if na(sHi)
+        nSeed += 1
+        sHi := high
+    if na(sLo)
+        nSeed += 1
+        sLo := low
+    if sBias >= 0 and high > sHi        // bias alcista o sin evento -> el HIGH es weak -> expande
+        sHi := high
+    if sBias <= 0 and low < sLo         // bias bajista o sin evento -> el LOW es weak -> expande
+        sLo := low"""
+
+C3 = C3_L2 if SOLO_WEAK else C3_L1
+
 PROBE = f"""
 
 // --- [S133 · PROBE v12: RELATCH ESTRUCTURAL al origen de la pierna — EN SOMBRA]
@@ -142,6 +202,7 @@ var int   nOutRange  = 0
 var int   nDisagree  = 0   // P7: veredicto latch != veredicto A
 var int   lastRelHiT = na
 var int   lastRelLoT = na
+var int   sBias      = 0   // L2: bias del ultimo evento -> decide QUE lado es strong (1=alcista, -1=bajista)
 
 float pdEqLo = 0.5 - i_pdEqBand / 100.0
 float pdEqHi = 0.5 + i_pdEqBand / 100.0
@@ -167,22 +228,15 @@ if barstate.isconfirmed
             rMin       := low          // el tracker reinicia: la nueva pierna nace aqui
             nRelatchLo += 1
             lastRelLoT := time
+            sBias      := 1            // L2: strong = LOW (queda congelado), weak = HIGH
         else
             sHi        := rMax
             rMax       := high
             nRelatchHi += 1
             lastRelHiT := time
+            sBias      := -1           // L2: strong = HIGH (queda congelado), weak = LOW
 
-    // C3 — EXPANSION INTACTA (f_updateTrailing tal cual, ambos lados). Orden reset->expand como :2261-2265.
-    // Es lo que garantiza pct en [0,1]: si el precio supera un lado, el rango lo sigue.
-    if na(sHi)
-        nSeed += 1
-    if na(sHi) or high > sHi
-        sHi := high
-    if na(sLo)
-        nSeed += 1
-    if na(sLo) or low < sLo
-        sLo := low
+{C3}
 
     // P7 — desacuerdo de VEREDICTO (no de nivel) contra la Opcion A vigente, barra a barra.
     [zLh, pLh] = f_premiumDiscount(close, sHi, sLo, pdEqLo, pdEqHi)
@@ -212,6 +266,7 @@ plot(nSeed,        "P_nSeed")         // anti-humo: siembras desde na
 plot(nOutRange,    "P_nOutRange")     // invariante: debe ser 0
 plot(lastRelHiT,   "P_lastRelHiT")    // anti-humo: cruzar con el panel (BOS 17-06 / CHoCH 14-05)
 plot(lastRelLoT,   "P_lastRelLoT")
+plot(sBias,        "P_sBias")         // L2: que lado esta congelado ahora (1=low strong, -1=high strong)
 plot(sAtr14,       "P_atr14")         // P1: la tolerancia 1.0 x ATR
 plot((sHi - sLo) / syminfo.mintick / 10, "P_ampL")  // amplitud del rango en sombra (pips)
 plot(close,        "P_close")
