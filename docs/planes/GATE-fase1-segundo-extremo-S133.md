@@ -206,6 +206,60 @@ sería llevar al CORE un modo de fallo conocido.
 
 ---
 
+## 6bis. LA CASCADA, RESUELTA — 3 TF nativas (medido, marker 1351)
+
+Tras el hallazgo de la ventana (§5bis) quedaban dos arquitecturas posibles y **nunca comparadas**. El
+usuario pidió medirlas antes de decidir. Arnés `scripts/gen_probe_ventana_pd.py` con **4 ventanas en un
+solo build** ⇒ (a) = las 4 columnas de una lectura · (b) = la columna `999999` entre D1/H1/M5.
+
+### (b) 3 TF NATIVAS, sin ventana — **EURUSD** ← **GANA**
+
+| TF | rango | `pct` | veredicto |
+|---|---|---|---|
+| **D1** | [0.95360, 1.51441] | 0.3435 | **DISCOUNT** |
+| **H1** | [1.02105, 1.19188] | 0.7328 | **PREMIUM** |
+| **M5** | [1.13335, 1.14730] | 0.9290 | **PREMIUM extremo** |
+
+- **ANIDA:** D1 ⊃ H1 ⊃ M5 — verificado numéricamente.
+- **ROTA:** 3 veredictos **distintos y simultáneos**. Es el requisito literal del usuario
+  (*"parametrizar dónde estará el discount de D1, el de H1 y el de M5"*), y sale **sin código por-TF y
+  con CERO parámetros nuevos**.
+
+### (a) 3 ventanas sobre D1 — **descartada**
+
+| ventana | rango | `pct` |
+|---|---|---|
+| W=500 | [1.10654, 1.18492] | 0.5066 (EQ) |
+| W=1000 | [1.01779, 1.18492] | 0.7686 (PREM) |
+| W=999999 | [0.95360, 1.51441] | 0.3435 (DISC) |
+
+También anida y rota, pero cae por dos motivos:
+
+1. **Cuesta 3 inputs**, y el mapeo ventana→TF sería **una DEFINICIÓN nuestra, no un hecho** — exactamente
+   el error que S130 cometió con el mapeo nivel→TF, que resultó ser **casualidad**.
+2. **Modo de fallo nuevo, MEDIDO:** con ventana corta en H1/M5 sale `nLo`=1 ⇒ **`pdLo`=NaN** — no hay 2.º
+   extremo dentro de la ventana ⇒ **la regla se queda sin candidatos**. Es el **gemelo exacto de S131**
+   (`i_minTouches`=2 dejaba la regla sin candidatos). La ventana corta **reintroduce** ese fallo.
+
+### EL DATO QUE DECIDE (sanity check contra sus lecturas — **no oráculo**)
+
+| | lectura del usuario | 2.º strong low nativo | distancia |
+|---|---|---|---|
+| suelo **H1** | 1.02108 | **1.02105** | **0.3 pips** |
+| suelo **D1** | 0.95751 | 0.95360 | 39.1 pips |
+
+**S132 midió "1100 pips de error en el suelo de H1"** con la Opción A. **Ahora: 0.3 pips.** Y nada se
+calibró contra sus marcas — 1.02105 sale de *"el 2.º strong low de la escala de H1"*, punto.
+
+**Cross-check del arnés:** `W=999999` reproduce el probe v14 al 4.º decimal (`pdLow`=0.95360,
+pct=0.3435 vs 0.3436) ⇒ los dos arneses miden lo mismo.
+
+**⇒ Decisión: (b) TF nativas.** La ventana queda **solo** como remedio del fósil de D1 en símbolos
+seculares (NAS100), a decidir **aparte y solo si molesta** — el usuario ya dijo que **D1 es contexto, no
+señal**. §2.3.2 debe reflejar que `pdWindow` es **opcional y por-TF**, no parte de la regla base.
+
+---
+
 ## 7. Siguiente
 
 **Fase 2 del plan, y su primer paso es un gate humano: descongelar S021.** La medición no lo decide.

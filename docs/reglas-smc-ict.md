@@ -344,9 +344,23 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 
 **Anidamiento MTF gratis:** cada TF usa la escala de sus propios pivotes ⇒ el 2.º extremo de M5 está más cerca del precio que el de H1, y el de H1 más que el de D1. **La cascada D1 ⊃ H1 ⊃ M5 sale sola, sin código por-TF ni parámetro de escalado.**
 
-**La VENTANA — el único parámetro** *(corregido en S133 tras medir NAS100; la v1 de esta sección decía "no hay parámetro de escala" y es **falso**)*. Los strong lows/highs se buscan **dentro de una ventana declarada de N velas del TF**, no en toda la historia disponible.
+**La VENTANA `pdWindow` — parámetro OPCIONAL y por-TF, NO parte de la regla base** *(dos correcciones en S133: la v1 decía "no hay parámetro de escala" (**falso**), y la v2 la hizo obligatoria (**también falso** — la cascada nativa no la necesita))*.
 
-**Por qué es obligatoria (medido, NAS100USD D1 vs H1):**
+**MEDIDO — la regla base, SIN ventana, ya cumple todo** (EURUSD, S133):
+
+| TF | rango = [2.º strong low, 2.º strong high] | `pct` | veredicto |
+|---|---|---|---|
+| D1 | [0.95360, 1.51441] | 0.344 | **DISCOUNT** |
+| H1 | [1.02105, 1.19188] | 0.733 | **PREMIUM** |
+| M5 | [1.13335, 1.14730] | 0.929 | **PREMIUM extremo** |
+
+**Anida** (D1 ⊃ H1 ⊃ M5) y **rota** (3 veredictos simultáneos distintos), **con cero parámetros**. La escala la fija el TF; no hace falta declarar nada.
+
+⚠️ **Contraejemplo medido — la ventana corta ROMPE la regla:** con `pdWindow` pequeño en H1/M5 solo cae **1** strong dentro ⇒ **no existe 2.º extremo** ⇒ la regla se queda **sin candidatos** (`pdLow`=`na`). Es el mismo modo de fallo que `minTouches`=2 (S131). **Una ventana nunca puede ser menor que la que contiene ≥2 strong del lado.**
+
+**Cuándo SÍ declararla (único caso):** símbolos de **tendencia secular fuerte**, donde el 2.º extremo del lado que el precio nunca vuelve a visitar **se fosiliza** en el arranque del feed:
+
+**Medido, NAS100USD D1 vs H1:**
 
 | | D1 (feed de ~24 años) | H1 (feed de ~1.5 años) |
 |---|---|---|
@@ -354,7 +368,7 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 | rango | 29752 pts | 11709 pts |
 | `pct` | **0.958 — clavado, no rota** | 0.898 |
 
-En un símbolo de tendencia secular fuerte, **el 2.º extremo del lado que el precio nunca vuelve a visitar se fosiliza en el arranque del feed** ⇒ el rango deja de ser operable. **H1 no lo sufre solo porque su feed es corto** — es decir, la ventana ya estaba actuando de hecho, sin declararse. Dejarla implícita hace que el resultado dependa de **cuánta historia sirva el bróker**, lo cual no es una regla: es un accidente.
+**El 2.º extremo del lado que el precio nunca vuelve a visitar se fosiliza en el arranque del feed** ⇒ ese rango deja de ser operable. **H1 no lo sufre solo porque su feed es corto** — la ventana ya actuaba de hecho, sin declararse. **Remedio: declarar `pdWindow` SOLO en el TF afectado** (no en los tres, y no por defecto). Alternativa legítima: **no hacer nada** — un D1 que dice "premium extremo" en un símbolo en máximos de 24 años **está diciendo la verdad**, y el dealing range operable es el de H1/M5.
 
 > **Nota histórica.** `i_pdSwingLen`=1000 (S130) acertaba el rango D1 de EURUSD **por este mismo mecanismo, sin saberlo**: no era una escala de pivote, actuaba como ventana de facto. Ver `decisiones-pd-rango.md` nota S133(b).
 
@@ -365,7 +379,7 @@ En un símbolo de tendencia secular fuerte, **el 2.º extremo del lado que el pr
 |---|---|---|
 | `eqBand` | **45–55%** | ancho de la banda de equilibrium. |
 | rango | `[pdLow, pdHigh]` = **2.º** strong low / **2.º** strong high de la escala del TF | se actualiza **solo** con un nuevo strong high/low (§2.3.1), **no** con pivotes. |
-| `pdWindow` | **por calibrar** (velas del TF) | **el único parámetro libre.** Acota dónde se buscan los strong. Sin él, el rango depende de cuánta historia sirva el bróker. |
+| `pdWindow` | **desactivada** (toda la historia del TF) | **OPCIONAL y por-TF.** Solo para el fósil en símbolos seculares. **Nunca menor que la ventana que contiene ≥2 strong del lado** (si no, la regla se queda sin candidatos). |
 
 **Contraejemplo.** Comprar en **premium** (precio en el 80% del rango) porque "hay un OB alcista" es operar contra la localización — el OB en premium tiene mucha menor probabilidad. Premium/Discount es el filtro que evita entradas caras.
 
