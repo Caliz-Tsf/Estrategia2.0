@@ -38,8 +38,12 @@ import sys, os, pathlib
 
 SRC = pathlib.Path(__file__).resolve().parent.parent / "pine" / "SMC-Visual.pine"
 OUT = pathlib.Path(os.environ.get("TEMP", ".")) / "PROBE-ventana-pd-S133.pine"
-MARKER = 1350
-VENTANAS = (500, 1000, 2000)
+MARKER = 1351
+# 999999 = SIN VENTANA (toda la historia del TF). Incluirla permite leer LAS DOS VARIANTES que hay que
+# comparar con UN SOLO build (decision del usuario S133: "mídelo antes de decidir"):
+#   (a) LA CASCADA = 3 ventanas sobre el MISMO TF   -> comparar las 4 columnas de una sola lectura
+#   (b) LA CASCADA = 3 TF nativas (D1/H1/M5)        -> comparar la columna 999999 entre las 3 lecturas
+VENTANAS = (500, 1000, 2000, 999999)
 
 s = SRC.read_text(encoding="utf-8")
 
