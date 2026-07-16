@@ -161,15 +161,36 @@ lleva 24 años sin acercarse al suelo**.
 lejos** en D1"* y *"que queden en un rango que sea **operable**"*. Y es **ADR-001**: la regla no puede valer
 solo para símbolos que oscilan.
 
-**Lo que NO se sabe todavía (y no se supone):**
-- Si H1 y M5 **sí** rotan en NAS100 (sus 2.º extremos serían mucho más cercanos). **No medido** — el probe
-  corre en el chart-TF. El usuario ya dijo que **D1 es contexto, no señal**, así que esto podría ser
-  suficiente. **Hay que medirlo, no asumirlo.**
-- Si el arreglo es el **k-ésimo con k>2**, una **ventana declarada** (S129 ya concluyó que la ventana es el
-  único parámetro libre), o **nada** (aceptar que D1 en un secular no rota, por diseño).
+### MEDIDO — H1 SÍ rota ⇒ **la causa del fósil es LA VENTANA, no la regla**
 
-**⇒ Esto se decide con el usuario ANTES de tocar el CORE.** Implementar ahora sería llevar al CORE una
-regla con un modo de fallo conocido y no resuelto.
+| | NAS100 **D1** | NAS100 **H1** |
+|---|---|---|
+| barras del feed | 6022 (**~24 años**) | 9055 (**~1.5 años**) |
+| `bias` | −1 | +1 |
+| `histLow` / **`pdLow`** | 1016.1 / **1021.1** *(de 2001)* | 16335.1 / **19013** *(reciente)* |
+| `histHigh` / `pdHigh` | 26288.1 / 22248.0 | 30773.2 / 30722.4 |
+| **RANGO USADO** | [1021.1, 30773.2] = **29752 pts** | **[19013, 30722.4] = 11709 pts** |
+| `pctN` / `pctA` | 0.9583 / 0.9583 | **0.8977** / 0.8431 |
+| `case3Lo` *(el suelo se movió)* | **0** | **839** |
+| `nRelatchMin2` / `Max2` | 2 / 11 | 3 / 9 |
+| `nOutRange` | 0 | **0** |
+| `nDisagree` vs A | 4.0% | **12.3%** |
+
+**El diagnóstico, en una frase:** H1 no se fosiliza **porque su feed solo llega 1.5 años atrás**. D1 tiene
+24 años y el precio nunca vuelve a 2001 ⇒ su 2.º extremo bajo se queda en el origen. **La regla es la
+misma en ambos; lo que cambia es la ventana de datos.**
+
+⇒ **S129 ya lo había concluido** (*"la ventana es el único parámetro ⇒ declararla"*) y el plan lo lista
+como decisión pendiente #1. **El error está en §2.3.2 de este parche doctrinal**, que escribió:
+*"ventana | toda la historia disponible del TF | **no hay parámetro de escala**"*. **Eso es lo que NAS100
+refuta.** La ventana **sí** es un parámetro, y es el único.
+
+**Nota:** que `nDisagree` suba de 4.0% (D1) a **12.3%** (H1) refuerza la lectura de §5 — P6 medía la
+métrica equivocada en D1 precisamente porque ahí el rango nuevo converge con A.
+
+**⇒ Decisión del usuario ANTES de tocar el CORE:** cómo se acota la ventana de D1 (o si se acepta que D1
+en un secular no rote, dado que él ya dijo que **D1 es contexto, no señal**). Implementar sin decidirlo
+sería llevar al CORE un modo de fallo conocido.
 
 ---
 
