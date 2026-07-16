@@ -360,6 +360,35 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 > "el M5" sea M5.** Lo de abajo queda como registro de las dos correcciones previas; **la ventana
 > declarada por TF es obligatoria** y su calibración está **pendiente**.
 
+> ## ⚠️ CORRECCIÓN DE ALCANCE — el defecto NO es solo del M5 *(S134, matriz de 9 celdas medida)*
+>
+> El aviso de arriba señala solo el M5. **Es incompleto: el H1 también falla.** Medido en vivo
+> (EURUSD, instancia limpia, sin overrides), veredicto por columna × chart-TF:
+>
+> | Columna | Chart D1 | Chart H1 | Chart M5 |
+> |---|---|---|---|
+> | **D1** | Discount 34% | Discount 34% | Discount 34% |
+> | **H1** | *Discount 34%* | Premium 74% | Premium 74% |
+> | **M5** | *Premium 58%* | *Discount 21%* | **Premium 91%** |
+>
+> **La regla:** una columna se lee correcta **si y solo si `chart-TF <= TF de la columna`**. El D1 es
+> estable en las tres (TV sirve su historia completa desde cualquier chart); el H1 solo falla desde un
+> chart D1; el M5 solo acierta desde un chart M5.
+>
+> **La regla base FUNCIONA:** desde **chart M5** las tres columnas dan **34/74/91** = la tabla del gate
+> de aquí abajo, celda por celda. La cascada anida y rota con cero parámetros.
+>
+> **⇒ Aparece un remedio de coste cero que no estaba considerado:** declarar que **el panel es válido
+> leído desde el TF más bajo** (regla de operación, no código), frente a la ventana real (array de
+> strong con `barIdx` en el CORE ⇒ SHA + riesgo OOM de S105 + tokens contra el CE10117). **DECISIÓN
+> ABIERTA.** Ver `docs/planes/MEDICION-matriz-chart-tf-S134.md`.
+>
+> ⚠️ **Contradicción viva en esta misma sección, sin resolver:** el aviso de arriba dice que la ventana
+> es **obligatoria**; la tabla de parámetros de abajo sigue diciendo `pdWindow` = *"desactivada ·
+> **OPCIONAL** y por-TF"*. Son incompatibles. Resolverlo es una **decisión de diseño**, no un hecho
+> medible ⇒ no se toca aquí. §2.3.2 lleva 4 correcciones en una sesión (S133); esta es la 5.ª y es
+> **solo de alcance**, no de diseño.
+
 **La VENTANA `pdWindow`** *(historial de correcciones en S133: v1 "no hay parámetro de escala" (**falso**); v2 "obligatoria por el fósil" (**falso: no era esa la razón**); v3 "opcional" (**falso**, ver el aviso de arriba); **v4: obligatoria, por determinismo**)*.
 
 **MEDIDO — la regla base, SIN ventana, ya cumple todo** (EURUSD, S133):
