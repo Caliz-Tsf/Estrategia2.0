@@ -128,8 +128,6 @@ var int lastEvT   = na
 
 float pdEqLo = 0.5 - i_pdEqBand / 100.0
 float pdEqHi = 0.5 + i_pdEqBand / 100.0
-float sLo = na
-float sHi = na
 
 if barstate.isconfirmed
     nBars += 1
@@ -166,9 +164,6 @@ if barstate.isconfirmed
                 max2 := sh
                 nRelatchMax2 += 1
 
-    // §2.3.2 — fallback en cascada. Garantiza pct en [0,1] ("el precio siempre esta por dentro").
-    sLo := na(min2) ? trailing.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailing.bottom
-    sHi := na(max2) ? trailing.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailing.top
     if not na(min2)
         if close >= min2
             nCase1Lo += 1
@@ -182,14 +177,23 @@ if barstate.isconfirmed
         else if close > max1
             nCase3Hi += 1
 
+    // §2.3.2 fallback, version local para los contadores historicos de esta barra confirmada.
+    float sLoI = na(min2) ? trailing.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailing.bottom
+    float sHiI = na(max2) ? trailing.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailing.top
     // P6 — desacuerdo de VEREDICTO contra la Opcion A vigente, barra a barra.
-    [zNh, pNh] = f_premiumDiscount(close, sHi, sLo, pdEqLo, pdEqHi)
+    [zNh, pNh] = f_premiumDiscount(close, sHiI, sLoI, pdEqLo, pdEqHi)
     [zAh, pAh] = f_premiumDiscount(close, chartState.pdHigh, chartState.pdLow, pdEqLo, pdEqHi)
     if not na(zNh) and not na(zAh) and zNh != zAh
         nDisagree += 1
     // P4 — el invariante.
     if not na(pNh) and (pNh < 0 or pNh > 1)
         nOutRange += 1
+
+// §2.3.2 — el rango VIGENTE, recalculado CADA barra (incluida la VIVA). min1/min2/max1/max2 son `var`
+// y persisten. OJO: esto tiene que vivir FUERA del `if barstate.isconfirmed` — si no, en la barra viva
+// saldria `na` y el volcado de islast (el unico canal que no sigue el crosshair) no mostraria nada.
+float sLo = na(min2) ? trailing.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailing.bottom
+float sHi = na(max2) ? trailing.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailing.top
 
 [zN, pctN] = f_premiumDiscount(close, sHi, sLo, pdEqLo, pdEqHi)
 [zA, pctA] = f_premiumDiscount(close, chartState.pdHigh, chartState.pdLow, pdEqLo, pdEqHi)
@@ -219,6 +223,24 @@ plot(sAtr14,       "P_atr14")
 plot((sHi - sLo) / syminfo.mintick / 10, "P_ampN")
 plot(close,        "P_close")
 plot({MARKER},     "P_marker")
+
+// --- VOLCADO EN islast. POR QUE: data_get_study_values sigue el CROSSHAIR y devolvio la barra
+// EQUIVOCADA en NAS100 (close=22688 con el chart en 29536) -> los valores no eran del presente.
+// data_get_pine_labels NO sigue el crosshair (gotcha S131) -> este es el canal fiable para el veredicto.
+if barstate.islast
+    string d = "== PROBE {MARKER} · " + syminfo.ticker + " " + timeframe.period + " ==\\n"
+    d += "close=" + str.tostring(close, "#.#####") + " bias=" + str.tostring(structSwing.bias) + "\\n"
+    d += "histLow="  + str.tostring(min1, "#.#####") + "  pdLow="  + str.tostring(min2, "#.#####") + "\\n"
+    d += "histHigh=" + str.tostring(max1, "#.#####") + "  pdHigh=" + str.tostring(max2, "#.#####") + "\\n"
+    d += "RANGO USADO=[" + str.tostring(sLo, "#.#####") + ", " + str.tostring(sHi, "#.#####") + "]\\n"
+    d += "pctN=" + str.tostring(pctN, "#.####") + "  pctA=" + str.tostring(pctA, "#.####") + "\\n"
+    d += "nBars=" + str.tostring(nBars) + " nOutRange=" + str.tostring(nOutRange) + "\\n"
+    d += "relatch min2=" + str.tostring(nRelatchMin2) + " max2=" + str.tostring(nRelatchMax2) + "\\n"
+    d += "strong lo=" + str.tostring(nStrongLo) + " hi=" + str.tostring(nStrongHi) + "\\n"
+    d += "caseLo 1/2/3=" + str.tostring(nCase1Lo) + "/" + str.tostring(nCase2Lo) + "/" + str.tostring(nCase3Lo) + "\\n"
+    d += "caseHi 2/3=" + str.tostring(nCase2Hi) + "/" + str.tostring(nCase3Hi) + "\\n"
+    d += "nDisagree=" + str.tostring(nDisagree)
+    label.new(bar_index, close, d, style = label.style_label_left, textcolor = color.white, size = size.small)
 """
 
 s = s + PROBE

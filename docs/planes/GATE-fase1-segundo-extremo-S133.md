@@ -6,33 +6,69 @@
 
 ---
 
+> ## 🛑 CORRECCIÓN (misma sesión) — LA COLUMNA DE NAS100 DE LA v1 DE ESTE DOC ERA HUMO
+>
+> **El usuario mandó una captura de su chart de NAS100 y no cuadraba con lo reportado.** Tenía razón:
+> `data_get_study_values` **sigue el crosshair** (gotcha conocido) y la lectura de NAS100 se tomó en una
+> **barra intermedia**. Se reportó `close`=22688 con el chart en **29532**. Todos los valores de estado de
+> esa columna eran de otra barra:
+>
+> | | v1 (barra intermedia — **HUMO**) | real (islast) |
+> |---|---|---|
+> | `close` | 22688.3 | **29532.4** |
+> | `bias` | +1 | **−1** |
+> | `histHigh` | 22248.0 | **26288.1** |
+> | `pdHigh` | 16771.6 | **22248.0** |
+>
+> **Antídoto aplicado:** volcado por `label` en `barstate.islast` — `data_get_pine_labels` **no** sigue el
+> crosshair (lección S131). Además se corrigió **un bug del propio probe**: `sLo`/`sHi` se calculaban dentro
+> de `if barstate.isconfirmed` ⇒ en la barra viva salían `na`. Ahora se recalculan cada barra.
+>
+> **Los contadores acumulados (`nOutRange`, `nRelatch*`, `case*`, `nDisagree`) sobreviven** — no dependen de
+> la barra leída. **Los valores de estado de NAS100 quedan corregidos abajo.** La columna de **EURUSD no está
+> afectada** (se leyó en la última barra: `close`=1.14628 = precio real).
+>
+> **Consecuencia sobre el veredicto: el gate SIGUE PASANDO, pero aparece un límite que la v1 no vio.** Ver §5bis.
+
+---
+
 ## 1. Veredicto
 
-**Ninguno de los tres criterios de abandono pre-comprometidos se dispara. El gate PASA: 5 predicciones
-verdes de 6.**
+**Ninguno de los tres criterios de abandono pre-comprometidos se dispara. El gate PASA.**
 
 Y lo hace por el motivo correcto: **la regla es doctrina, no ajuste**. Ninguno de los umbrales se calibró
 contra las marcas del usuario — sus niveles solo se usaron como *sanity check* a posteriori.
+
+**Pero con los datos frescos de NAS100 aparece un límite real (§5bis): en un símbolo de tendencia secular
+fuerte, el 2.º extremo del lado que el precio nunca visita se FOSILIZA en el origen del feed** ⇒ el rango
+D1 sale `[1021.1, 30773.2]` y el veredicto es **premium 96% permanente** ⇒ **no operable**. Eso es media
+promesa del usuario (*"que queden en un rango que sea operable"*) sin cumplir. **Se decide antes de tocar
+el CORE.**
 
 ---
 
 ## 2. Los números
 
-| | **EURUSD D1** (bajista) | **NAS100USD D1** (alcista) |
+*(NAS100 = lectura fresca por `label` en islast, tras la corrección de arriba.)*
+
+| | **EURUSD D1** (secular bajista) | **NAS100USD D1** (secular alcista) |
 |---|---|---|
-| n barras | 6284 | 5752 |
-| `bias` (swing / major) | **−1 / −1** | **+1 / +1** |
+| n barras | 6284 | 6022 |
+| `close` | 1.14628 | 29532.4 |
+| `bias` | −1 | **−1** *(estructural local; el secular es alcista)* |
 | `histLow` | 0.90275 | 1016.1 |
-| **`pdLow`** | **0.95360** | 1021.1 |
-| `histHigh` | 1.60389 | 22248.0 |
-| **`pdHigh`** | **1.51441** | 16771.6 |
-| `nStrongLo` / `nStrongHi` | 23 / 18 | 22 / 11 |
-| `nRelatchMin2` | 2 | **2** ← *strong (alcista)* |
-| `nRelatchMax2` | **3** ← *strong (bajista)* | 10 |
+| **`pdLow`** | **0.95360** | **1021.1** ← *de 2001* |
+| `histHigh` | 1.60389 | 26288.1 |
+| **`pdHigh`** | **1.51441** | 22248.0 |
+| **RANGO USADO** | **[0.95360, 1.51441]** | **[1021.1, 30773.2]** ← *techo = trailing (caso 3)* |
+| `pctN` / `pctA` | 0.3436 / 0.2963 | **0.9583 / 0.9583** |
+| `nStrongLo` / `nStrongHi` | 23 / 18 | 23 / 12 |
+| `nRelatchMin2` | 2 | 2 |
+| `nRelatchMax2` | **3** | **11** |
 | `nOutRange` | **0** | **0** |
-| fallback: case2 / case3 (abajo) | 27 / 0 | 155 / 0 |
-| fallback: case2 / case3 (arriba) | 434 / 312 | 1094 / **2913** |
-| `nDisagree` vs Opción A | 363/6284 = **5.8%** | 238/5752 = **4.1%** |
+| fallback: case1/2/3 (abajo) | 5859 / 27 / 0 | 5190 / 155 / 0 |
+| fallback: case2/3 (arriba) | 434 / 312 | 1109 / **3168** |
+| `nDisagree` vs Opción A | 363/6284 = **5.8%** | 238/6022 = **4.0%** |
 
 ## 3. Predicciones (escritas en el arnés ANTES de medir)
 
@@ -40,12 +76,18 @@ contra las marcas del usuario — sus niveles solo se usaron como *sanity check*
 |---|---|---|
 | P1 | `histLow` EURUSD = 0.90275 ±10 pips | ✅ **VERDE — exacto** *(declarada fácil de antemano; es cross-check del arnés)* |
 | P2 | `pdLow` EURUSD = 0.95360 ±20 pips | ✅ **VERDE — EXACTO** |
-| P3 | **LA QUE DECIDE:** `nRelatchMax2` ≤ 10 (Fable dio **41**) | ✅ **VERDE — 3** |
+| P3 | **LA QUE DECIDE:** `nRelatchMax2` ≤ 10 (Fable dio **41**) | ⚠️ **MITAD — 3 en EURUSD (verde), 11 en NAS100 (falla por 1)** |
 | P4 | `nOutRange` = 0, incluida la franja histórica | ✅ **VERDE — 0 en ambos símbolos** |
-| P5 | **ADR-001:** NAS100 congela el lado que dicta el bias, sin tocar código | ✅ **VERDE** |
-| P6 | `nDisagree` ≥ 15% de las barras | ❌ **FALSA — 5.8% y 4.1%** |
+| P5 | **ADR-001:** mismo código, sin ramas por símbolo | ✅ **VERDE en lo mecánico** — pero ver §5bis |
+| P6 | `nDisagree` ≥ 15% de las barras | ❌ **FALSA — 5.8% y 4.0%** |
 
-**Marcador S133: 9 vivas de 17.**
+**Marcador S133: 8 vivas de 17.** *(P3 baja de verde a mitad tras la corrección de NAS100; se registra
+como salió, sin re-escribir el umbral a posteriori.)*
+
+**Sobre P3 en NAS100:** 11 > 10 ⇒ falla su umbral, pero el umbral era **mío y arbitrario**. El contraste
+que importa: **11 re-fijaciones en 6022 barras = 1 cada 547 barras**, contra las **41** del esqueleto de
+Fable. Y no es "caminar hacia el precio": en un símbolo secular alcista el 2.º más alto **sube porque hay
+altos más altos** — que es exactamente lo que el usuario pide. **El espíritu de P3 se cumple; su letra no.**
 
 ---
 
@@ -96,6 +138,38 @@ doctrina**, y además: (a) elimina el accidente, (b) elimina el input, (c) **eli
 3.2%, misma mecánica que A ⇒ no compraba nada). Aquí la mecánica **sí** difiere, y lo que compra es
 estabilidad del strong (P3) + una regla doctrinal sin parámetro de escala — no un veredicto distinto
 cada día. **Se registra como predicción FALSA** (no se re-escribe a posteriori), con esta lectura al lado.
+
+---
+
+## 5bis. EL LÍMITE QUE LA CORRECCIÓN DESTAPÓ — el lado no visitado se FOSILIZA
+
+**Lo que funciona (y responde la pregunta literal del usuario):** *"el precio rompe el alto más alto y se
+supone que el premium debiese subir hasta donde está el alto más alto nuevo, ¿no?"* → **SÍ, medido:**
+`close`=29532 > `histHigh`=26288 ⇒ **caso 3** ⇒ `RANGO USADO = [1021.1, **30773.2**]`. El techo expandió
+al nuevo alto más alto, y `nOutRange`=0. **El fallback §2.3.2 hace exactamente lo que él describió.**
+
+**Lo que NO funciona:** el **suelo** de NAS100 es `pdLow` = **1021.1** — un nivel de **2001**. El rango D1
+sale de **29752 puntos** y el veredicto es **premium 95.8%**... y lleva así 5190 barras (`case1Lo`).
+**No rota. No es operable.**
+
+**La causa, en una frase:** el 2.º extremo del lado que la tendencia secular **nunca vuelve a visitar** se
+queda anclado en el arranque del feed. En EURUSD no se ve porque el precio ha visitado los dos lados
+(`case2Lo`=27 ⇒ la franja histórica se tocó). En NAS100 `case3Lo`=0 y `case2Lo`=155 sobre 6022: **el precio
+lleva 24 años sin acercarse al suelo**.
+
+**Por qué importa:** es media promesa del usuario sin cumplir — *"para darle el premium y discount **no tan
+lejos** en D1"* y *"que queden en un rango que sea **operable**"*. Y es **ADR-001**: la regla no puede valer
+solo para símbolos que oscilan.
+
+**Lo que NO se sabe todavía (y no se supone):**
+- Si H1 y M5 **sí** rotan en NAS100 (sus 2.º extremos serían mucho más cercanos). **No medido** — el probe
+  corre en el chart-TF. El usuario ya dijo que **D1 es contexto, no señal**, así que esto podría ser
+  suficiente. **Hay que medirlo, no asumirlo.**
+- Si el arreglo es el **k-ésimo con k>2**, una **ventana declarada** (S129 ya concluyó que la ventana es el
+  único parámetro libre), o **nada** (aceptar que D1 en un secular no rota, por diseño).
+
+**⇒ Esto se decide con el usuario ANTES de tocar el CORE.** Implementar ahora sería llevar al CORE una
+regla con un modo de fallo conocido y no resuelto.
 
 ---
 
