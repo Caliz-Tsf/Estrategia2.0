@@ -36,7 +36,6 @@ i_gradPersistDays  = input.int(5,   "Gradient: persistencia grids P3 (cuota) §5
 // era el de 2.5 meses (758 pips); con 1000 es [0.95360, 1.60389] estructural. MEDIDO en Visual, NO en
 // Strategy (aqui solo se alinea el default para no dejar dos verdades distintas). Ver
 // docs/planes/DISENO-cascada-pd-anidada-S130.md.
-i_pdSwingLen  = input.int(1000, "Swing P/D (rango dominante)", minval = 10, group = GRP_SCORE)
 i_pdEqBand    = input.float(5.0, "Banda equilibrium P/D (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_SCORE)
 i_scoreThresh = input.int(0, "Score threshold (calibrar Fase 3)", group = GRP_SCORE)
 i_eqThreshold = input.float(0.1, "Umbral igualdad EQH/EQL (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_SCORE)
@@ -1542,6 +1541,20 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     var SMC_TFState   st       = SMC_TFState.new()
     var SMC_Structure structTf = SMC_Structure.new()
     var SMC_Trailing  trailTf  = SMC_Trailing.new()
+    // [ADR-021] Estructura de ESCALA P/D (pdLen=50, la dominante de LuxAlgo). Los strong del dealing
+    // range nacen de SUS rupturas, NO de las de structTf (swingLen=5): medido en S133, con escala 5 el
+    // rango sale LOCAL (319 pips) = el bug de S021 reencarnado. `pdLen` NO desaparece: cambia de
+    // significado (era la escala del pivote de reanclaje; ahora es la escala de la estructura).
+    var SMC_Structure structPd = SMC_Structure.new()
+    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2). 6 floats, O(1) por evento:
+    // runMin/runMax = origen de la pierna en curso; min1/max1 = 1.er extremo (HISTORICO, NO entra al
+    // rango); min2/max2 = 2.º extremo = EL RANGO. Mantener los dos mas bajos no requiere ordenar.
+    var float runMin = na
+    var float runMax = na
+    var float min1   = na
+    var float min2   = na
+    var float max1   = na
+    var float max2   = na
     var array<SMC_Zone> zonesTf = array.new<SMC_Zone>()
     var array<SMC_Pool> poolsTf = array.new<SMC_Pool>()
     var array<float> obBufHigh = array.new<float>()
@@ -1569,14 +1582,38 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     if barstate.isconfirmed and not na(sl)
         f_setStructureLow(structTf, sl, bar_index - swingLen, time[swingLen])
     if barstate.isconfirmed and not na(pdH)
-        f_resetTrailingHigh(trailTf, pdH, bar_index - pdLen, time[pdLen])
+        f_setStructureHigh(structPd, pdH, bar_index - pdLen, time[pdLen])
     if barstate.isconfirmed and not na(pdL)
-        f_resetTrailingLow(trailTf, pdL, bar_index - pdLen, time[pdLen])
+        f_setStructureLow(structPd, pdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(trailTf, high, low, time)
     if barstate.isconfirmed
-        st.pdHigh := trailTf.top
-        st.pdLow  := trailTf.bottom
-        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Origen de la pierna en curso. min/max de barras PASADAS -> anti-repaint [#1].
+        runMin := na(runMin) ? low  : math.min(runMin, low)
+        runMax := na(runMax) ? high : math.max(runMax, high)
+        SMC_Event ev   = f_detectStructure(structTf, bar_index, time, true, true)
+        SMC_Event evPd = f_detectStructure(structPd, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Un strong nace SOLO cuando la pierna que empezo en el ROMPIO ESTRUCTURA (de
+        // escala P/D): 'strong' es RELACIONAL, no una propiedad local del nivel. El 1.º y el 2.º: O(1).
+        if not na(evPd) and (evPd.kind == KIND_BOS or evPd.kind == KIND_CHOCH)
+            if evPd.dir == DIR_BULL
+                if na(min1) or runMin < min1
+                    min2 := na(min1) ? min2 : min1
+                    min1 := runMin
+                else if na(min2) or runMin < min2
+                    min2 := runMin
+                runMin := low
+            else
+                if na(max1) or runMax > max1
+                    max2 := na(max1) ? max2 : max1
+                    max1 := runMax
+                else if na(max2) or runMax > max2
+                    max2 := runMax
+                runMax := high
+        // [ADR-021 §2.3.2] El rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en cascada
+        // -> pct en [0,1] por construccion: si el precio entra en la franja historica el rango se estira
+        // al 1.º, y si rompe el historico expande con el trailing hasta que se confirme el pivote nuevo.
+        st.pdLow  := na(min2) ? trailTf.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailTf.bottom
+        st.pdHigh := na(max2) ? trailTf.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailTf.top
         f_updateTFState(st, ev)
         if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
             int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
@@ -1825,6 +1862,20 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
     var SMC_TFState   st       = SMC_TFState.new()
     var SMC_Structure structTf = SMC_Structure.new()
     var SMC_Trailing  trailTf  = SMC_Trailing.new()
+    // [ADR-021] Estructura de ESCALA P/D (pdLen=50, la dominante de LuxAlgo). Los strong del dealing
+    // range nacen de SUS rupturas, NO de las de structTf (swingLen=5): medido en S133, con escala 5 el
+    // rango sale LOCAL (319 pips) = el bug de S021 reencarnado. `pdLen` NO desaparece: cambia de
+    // significado (era la escala del pivote de reanclaje; ahora es la escala de la estructura).
+    var SMC_Structure structPd = SMC_Structure.new()
+    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2). 6 floats, O(1) por evento:
+    // runMin/runMax = origen de la pierna en curso; min1/max1 = 1.er extremo (HISTORICO, NO entra al
+    // rango); min2/max2 = 2.º extremo = EL RANGO. Mantener los dos mas bajos no requiere ordenar.
+    var float runMin = na
+    var float runMax = na
+    var float min1   = na
+    var float min2   = na
+    var float max1   = na
+    var float max2   = na
     var array<SMC_Zone> zonesTf = array.new<SMC_Zone>()
     var array<SMC_Pool> poolsTf = array.new<SMC_Pool>()
     var array<float> obBufHigh = array.new<float>()
@@ -1852,14 +1903,38 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
     if barstate.isconfirmed and not na(sl)
         f_setStructureLow(structTf, sl, bar_index - swingLen, time[swingLen])
     if barstate.isconfirmed and not na(pdH)
-        f_resetTrailingHigh(trailTf, pdH, bar_index - pdLen, time[pdLen])
+        f_setStructureHigh(structPd, pdH, bar_index - pdLen, time[pdLen])
     if barstate.isconfirmed and not na(pdL)
-        f_resetTrailingLow(trailTf, pdL, bar_index - pdLen, time[pdLen])
+        f_setStructureLow(structPd, pdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(trailTf, high, low, time)
     if barstate.isconfirmed
-        st.pdHigh := trailTf.top
-        st.pdLow  := trailTf.bottom
-        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Origen de la pierna en curso. min/max de barras PASADAS -> anti-repaint [#1].
+        runMin := na(runMin) ? low  : math.min(runMin, low)
+        runMax := na(runMax) ? high : math.max(runMax, high)
+        SMC_Event ev   = f_detectStructure(structTf, bar_index, time, true, true)
+        SMC_Event evPd = f_detectStructure(structPd, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Un strong nace SOLO cuando la pierna que empezo en el ROMPIO ESTRUCTURA (de
+        // escala P/D): 'strong' es RELACIONAL, no una propiedad local del nivel. El 1.º y el 2.º: O(1).
+        if not na(evPd) and (evPd.kind == KIND_BOS or evPd.kind == KIND_CHOCH)
+            if evPd.dir == DIR_BULL
+                if na(min1) or runMin < min1
+                    min2 := na(min1) ? min2 : min1
+                    min1 := runMin
+                else if na(min2) or runMin < min2
+                    min2 := runMin
+                runMin := low
+            else
+                if na(max1) or runMax > max1
+                    max2 := na(max1) ? max2 : max1
+                    max1 := runMax
+                else if na(max2) or runMax > max2
+                    max2 := runMax
+                runMax := high
+        // [ADR-021 §2.3.2] El rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en cascada
+        // -> pct en [0,1] por construccion: si el precio entra en la franja historica el rango se estira
+        // al 1.º, y si rompe el historico expande con el trailing hasta que se confirme el pivote nuevo.
+        st.pdLow  := na(min2) ? trailTf.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailTf.bottom
+        st.pdHigh := na(max2) ? trailTf.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailTf.top
         f_updateTFState(st, ev)
         if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
             int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
@@ -2019,13 +2094,11 @@ var array<SMC_Event> SMC_eventsMajor = array.new<SMC_Event>()
 // alimenta SOLO del evento de escala swing -> el bias mayor; lo que el MTF exporta [Sprint 1.4] y
 // el scoring lee [Sprint 2.1]. structInternal queda fuera, no voltea el bias, §1.4.)
 
-// Dealing range Premium/Discount [T07]: trailing extremes anclados al ultimo swing de
-// ESCALA P/D (opcion A, ver docs/decisiones-pd-rango.md). Estado del consumidor (el TYPE
-// vive en CORE). Swing P/D dedicado (i_pdSwingLen, default 50 = swing de LuxAlgo), NO el
-// swingLen=5 estructural: el dealing range de LuxAlgo se basa en
-// getCurrentStructure(swingsLengthInput=50) (ref :782) -> rango DOMINANTE, no local.
+// Dealing range Premium/Discount [T07 · ADR-021]: el rango es el 2.º extremo estructural de escala
+// DOMINANTE (§2.3.2). Estado del consumidor (el TYPE vive en CORE); el bloque de calculo esta abajo,
+// DESPUES de evStructMajor (de sus rupturas nacen los strong). `trailing` = red del fallback.
+// i_pdSwingLen eliminado: su papel lo hace i_majorLen (misma escala 50). Ver ADR-021.
 var SMC_Trailing trailing = SMC_Trailing.new()
-[pdSwingHigh, pdSwingLow] = f_detectSwings(i_pdSwingLen)
 
 [internalHigh, internalLow] = f_detectSwings(i_internalLen)
 newInternalHigh = barstate.isconfirmed and not na(internalHigh)
@@ -2052,22 +2125,6 @@ if newMajorHigh
 if newMajorLow
     f_setStructureLow(structMajor, majorLow, bar_index - i_majorLen, time[i_majorLen])
 
-// --- Premium/Discount: dealing range [T07] ---
-// Reanclaje a los swings de ESCALA P/D (i_pdSwingLen, default 50 = swing de LuxAlgo; ref
-// :782 getCurrentStructure(swingsLengthInput,false)). Solo en swings confirmados (anti-
-// repaint); el swing P/D pertenece a la vela t = bar_index - i_pdSwingLen. Luego
-// f_updateTrailing expande el rango CADA barra (incl. la viva) como LuxAlgo
-// (updateTrailingExtremes :770-771, no gated) -> el precio vivo nunca excede el rango y el
-// pct queda en 0..1. Orden reset->expand. El snapshot para el scoring se congela SOLO en
-// barstate.isconfirmed (determinista, no repinta historia).
-if barstate.isconfirmed and not na(pdSwingHigh)
-    f_resetTrailingHigh(trailing, pdSwingHigh, bar_index - i_pdSwingLen, time[i_pdSwingLen])
-if barstate.isconfirmed and not na(pdSwingLow)
-    f_resetTrailingLow(trailing, pdSwingLow, bar_index - i_pdSwingLen, time[i_pdSwingLen])
-f_updateTrailing(trailing, high, low, time)
-if barstate.isconfirmed
-    chartState.pdHigh := trailing.top
-    chartState.pdLow  := trailing.bottom
 
 SMC_Event evStructSwing = na
 SMC_Event evStructInt   = na
@@ -2091,6 +2148,38 @@ if barstate.isconfirmed
     evStructMajor := f_detectStructure(structMajor, bar_index, time, true, true)
     if not na(evStructMajor)
         f_pushEvent(SMC_eventsMajor, evStructMajor, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
+
+// --- Premium/Discount: dealing range = el 2.º extremo estructural [T07 · ADR-021 · §2.3.1/§2.3.2] ---
+// Espejo chart-TF del bloque del CORE. Consume evStructMajor (escala DOMINANTE 50) — NO evStructSwing:
+// medido en S133, con escala 5 el rango sale LOCAL (319 pips) = el bug de S021.
+// OJO AL ORDEN: va DESPUES de evStructMajor a proposito; antes usaria el evento de la barra ANTERIOR.
+var float cRunMin = na
+var float cRunMax = na
+var float cMin1   = na
+var float cMin2   = na
+var float cMax1   = na
+var float cMax2   = na
+f_updateTrailing(trailing, high, low, time)
+if barstate.isconfirmed
+    cRunMin := na(cRunMin) ? low  : math.min(cRunMin, low)
+    cRunMax := na(cRunMax) ? high : math.max(cRunMax, high)
+    if not na(evStructMajor) and (evStructMajor.kind == KIND_BOS or evStructMajor.kind == KIND_CHOCH)
+        if evStructMajor.dir == DIR_BULL
+            if na(cMin1) or cRunMin < cMin1
+                cMin2 := na(cMin1) ? cMin2 : cMin1
+                cMin1 := cRunMin
+            else if na(cMin2) or cRunMin < cMin2
+                cMin2 := cRunMin
+            cRunMin := low
+        else
+            if na(cMax1) or cRunMax > cMax1
+                cMax2 := na(cMax1) ? cMax2 : cMax1
+                cMax1 := cRunMax
+            else if na(cMax2) or cRunMax > cMax2
+                cMax2 := cRunMax
+            cRunMax := high
+    chartState.pdLow  := na(cMin2) ? trailing.bottom : close >= cMin2 ? cMin2 : close >= cMin1 ? cMin1 : trailing.bottom
+    chartState.pdHigh := na(cMax2) ? trailing.top    : close <= cMax2 ? cMax2 : close <= cMax1 ? cMax1 : trailing.top
 
 // --- Order Blocks [T05] ---
 // Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra
@@ -2670,8 +2759,8 @@ if barstate.isconfirmed
 // INTERNO por-contexto (R-P3-1, spike S039 ✅) -> no contamina el chart. lookahead_off
 // SIEMPRE (regla #1, anti-repaint). Se reconstituyen a SMC_TFState ligeros (orden de campos
 // = orden del tuple, .new posicional) que el scoring consumira (Sprint 2.1). Mapa rico = T13b.
-[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_ta0, d1_tb0, d1_k1, d1_t1, d1_b1, d1_d1, d1_ta1, d1_tb1, d1_k2, d1_t2, d1_b2, d1_d2, d1_ta2, d1_tb2, d1_k3, d1_t3, d1_b3, d1_d3, d1_ta3, d1_tb3, d1_k4, d1_t4, d1_b4, d1_d4, d1_ta4, d1_tb4, d1_k5, d1_t5, d1_b5, d1_d5, d1_ta5, d1_tb5, d1_k6, d1_t6, d1_b6, d1_d6, d1_ta6, d1_tb6, d1_k7, d1_t7, d1_b7, d1_d7, d1_ta7, d1_tb7, d1_k8, d1_t8, d1_b8, d1_d8, d1_ta8, d1_tb8, d1_k9, d1_t9, d1_b9, d1_d9, d1_ta9, d1_tb9, d1_k10, d1_t10, d1_b10, d1_d10, d1_ta10, d1_tb10, d1_k11, d1_t11, d1_b11, d1_d11, d1_ta11, d1_tb11] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
-[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
+[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_ta0, d1_tb0, d1_k1, d1_t1, d1_b1, d1_d1, d1_ta1, d1_tb1, d1_k2, d1_t2, d1_b2, d1_d2, d1_ta2, d1_tb2, d1_k3, d1_t3, d1_b3, d1_d3, d1_ta3, d1_tb3, d1_k4, d1_t4, d1_b4, d1_d4, d1_ta4, d1_tb4, d1_k5, d1_t5, d1_b5, d1_d5, d1_ta5, d1_tb5, d1_k6, d1_t6, d1_b6, d1_d6, d1_ta6, d1_tb6, d1_k7, d1_t7, d1_b7, d1_d7, d1_ta7, d1_tb7, d1_k8, d1_t8, d1_b8, d1_d8, d1_ta8, d1_tb8, d1_k9, d1_t9, d1_b9, d1_d9, d1_ta9, d1_tb9, d1_k10, d1_t10, d1_b10, d1_d10, d1_ta10, d1_tb10, d1_k11, d1_t11, d1_b11, d1_d11, d1_ta11, d1_tb11] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
+[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
 SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
 SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
 // Buffer generico de ranuras reconstituido por HTF (ADR-009). 2a llamada/TF (mas cupo) se
@@ -2696,8 +2785,8 @@ h1TB   = array.from(h1_tb0, h1_tb1, h1_tb2, h1_tb3, h1_tb4, h1_tb5, h1_tb6, h1_t
 // EQ^ EQv. kind<0 = traspasado/tomado (mitigada/barrido/EQ cruzado). kExt/minStr/inclMit =
 // defaults Context (6.0/0.5/false); exposicion fina como inputs = Sprint 2.1. lookahead_off
 // SIEMPRE (regla #1, anti-repaint). GATE B (S115) valido las 4 security en vivo sin CE10117/OOM.
-[xd1_pdH, xd1_pdL, xd1_atr, xd1_ek0, xd1_et0, xd1_eb0, xd1_ed0, xd1_ea0, xd1_etb0, xd1_ek1, xd1_et1, xd1_eb1, xd1_ed1, xd1_ea1, xd1_etb1, xd1_ek2, xd1_et2, xd1_eb2, xd1_ed2, xd1_ea2, xd1_etb2, xd1_ek3, xd1_et3, xd1_eb3, xd1_ed3, xd1_ea3, xd1_etb3, xd1_ek4, xd1_et4, xd1_eb4, xd1_ed4, xd1_ea4, xd1_etb4, xd1_ek5, xd1_et5, xd1_eb5, xd1_ed5, xd1_ea5, xd1_etb5, xd1_ek6, xd1_et6, xd1_eb6, xd1_ed6, xd1_ea6, xd1_etb6, xd1_ek7, xd1_et7, xd1_eb7, xd1_ed7, xd1_ea7, xd1_etb7] = request.security(syminfo.tickerid, "D", f_tfExtremes(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, 6.0, 0.5, false), lookahead = barmerge.lookahead_off)
-[xh1_pdH, xh1_pdL, xh1_atr, xh1_ek0, xh1_et0, xh1_eb0, xh1_ed0, xh1_ea0, xh1_etb0, xh1_ek1, xh1_et1, xh1_eb1, xh1_ed1, xh1_ea1, xh1_etb1, xh1_ek2, xh1_et2, xh1_eb2, xh1_ed2, xh1_ea2, xh1_etb2, xh1_ek3, xh1_et3, xh1_eb3, xh1_ed3, xh1_ea3, xh1_etb3, xh1_ek4, xh1_et4, xh1_eb4, xh1_ed4, xh1_ea4, xh1_etb4, xh1_ek5, xh1_et5, xh1_eb5, xh1_ed5, xh1_ea5, xh1_etb5, xh1_ek6, xh1_et6, xh1_eb6, xh1_ed6, xh1_ea6, xh1_etb6, xh1_ek7, xh1_et7, xh1_eb7, xh1_ed7, xh1_ea7, xh1_etb7] = request.security(syminfo.tickerid, "60", f_tfExtremes(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, 6.0, 0.5, false), lookahead = barmerge.lookahead_off)
+[xd1_pdH, xd1_pdL, xd1_atr, xd1_ek0, xd1_et0, xd1_eb0, xd1_ed0, xd1_ea0, xd1_etb0, xd1_ek1, xd1_et1, xd1_eb1, xd1_ed1, xd1_ea1, xd1_etb1, xd1_ek2, xd1_et2, xd1_eb2, xd1_ed2, xd1_ea2, xd1_etb2, xd1_ek3, xd1_et3, xd1_eb3, xd1_ed3, xd1_ea3, xd1_etb3, xd1_ek4, xd1_et4, xd1_eb4, xd1_ed4, xd1_ea4, xd1_etb4, xd1_ek5, xd1_et5, xd1_eb5, xd1_ed5, xd1_ea5, xd1_etb5, xd1_ek6, xd1_et6, xd1_eb6, xd1_ed6, xd1_ea6, xd1_etb6, xd1_ek7, xd1_et7, xd1_eb7, xd1_ed7, xd1_ea7, xd1_etb7] = request.security(syminfo.tickerid, "D", f_tfExtremes(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, 6.0, 0.5, false), lookahead = barmerge.lookahead_off)
+[xh1_pdH, xh1_pdL, xh1_atr, xh1_ek0, xh1_et0, xh1_eb0, xh1_ed0, xh1_ea0, xh1_etb0, xh1_ek1, xh1_et1, xh1_eb1, xh1_ed1, xh1_ea1, xh1_etb1, xh1_ek2, xh1_et2, xh1_eb2, xh1_ed2, xh1_ea2, xh1_etb2, xh1_ek3, xh1_et3, xh1_eb3, xh1_ed3, xh1_ea3, xh1_etb3, xh1_ek4, xh1_et4, xh1_eb4, xh1_ed4, xh1_ea4, xh1_etb4, xh1_ek5, xh1_et5, xh1_eb5, xh1_ed5, xh1_ea5, xh1_etb5, xh1_ek6, xh1_et6, xh1_eb6, xh1_ed6, xh1_ea6, xh1_etb6, xh1_ek7, xh1_et7, xh1_eb7, xh1_ed7, xh1_ea7, xh1_etb7] = request.security(syminfo.tickerid, "60", f_tfExtremes(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, 6.0, 0.5, false), lookahead = barmerge.lookahead_off)
 // Reconstitucion a arrays por HTF (mismo patron que nearest, ADR-009). Buffers de extremos que
 // el scoring consumira (Sprint 2.1). Escalares pdHigh/pdLow/atr accesibles como xd1_pdH etc.
 xd1eKind = array.from(xd1_ek0, xd1_ek1, xd1_ek2, xd1_ek3, xd1_ek4, xd1_ek5, xd1_ek6, xd1_ek7)

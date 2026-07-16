@@ -92,15 +92,12 @@ i_showIPR      = input.bool(true,  "Mostrar IPR (rango desbalanceado, §5.9)", g
 i_iprWindow    = input.int(10,     "IPR: ventana (velas)", minval = 2, group = GRP_FVG)
 i_iprMinGaps   = input.int(3,      "IPR: FVG mín. mismo lado", minval = 2, group = GRP_FVG)
 i_showPD       = input.bool(true,  "Mostrar Premium/Discount",         group = GRP_PD)
-// [S130] 50 -> 1000: con 50 el "rango D1" era el de 50 velas (~2.5 meses) = 758 pips, MENOR que el
-// rango nativo de H1 (1905) -> el P/D vivia en una esquina del grafico. Con 1000 el rango D1 es
-// [0.95360, 1.60389] (6503 pips), suelo = pivote real de 2022 (NO es el min/max de la ventana:
-// ese es [0.90275, 1.60389], difiere 508 pips) -> sigue siendo estructural (§2.3) y Opcion A
-// (paridad LuxAlgo intacta). Medido en vivo D1 OANDA:EURUSD, S130. PROVISIONAL: el mismo len va a
-// los 3 request.security (D/60/5) -> en H1 son 41 dias y en M5 3.5. La regla definitiva (rango de
-// pool a pool por escala, modelo del usuario S130) esta en docs/planes/DISENO-cascada-pd-anidada-S130.md §9.
-// OJO: >= ~4000 revienta con RE10008 (max_bars_back) -> techo entre 1000 y 4000, sin calibrar.
-i_pdSwingLen   = input.int(1000,   "Swing P/D (rango dominante)", minval = 10, group = GRP_PD)
+// [ADR-021] `i_pdSwingLen` ELIMINADO. Era la escala del pivote de reanclaje de la Opcion A; con el 2.º
+// extremo estructural (§2.3.2) el rango se reancla por RUPTURA DE ESTRUCTURA, no por pivote, y la escala
+// de esa estructura es la DOMINANTE -> la aporta `i_majorLen` (=50, el swing de LuxAlgo, ref :782).
+// Un solo input para un solo concepto; se acabo el par redundante (y el riesgo de ponerlos distintos:
+// el chart-TF usaba i_majorLen y las MTF i_pdSwingLen). El 1000 de S130 acertaba actuando como VENTANA
+// de facto, sin saberlo (ver decisiones-pd-rango.md nota S133(b)); ya no hace falta.
 i_pdEqBand     = input.float(5.0,  "Banda equilibrium (± %)", minval = 0.0, maxval = 25.0, step = 0.5, group = GRP_PD)
 i_showGradient = input.bool(true,  "Mostrar Gradient Levels (grid del rango §5.16)", group = GRP_GRAD)
 i_gradEighths  = input.bool(true,  "Incluir eighths (0.125/0.375/0.625/0.875)", group = GRP_GRAD)
@@ -1612,6 +1609,20 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     var SMC_TFState   st       = SMC_TFState.new()
     var SMC_Structure structTf = SMC_Structure.new()
     var SMC_Trailing  trailTf  = SMC_Trailing.new()
+    // [ADR-021] Estructura de ESCALA P/D (pdLen=50, la dominante de LuxAlgo). Los strong del dealing
+    // range nacen de SUS rupturas, NO de las de structTf (swingLen=5): medido en S133, con escala 5 el
+    // rango sale LOCAL (319 pips) = el bug de S021 reencarnado. `pdLen` NO desaparece: cambia de
+    // significado (era la escala del pivote de reanclaje; ahora es la escala de la estructura).
+    var SMC_Structure structPd = SMC_Structure.new()
+    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2). 6 floats, O(1) por evento:
+    // runMin/runMax = origen de la pierna en curso; min1/max1 = 1.er extremo (HISTORICO, NO entra al
+    // rango); min2/max2 = 2.º extremo = EL RANGO. Mantener los dos mas bajos no requiere ordenar.
+    var float runMin = na
+    var float runMax = na
+    var float min1   = na
+    var float min2   = na
+    var float max1   = na
+    var float max2   = na
     var array<SMC_Zone> zonesTf = array.new<SMC_Zone>()
     var array<SMC_Pool> poolsTf = array.new<SMC_Pool>()
     var array<float> obBufHigh = array.new<float>()
@@ -1639,14 +1650,38 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     if barstate.isconfirmed and not na(sl)
         f_setStructureLow(structTf, sl, bar_index - swingLen, time[swingLen])
     if barstate.isconfirmed and not na(pdH)
-        f_resetTrailingHigh(trailTf, pdH, bar_index - pdLen, time[pdLen])
+        f_setStructureHigh(structPd, pdH, bar_index - pdLen, time[pdLen])
     if barstate.isconfirmed and not na(pdL)
-        f_resetTrailingLow(trailTf, pdL, bar_index - pdLen, time[pdLen])
+        f_setStructureLow(structPd, pdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(trailTf, high, low, time)
     if barstate.isconfirmed
-        st.pdHigh := trailTf.top
-        st.pdLow  := trailTf.bottom
-        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Origen de la pierna en curso. min/max de barras PASADAS -> anti-repaint [#1].
+        runMin := na(runMin) ? low  : math.min(runMin, low)
+        runMax := na(runMax) ? high : math.max(runMax, high)
+        SMC_Event ev   = f_detectStructure(structTf, bar_index, time, true, true)
+        SMC_Event evPd = f_detectStructure(structPd, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Un strong nace SOLO cuando la pierna que empezo en el ROMPIO ESTRUCTURA (de
+        // escala P/D): 'strong' es RELACIONAL, no una propiedad local del nivel. El 1.º y el 2.º: O(1).
+        if not na(evPd) and (evPd.kind == KIND_BOS or evPd.kind == KIND_CHOCH)
+            if evPd.dir == DIR_BULL
+                if na(min1) or runMin < min1
+                    min2 := na(min1) ? min2 : min1
+                    min1 := runMin
+                else if na(min2) or runMin < min2
+                    min2 := runMin
+                runMin := low
+            else
+                if na(max1) or runMax > max1
+                    max2 := na(max1) ? max2 : max1
+                    max1 := runMax
+                else if na(max2) or runMax > max2
+                    max2 := runMax
+                runMax := high
+        // [ADR-021 §2.3.2] El rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en cascada
+        // -> pct en [0,1] por construccion: si el precio entra en la franja historica el rango se estira
+        // al 1.º, y si rompe el historico expande con el trailing hasta que se confirme el pivote nuevo.
+        st.pdLow  := na(min2) ? trailTf.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailTf.bottom
+        st.pdHigh := na(max2) ? trailTf.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailTf.top
         f_updateTFState(st, ev)
         if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
             int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
@@ -1895,6 +1930,20 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
     var SMC_TFState   st       = SMC_TFState.new()
     var SMC_Structure structTf = SMC_Structure.new()
     var SMC_Trailing  trailTf  = SMC_Trailing.new()
+    // [ADR-021] Estructura de ESCALA P/D (pdLen=50, la dominante de LuxAlgo). Los strong del dealing
+    // range nacen de SUS rupturas, NO de las de structTf (swingLen=5): medido en S133, con escala 5 el
+    // rango sale LOCAL (319 pips) = el bug de S021 reencarnado. `pdLen` NO desaparece: cambia de
+    // significado (era la escala del pivote de reanclaje; ahora es la escala de la estructura).
+    var SMC_Structure structPd = SMC_Structure.new()
+    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2). 6 floats, O(1) por evento:
+    // runMin/runMax = origen de la pierna en curso; min1/max1 = 1.er extremo (HISTORICO, NO entra al
+    // rango); min2/max2 = 2.º extremo = EL RANGO. Mantener los dos mas bajos no requiere ordenar.
+    var float runMin = na
+    var float runMax = na
+    var float min1   = na
+    var float min2   = na
+    var float max1   = na
+    var float max2   = na
     var array<SMC_Zone> zonesTf = array.new<SMC_Zone>()
     var array<SMC_Pool> poolsTf = array.new<SMC_Pool>()
     var array<float> obBufHigh = array.new<float>()
@@ -1922,14 +1971,38 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
     if barstate.isconfirmed and not na(sl)
         f_setStructureLow(structTf, sl, bar_index - swingLen, time[swingLen])
     if barstate.isconfirmed and not na(pdH)
-        f_resetTrailingHigh(trailTf, pdH, bar_index - pdLen, time[pdLen])
+        f_setStructureHigh(structPd, pdH, bar_index - pdLen, time[pdLen])
     if barstate.isconfirmed and not na(pdL)
-        f_resetTrailingLow(trailTf, pdL, bar_index - pdLen, time[pdLen])
+        f_setStructureLow(structPd, pdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(trailTf, high, low, time)
     if barstate.isconfirmed
-        st.pdHigh := trailTf.top
-        st.pdLow  := trailTf.bottom
-        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Origen de la pierna en curso. min/max de barras PASADAS -> anti-repaint [#1].
+        runMin := na(runMin) ? low  : math.min(runMin, low)
+        runMax := na(runMax) ? high : math.max(runMax, high)
+        SMC_Event ev   = f_detectStructure(structTf, bar_index, time, true, true)
+        SMC_Event evPd = f_detectStructure(structPd, bar_index, time, true, true)
+        // [ADR-021 §2.3.1] Un strong nace SOLO cuando la pierna que empezo en el ROMPIO ESTRUCTURA (de
+        // escala P/D): 'strong' es RELACIONAL, no una propiedad local del nivel. El 1.º y el 2.º: O(1).
+        if not na(evPd) and (evPd.kind == KIND_BOS or evPd.kind == KIND_CHOCH)
+            if evPd.dir == DIR_BULL
+                if na(min1) or runMin < min1
+                    min2 := na(min1) ? min2 : min1
+                    min1 := runMin
+                else if na(min2) or runMin < min2
+                    min2 := runMin
+                runMin := low
+            else
+                if na(max1) or runMax > max1
+                    max2 := na(max1) ? max2 : max1
+                    max1 := runMax
+                else if na(max2) or runMax > max2
+                    max2 := runMax
+                runMax := high
+        // [ADR-021 §2.3.2] El rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en cascada
+        // -> pct en [0,1] por construccion: si el precio entra en la franja historica el rango se estira
+        // al 1.º, y si rompe el historico expande con el trailing hasta que se confirme el pivote nuevo.
+        st.pdLow  := na(min2) ? trailTf.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailTf.bottom
+        st.pdHigh := na(max2) ? trailTf.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailTf.top
         f_updateTFState(st, ev)
         if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
             int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
@@ -2190,13 +2263,14 @@ var array<SMC_Event> SMC_eventsMajor = array.new<SMC_Event>()
 // alimenta SOLO del evento de escala swing -structSwing- -> el bias mayor; lo que el MTF exporta
 // [Sprint 1.4] y el scoring lee [Sprint 2.1]. structInternal queda fuera, no voltea el bias, §1.4.)
 
-// Dealing range Premium/Discount [T07]: trailing extremes anclados al ultimo swing de
-// ESCALA P/D (opcion A, ver docs/decisiones-pd-rango.md). Estado del consumidor (el TYPE
-// vive en CORE). Swing P/D dedicado (i_pdSwingLen, default 50 = swing de LuxAlgo), NO el
-// swingLen=5 estructural: el dealing range de LuxAlgo se basa en
-// getCurrentStructure(swingsLengthInput=50) (ref :782) -> rango DOMINANTE, no local.
+// Dealing range Premium/Discount [T07 · ADR-021]: el rango es el 2.º extremo estructural de
+// escala DOMINANTE (§2.3.2). Estado del consumidor (el TYPE vive en CORE); el bloque de
+// calculo esta mas abajo, DESPUES de evStructMajor (el orden importa: de sus rupturas nacen
+// los strong). `trailing` se conserva como red del fallback (y paridad LuxAlgo parcial).
+// El input i_pdSwingLen desaparecio: era la escala del pivote de reanclaje de la Opcion A, y
+// su papel lo hace ahora i_majorLen (misma escala dominante 50 de LuxAlgo, ref :782) -> un
+// solo input para un solo concepto. Ver ADR-021 y la nota S133 de decisiones-pd-rango.md.
 var SMC_Trailing trailing = SMC_Trailing.new()
-[pdSwingHigh, pdSwingLow] = f_detectSwings(i_pdSwingLen)
 
 // Pivotes internos (los swing ya se calcularon arriba). Mismo guard anti-repaint.
 [internalHigh, internalLow] = f_detectSwings(i_internalLen)
@@ -2250,23 +2324,6 @@ if barstate.isconfirmed
         float ampL = na(legPrev) or sAtr14 <= 0 ? 0.0 : math.abs(legPl - legPrev) / sAtr14
         f_pushSwingV(SMC_majorSwingsV, SMC_Swing.new(legPl, bar_index - i_swingStructLen, time[i_swingStructLen], f_classifySwing(false, legPl, SMC_majorSwingsV), false, ampL), MAX_MAJOR_CHART)
 
-// --- Premium/Discount: dealing range [T07] ---
-// Reanclaje a los swings de ESCALA P/D (i_pdSwingLen, default 50 = swing de LuxAlgo; ref
-// :782 getCurrentStructure(swingsLengthInput,false)). Solo en swings confirmados (anti-
-// repaint); el swing P/D pertenece a la vela t = bar_index - i_pdSwingLen. Luego
-// f_updateTrailing expande el rango CADA barra (incl. la viva) como LuxAlgo
-// (updateTrailingExtremes :770-771, no gated) -> el precio vivo nunca excede el rango y el
-// pct queda en 0..1. Orden reset->expand. El snapshot para el scoring se congela SOLO en
-// barstate.isconfirmed (determinista, no repinta historia).
-if barstate.isconfirmed and not na(pdSwingHigh)
-    f_resetTrailingHigh(trailing, pdSwingHigh, bar_index - i_pdSwingLen, time[i_pdSwingLen])
-if barstate.isconfirmed and not na(pdSwingLow)
-    f_resetTrailingLow(trailing, pdSwingLow, bar_index - i_pdSwingLen, time[i_pdSwingLen])
-f_updateTrailing(trailing, high, low, time)
-if barstate.isconfirmed
-    chartState.pdHigh := trailing.top
-    chartState.pdLow  := trailing.bottom
-
 // Ruptura estructural solo al cierre confirmado (anti-repaint [D-PINE-03]). El
 // interno usa guard de nivel-distinto: no duplica la senal cuando su pivote coincide
 // con el del swing (cf. LuxAlgo extraCondition).
@@ -2292,6 +2349,40 @@ if barstate.isconfirmed
     evStructMajor := f_detectStructure(structMajor, bar_index, time, true, true)
     if not na(evStructMajor)
         f_pushEvent(SMC_eventsMajor, evStructMajor, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
+
+// --- Premium/Discount: dealing range = el 2.º extremo estructural [T07 · ADR-021 · §2.3.1/§2.3.2] ---
+// Espejo chart-TF del bloque del CORE. Consume evStructMajor (escala DOMINANTE 50) — NO evStructSwing:
+// medido en S133, con escala 5 el rango sale LOCAL (319 pips) = el bug de S021.
+// OJO AL ORDEN: este bloque vivia ANTES de la estructura y por eso habria usado el evento de la barra
+// ANTERIOR. Va DESPUES de :evStructMajor a proposito. f_updateTrailing se conserva (paridad LuxAlgo
+// parcial) y sirve de red del fallback; el reanclaje por pivote de la Opcion A se elimino.
+var float cRunMin = na
+var float cRunMax = na
+var float cMin1   = na
+var float cMin2   = na
+var float cMax1   = na
+var float cMax2   = na
+f_updateTrailing(trailing, high, low, time)
+if barstate.isconfirmed
+    cRunMin := na(cRunMin) ? low  : math.min(cRunMin, low)
+    cRunMax := na(cRunMax) ? high : math.max(cRunMax, high)
+    if not na(evStructMajor) and (evStructMajor.kind == KIND_BOS or evStructMajor.kind == KIND_CHOCH)
+        if evStructMajor.dir == DIR_BULL
+            if na(cMin1) or cRunMin < cMin1
+                cMin2 := na(cMin1) ? cMin2 : cMin1
+                cMin1 := cRunMin
+            else if na(cMin2) or cRunMin < cMin2
+                cMin2 := cRunMin
+            cRunMin := low
+        else
+            if na(cMax1) or cRunMax > cMax1
+                cMax2 := na(cMax1) ? cMax2 : cMax1
+                cMax1 := cRunMax
+            else if na(cMax2) or cRunMax > cMax2
+                cMax2 := cRunMax
+            cRunMax := high
+    chartState.pdLow  := na(cMin2) ? trailing.bottom : close >= cMin2 ? cMin2 : close >= cMin1 ? cMin1 : trailing.bottom
+    chartState.pdHigh := na(cMax2) ? trailing.top    : close <= cMax2 ? cMax2 : close <= cMax1 ? cMax1 : trailing.top
 
 // --- Order Blocks [T05] ---
 // Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra
@@ -2939,7 +3030,15 @@ plot(i_showEMA ? emaSlow : na, "EMA lenta",  color = color.new(color.red,    0),
 f_m5Light(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
     var SMC_TFState   lst       = SMC_TFState.new()
     var SMC_Structure lstructTf = SMC_Structure.new()
+    var SMC_Structure lstructPd = SMC_Structure.new()
     var SMC_Trailing  ltrailTf  = SMC_Trailing.new()
+    // [ADR-021] Espejo del 2.º extremo estructural del CORE (§2.3.1/§2.3.2), version light.
+    var float lrunMin = na
+    var float lrunMax = na
+    var float lmin1   = na
+    var float lmin2   = na
+    var float lmax1   = na
+    var float lmax2   = na
     float latr14 = ta.atr(14)
     [lsh, lsl]   = f_detectSwings(swingLen)
     [lpdH, lpdL] = f_detectSwings(pdLen)
@@ -2948,14 +3047,32 @@ f_m5Light(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
     if barstate.isconfirmed and not na(lsl)
         f_setStructureLow(lstructTf, lsl, bar_index - swingLen, time[swingLen])
     if barstate.isconfirmed and not na(lpdH)
-        f_resetTrailingHigh(ltrailTf, lpdH, bar_index - pdLen, time[pdLen])
+        f_setStructureHigh(lstructPd, lpdH, bar_index - pdLen, time[pdLen])
     if barstate.isconfirmed and not na(lpdL)
-        f_resetTrailingLow(ltrailTf, lpdL, bar_index - pdLen, time[pdLen])
+        f_setStructureLow(lstructPd, lpdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(ltrailTf, high, low, time)
     if barstate.isconfirmed
-        lst.pdHigh := ltrailTf.top
-        lst.pdLow  := ltrailTf.bottom
-        SMC_Event lev = f_detectStructure(lstructTf, bar_index, time, true, true)
+        lrunMin := na(lrunMin) ? low  : math.min(lrunMin, low)
+        lrunMax := na(lrunMax) ? high : math.max(lrunMax, high)
+        SMC_Event lev   = f_detectStructure(lstructTf, bar_index, time, true, true)
+        SMC_Event levPd = f_detectStructure(lstructPd, bar_index, time, true, true)
+        if not na(levPd) and (levPd.kind == KIND_BOS or levPd.kind == KIND_CHOCH)
+            if levPd.dir == DIR_BULL
+                if na(lmin1) or lrunMin < lmin1
+                    lmin2 := na(lmin1) ? lmin2 : lmin1
+                    lmin1 := lrunMin
+                else if na(lmin2) or lrunMin < lmin2
+                    lmin2 := lrunMin
+                lrunMin := low
+            else
+                if na(lmax1) or lrunMax > lmax1
+                    lmax2 := na(lmax1) ? lmax2 : lmax1
+                    lmax1 := lrunMax
+                else if na(lmax2) or lrunMax > lmax2
+                    lmax2 := lrunMax
+                lrunMax := high
+        lst.pdLow  := na(lmin2) ? ltrailTf.bottom : close >= lmin2 ? lmin2 : close >= lmin1 ? lmin1 : ltrailTf.bottom
+        lst.pdHigh := na(lmax2) ? ltrailTf.top    : close <= lmax2 ? lmax2 : close <= lmax1 ? lmax1 : ltrailTf.top
         f_updateTFState(lst, lev)
         SMC_Event levM = f_detectMSS(lev, open, high, low, close, latr14, dispFactor, bodyPct)
         if not na(levM)
@@ -2975,13 +3092,13 @@ f_m5Light(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
 // INTERNO por-contexto (R-P3-1, spike S039 ✅) -> no contamina el chart. lookahead_off
 // SIEMPRE (regla #1, anti-repaint). Se reconstituyen a SMC_TFState ligeros (orden de campos
 // = orden del tuple, .new posicional) que el dibujo en cascada consume. Mapa rico = T13b.
-[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_ta0, d1_tb0, d1_k1, d1_t1, d1_b1, d1_d1, d1_ta1, d1_tb1, d1_k2, d1_t2, d1_b2, d1_d2, d1_ta2, d1_tb2, d1_k3, d1_t3, d1_b3, d1_d3, d1_ta3, d1_tb3, d1_k4, d1_t4, d1_b4, d1_d4, d1_ta4, d1_tb4, d1_k5, d1_t5, d1_b5, d1_d5, d1_ta5, d1_tb5, d1_k6, d1_t6, d1_b6, d1_d6, d1_ta6, d1_tb6, d1_k7, d1_t7, d1_b7, d1_d7, d1_ta7, d1_tb7, d1_k8, d1_t8, d1_b8, d1_d8, d1_ta8, d1_tb8, d1_k9, d1_t9, d1_b9, d1_d9, d1_ta9, d1_tb9, d1_k10, d1_t10, d1_b10, d1_d10, d1_ta10, d1_tb10, d1_k11, d1_t11, d1_b11, d1_d11, d1_ta11, d1_tb11] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
-[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
+[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_ta0, d1_tb0, d1_k1, d1_t1, d1_b1, d1_d1, d1_ta1, d1_tb1, d1_k2, d1_t2, d1_b2, d1_d2, d1_ta2, d1_tb2, d1_k3, d1_t3, d1_b3, d1_d3, d1_ta3, d1_tb3, d1_k4, d1_t4, d1_b4, d1_d4, d1_ta4, d1_tb4, d1_k5, d1_t5, d1_b5, d1_d5, d1_ta5, d1_tb5, d1_k6, d1_t6, d1_b6, d1_d6, d1_ta6, d1_tb6, d1_k7, d1_t7, d1_b7, d1_d7, d1_ta7, d1_tb7, d1_k8, d1_t8, d1_b8, d1_d8, d1_ta8, d1_tb8, d1_k9, d1_t9, d1_b9, d1_d9, d1_ta9, d1_tb9, d1_k10, d1_t10, d1_b10, d1_d10, d1_ta10, d1_tb10, d1_k11, d1_t11, d1_b11, d1_d11, d1_ta11, d1_tb11] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
+[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
 SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
 SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
 // [S103 · OBS#9] Estado M5 LIGERO (solo escalares) para la 3.a col del panel cuando el chart NO esta
 // en M5. request.security("5", f_m5Light) — tuple de 17, sin geometria -> prueba de memoria.
-[m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr] = request.security(syminfo.tickerid, "5", f_m5Light(i_swingLen, i_pdSwingLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
+[m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr] = request.security(syminfo.tickerid, "5", f_m5Light(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
 SMC_TFState m5State = SMC_TFState.new(m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr)
 // Buffer generico de ranuras reconstituido por HTF (ADR-009). 2a llamada/TF (mas cupo) se
 // activaria aqui con un 2o request.security cuando Sprint 1.5/1.6 lo exijan (no ahora).
