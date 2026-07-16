@@ -344,7 +344,23 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 
 **Anidamiento MTF gratis:** cada TF usa la escala de sus propios pivotes ⇒ el 2.º extremo de M5 está más cerca del precio que el de H1, y el de H1 más que el de D1. **La cascada D1 ⊃ H1 ⊃ M5 sale sola, sin código por-TF ni parámetro de escalado.**
 
-**La VENTANA `pdWindow` — parámetro OPCIONAL y por-TF, NO parte de la regla base** *(dos correcciones en S133: la v1 decía "no hay parámetro de escala" (**falso**), y la v2 la hizo obligatoria (**también falso** — la cascada nativa no la necesita))*.
+> ## ⚠️ LA VENTANA ES OBLIGATORIA — corregido por 3.ª vez (S133, medido EN VIVO tras implementar)
+>
+> **MEDIDO en el indicador real:** la columna **M5 del panel** da **Discount 21%** con el chart en H1 y
+> **Premium 90%** con el chart en M5. **El mismo TF, dos veredictos**, según dónde estés mirando. (El 90%
+> es el correcto: coincide con el probe del gate, `pct`=0.929.)
+>
+> **Causa:** `request.security("5", …)` desde un chart H1 recibe **mucha más historia M5** que un chart M5
+> nativo (5253 barras). Más historia ⇒ más strong acumulados ⇒ **el 2.º extremo se va más lejos** ⇒ el
+> rango se ensancha y el veredicto cambia.
+>
+> **Consecuencia doctrinal:** sin ventana, el 2.º extremo depende de **cuántas barras sirva el
+> bróker/TV**, no de la estructura ⇒ **el resultado no es determinista** y viola la regla dura #1
+> (determinismo) y el espíritu de ADR-001. **La ventana no es un remedio del fósil: es lo que hace que
+> "el M5" sea M5.** Lo de abajo queda como registro de las dos correcciones previas; **la ventana
+> declarada por TF es obligatoria** y su calibración está **pendiente**.
+
+**La VENTANA `pdWindow`** *(historial de correcciones en S133: v1 "no hay parámetro de escala" (**falso**); v2 "obligatoria por el fósil" (**falso: no era esa la razón**); v3 "opcional" (**falso**, ver el aviso de arriba); **v4: obligatoria, por determinismo**)*.
 
 **MEDIDO — la regla base, SIN ventana, ya cumple todo** (EURUSD, S133):
 

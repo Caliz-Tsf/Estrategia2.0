@@ -1,8 +1,29 @@
 # ADR-021 — El dealing range es el **2.º extremo estructural** por temporalidad
 
 - **Fecha:** 2026-07-15 (Sesion-133)
-- **Estado:** **ACEPTADA** — descongelada por el usuario en S133; gate de medición pasado en sombra
+- **Estado:** **ACEPTADA — IMPLEMENTADA, con un DEFECTO ABIERTO que bloquea la firma** (ver abajo).
+  Descongelada por el usuario en S133; gate pasado en sombra
   (`docs/planes/GATE-fase1-segundo-extremo-S133.md`) **antes** de tocar código.
+
+> ## 🛑 DEFECTO ABIERTO (S133, medido EN VIVO tras implementar): `pdWindow` es OBLIGATORIA
+>
+> **El panel da `M5 Discount 21%` con el chart en H1 y `M5 Premium 90%` con el chart en M5.** Mismo TF,
+> dos veredictos. (El 90% es el correcto: coincide con el probe del gate, `pct`=0.929.)
+>
+> **Causa:** `request.security("5", f_m5Light(...))` desde un chart H1 recibe **mucha más historia M5**
+> que un chart M5 nativo (5253 barras) ⇒ más strong acumulados ⇒ **el 2.º extremo se va más lejos** ⇒
+> el rango se ensancha.
+>
+> **Lo que esto refuta:** que `pdWindow` fuera **opcional** (§2.3.2, decidido en esta misma sesión). Sin
+> ventana, el 2.º extremo depende de **cuánta historia sirva el bróker/TV**, no de la estructura ⇒
+> **no es determinista** (regla dura #1) y el "M5" deja de ser M5. **La ventana no es el remedio del
+> fósil secular: es lo que define la escala.**
+>
+> **Lo que NO refuta:** la regla en sí. D1 (34%) y H1 (74%) cuadran **exactos** con el gate en sombra, el
+> techo no camina (3 re-fijaciones vs 41), y la cascada rota. **El defecto es de acotación, no de diseño.**
+>
+> **Pendiente:** calibrar `pdWindow` por TF y re-verificar que el veredicto de cada TF **no dependa del
+> chart-TF**. Hasta entonces **no se firma F1-GATE**.
 - **Supersede:** [`docs/decisiones-pd-rango.md`](../decisiones-pd-rango.md) (Opción A, S021, reconfirmada
   en S057 y S091). Aquel doc queda como **registro histórico**.
 - **Precisa (no contradice):** regla dura #2 (CORE byte-idéntico — **se mantiene**), #1 (anti-repaint —
