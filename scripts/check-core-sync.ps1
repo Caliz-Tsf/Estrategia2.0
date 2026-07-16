@@ -66,18 +66,20 @@ if (-not $StrategyPath) { $StrategyPath = Join-Path $projectRoot 'pine/SMC-Strat
 if (-not $ContextPath)  { $ContextPath  = Join-Path $projectRoot 'pine/SMC-Context.pine' }
 
 # Regex del marcador de inicio y de cualquier encabezado de seccion.
-$startRe   = '^\s*//\s*===\s*LIBRARY\s+CORE\s*===\s*$'
-$sectionRe = '^\s*//\s*===\s*.+?\s*===\s*$'
+$startRe    = '^\s*//\s*===\s*LIBRARY\s+CORE\s*===\s*$'
+$sectionRe  = '^\s*//\s*===\s*.+?\s*===\s*$'
+# [ADR-022] 2.º bloque byte-identico, SOLO Strategy + Context (el Visual no debe cargarlo).
+$extremesRe = '^\s*//\s*===\s*EXTREMES\s+CORE\s*===\s*$'
 
 function Write-Info($msg) { if (-not $Quiet) { Write-Host $msg } }
 
-# Extrae el bloque LIBRARY CORE de un archivo como array de lineas.
+# Extrae un bloque delimitado por su marcador de inicio hasta el siguiente header de seccion.
 # Devuelve $null si no encuentra el marcador de inicio.
-function Get-CoreBlock([string]$path) {
+function Get-Block([string]$path, [string]$startPattern) {
     $lines = [System.IO.File]::ReadAllLines($path)
     $startIdx = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match $startRe) { $startIdx = $i; break }
+        if ($lines[$i] -match $startPattern) { $startIdx = $i; break }
     }
     if ($startIdx -lt 0) { return $null }
 
@@ -88,6 +90,8 @@ function Get-CoreBlock([string]$path) {
     # Bloque = desde el marcador (incl.) hasta el siguiente header (excl.)
     return $lines[$startIdx..($endIdx - 1)]
 }
+
+function Get-CoreBlock([string]$path) { Get-Block $path $startRe }
 
 function Get-Sha256([string]$text) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -168,6 +172,51 @@ if ($hashV -eq $hashS) {
             exit 1
         }
         Write-Info "[OK] LIBRARY CORE identico tambien en Context (3 consumidores)."
+
+        # --- EXTREMES CORE (ADR-022): 2.º bloque byte-identico, solo Strategy + Context ---
+        # f_tfExtremes NO vive en el LIBRARY CORE porque Visual no la llama nunca y en Pine una
+        # funcion no-llamada SI cuenta tokens (ADR-020) -> sus 139 lineas cruzaban al Visual sobre
+        # el techo CE10117 (medido S133). Pero la comparten 2 consumidores => necesita la MISMA
+        # garantia de single-source-of-truth que el CORE. Sin este check quedarian 2 copias a mano.
+        $extS = Get-Block $StrategyPath $extremesRe
+        $extC = Get-Block $ContextPath  $extremesRe
+        if ($null -eq $extS -and $null -eq $extC) {
+            Write-Info "[i] Sin bloque EXTREMES CORE en Strategy/Context (nada que verificar)."
+        } elseif ($null -eq $extS -or $null -eq $extC) {
+            $falta = if ($null -eq $extS) { $StrategyPath } else { $ContextPath }
+            Write-Host "[X] ERROR: EXTREMES CORE existe en uno pero no en el otro. Falta en: $falta" -ForegroundColor Red
+            Write-Host "CORE_SYNC=ERROR (EXTREMES CORE incompleto)"
+            exit 2
+        } else {
+            $hashES = Get-Sha256 ($extS -join "`n")
+            $hashEC = Get-Sha256 ($extC -join "`n")
+            if ($hashES -ne $hashEC) {
+                Write-Host "[X] EXTREMES CORE DIVERGENTE entre Strategy y Context." -ForegroundColor Red
+                Write-Host ("    Strategy: {0} lineas, SHA {1}" -f $extS.Count, $hashES.Substring(0, 16))
+                Write-Host ("    Context:  {0} lineas, SHA {1}" -f $extC.Count, $hashEC.Substring(0, 16))
+                if (-not $Quiet) {
+                    Write-Host ""
+                    Write-Host "    --- Diferencias (S = solo Strategy, C = solo Context) ---"
+                    foreach ($d in (Compare-Object -ReferenceObject $extS -DifferenceObject $extC -CaseSensitive)) {
+                        $tag = if ($d.SideIndicator -eq '<=') { 'S' } else { 'C' }
+                        Write-Host ("    [{0}] {1}" -f $tag, $d.InputObject)
+                    }
+                }
+                Write-Host ""
+                Write-Host "CORE_SYNC=DIVERGENT -- ARREGLAR antes de commitear (ADR-022)."
+                exit 1
+            }
+            Write-Info ("[OK] EXTREMES CORE identico en Strategy y Context (ADR-022).")
+            Write-Info ("     Lineas: {0} | SHA-256: {1}" -f $extS.Count, $hashES.Substring(0, 16))
+            # Guardrail: el Visual NO debe cargarlo (es la razon de existir del bloque).
+            if ((Get-Block $VisualPath $extremesRe) -or ([System.IO.File]::ReadAllText($VisualPath) -match 'f_tfExtremes\(')) {
+                Write-Host "[X] ERROR: SMC-Visual.pine contiene f_tfExtremes / EXTREMES CORE." -ForegroundColor Red
+                Write-Host "    Ese bloque existe precisamente para que el Visual NO lo cargue (CE10117, ADR-022)."
+                Write-Host "CORE_SYNC=ERROR (Visual carga EXTREMES CORE)"
+                exit 2
+            }
+        }
+
         Write-Host "CORE_SYNC=OK"
         exit 0
     }

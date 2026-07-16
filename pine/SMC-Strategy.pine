@@ -1856,6 +1856,14 @@ f_farthestEvent(array<int> evK, array<float> evL, array<int> evD, array<int> evT
     bool useTaken = na(aLvl) and not na(tLvl)
     [useTaken ? tLvl : aLvl, useTaken ? tDir : aDir, useTaken ? tTA : aTA, useTaken ? tTB : aTB, useTaken]
 
+// === EXTREMES CORE ===
+// [ADR-022 · precisa ADR-018/ADR-020] Bloque byte-identico entre SMC-Strategy y SMC-Context,
+// verificado por check-core-sync.ps1 igual que el LIBRARY CORE. NO vive en el CORE compartido
+// porque SMC-Visual NO la llama nunca y, en Pine, una funcion no-llamada SI cuenta tokens
+// (ADR-020, confirmado empiricamente): sus 139 lineas cruzaban al Visual sobre el techo
+// CE10117 (medido S133: 100952 vs limite 100256; con la ablacion compila y aplica).
+// Regla de ADR-020 aplicada a su espiritu: el CORE no carga a quien no la usa.
+
 // f_tfExtremes: MISMA cadena de deteccion que f_computeTFState (cuerpo copiado verbatim, garantia de
 // paridad) pero la EMISION cambia: en vez de nearest-N, emite el extremo importante por concepto/lado.
 // Tuple plano: 3 escalares + 8 slots x 6 campos {kind, top, bottom, dir, tA, tB} = 51.
@@ -1995,6 +2003,7 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
       na(poDl) ? 0 : (poDs ? -KIND_POOL : KIND_POOL), poDl, poDl, poDd, poDa, int(na),
       na(eqUl) ? 0 : (eqUx ? -KIND_EQH : KIND_EQH),  eqUl, eqUl, eqUd, eqUa, eqUb,
       na(eqDl) ? 0 : (eqDx ? -KIND_EQL : KIND_EQL),  eqDl, eqDl, eqDd, eqDa, eqDb ]
+
 // === DETECCIÓN TF PROPIO ===
 
 // --- f_detectVolumeImbalance [T31 · §5.5] — Strategy-local (movida FUERA del CORE byte-identico en
