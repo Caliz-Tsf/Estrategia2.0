@@ -300,21 +300,64 @@ Las zonas son las áreas donde se busca la **entrada**: donde el precio instituc
 
 **Concepto.** El *dealing range* (rango de negociación entre el último **strong high** y **strong low**) dividido en zonas de valor. Vender en **premium** (caro), comprar en **discount** (barato), evitar el **equilibrium** (zona de chop sin ventaja).
 
-**Definición cuantificada.** Sea el rango `[L, H]` entre el strong low `L` y strong high `H` vigentes (los swings que delimitan el rango operativo actual):
+**Definición cuantificada.** Sea el rango `[L, H]` entre el strong low `L` y strong high `H` vigentes (ver "Strong / weak" abajo):
 - `eq = (H + L) / 2` (nivel 50%).
 - **Discount:** precio `< eq` (mitad inferior) → favorece **long**.
 - **Premium:** precio `> eq` (mitad superior) → favorece **short**.
 - **Equilibrium (banda):** precio dentro de `[45%, 55%]` del rango → zona neutral. Confluencia #31: si el precio está en equilibrium, **resta** 50% del peso (no hay ventaja de localización).
 
+#### 2.3.1 Strong / weak — cuantificación *(S133; antes era un término primitivo)*
+
+**Strong es RELACIONAL, no una propiedad local del nivel.** No lo determinan ni los toques, ni la amplitud, ni la antigüedad (las tres vías medidas y **refutadas** en S131/S132). Lo determina **lo que hizo la pierna que nació en él**:
+
+- **Strong low** := el mínimo de la pierna cuya subida posterior **rompió estructura** (BOS/CHoCH alcista de la escala del TF). Queda *protegido/defendido*.
+- **Strong high** := simétrico, con eventos **bajistas**.
+- Se fijan **en la barra de la ruptura**, con `min/max` de barras pasadas → anti-repaint `[D-PINE-03]`.
+
+**Strong / weak depende del BIAS, nunca del lado:**
+
+| bias estructural vigente | lado STRONG (defendido) | lado WEAK (liquidez pendiente) |
+|---|---|---|
+| **BAJISTA** | high | low |
+| **ALCISTA** | low | high |
+
+> **Corolario (S133).** Que el rango "camine hacia el precio" **en el lado weak es CORRECTO**: un weak low es liquidez y su destino es ser barrido. En una divisa bajista el discount pegado al precio **no es un bug**. El defecto es que el lado **strong** también camine.
+
+**Símbolo-agnóstico `[ADR-001]`:** anclar al bias — no a un lado — es simétrico por construcción. En un símbolo de tendencia secular alcista el latch se va solo al low. **Nunca se hardcodea un lado ni un símbolo.**
+
+#### 2.3.2 El dealing range: el **2.º** extremo estructural *(S133)*
+
+Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en toda su historia:
+
+| Nivel | Definición | Uso |
+|---|---|---|
+| `histLow` / `histHigh` | el strong low **más bajo** / el strong high **más alto** | **Se marcan aparte. NO entran en el dealing range.** Son el extremo histórico del símbolo. |
+| `pdLow` / `pdHigh` | el **2.º** más bajo / el **2.º** más alto | **Son el dealing range** `[L, H]`. |
+
+**Por qué el 2.º y no el 1.º:** el extremo histórico es el arranque del feed (o un evento único de hace décadas) — un rango anclado ahí es cierto pero **no operable**. El 2.º extremo da un rango *"no tan lejos"* y sigue siendo **estructural**, no aritmético.
+
+**Fallback en cascada** (garantiza el invariante `pct ∈ [0,1]`; simétrico arriba):
+
+1. `close >= pdLow` → suelo = `pdLow` *(caso normal)*
+2. `histLow <= close < pdLow` → suelo = `histLow` *(franja histórica: el rango **se estira**)*
+3. `close < histLow` → suelo = el trailing extreme *(el precio rompió el histórico: expande hasta que se confirme el pivote nuevo, que pasa a ser el nuevo `histLow` y desplaza al antiguo a `pdLow`)*
+
+**Anidamiento MTF gratis:** cada TF usa la escala de sus propios pivotes ⇒ el 2.º extremo de M5 está más cerca del precio que el de H1, y el de H1 más que el de D1. **La cascada D1 ⊃ H1 ⊃ M5 sale sola, sin código por-TF ni parámetro de escalado.**
+
+**Contraejemplo `[cuantificado]`.** Reanclar el rango en **cualquier** swing confirmado (sin exigir que haya roto estructura) hace que el lado strong camine hacia el precio: **medido en S133**, el techo así calculado queda a **9-13×ATR** del strong high real. Tampoco vale tomar **el último** strong high en vez del 2.º más alto: cada evento lo re-fija más abajo → mismo defecto (medido, 4 configuraciones).
+
 **Parámetros default.**
 | Param | Default | Nota |
 |---|---|---|
 | `eqBand` | **45–55%** | ancho de la banda de equilibrium. |
-| rango | strong high / strong low vigentes | se actualiza con la estructura. |
+| rango | `[pdLow, pdHigh]` = **2.º** strong low / **2.º** strong high de la escala del TF | se actualiza **solo** con un nuevo strong high/low (§2.3.1), **no** con pivotes. |
+| ventana | toda la historia disponible del TF | **no hay parámetro de escala**: la escala la fija el TF, no un input. |
 
 **Contraejemplo.** Comprar en **premium** (precio en el 80% del rango) porque "hay un OB alcista" es operar contra la localización — el OB en premium tiene mucha menor probabilidad. Premium/Discount es el filtro que evita entradas caras.
 
-**Casos de prueba** *(EURUSD, TV MCP 2026-06-11; H1, rango dominante strong_high 1.16859 / strong_low 1.14997, eq 1.15928)*:
+> ⚠️ **Los casos de prueba de abajo NO son un oráculo independiente — quedan como REGISTRO HISTÓRICO de la Opción A** *(S133)*. Se generaron **desde la implementación ya escrita** (`decisiones-pd-rango.md`, tabla de validación "al 5.º decimal") ⇒ **validan el código contra sí mismo**. No pueden usarse para validar §2.3.1/§2.3.2. **Se regeneran** tras implementar el 2.º extremo estructural.
+
+**Casos de prueba** *(⚠️ NO-ORÁCULO — registro de la Opción A. EURUSD, TV MCP 2026-06-11; H1, rango dominante strong_high 1.16859 / strong_low 1.14997, eq 1.15928)*:
 - ✓ Premium: 2026-05-31→06-01 el precio cotizó ~1.166 (> eq 1.15928, ~90% del rango) → favorece short; en efecto cayó.
 - ✓ Discount: precio actual 2026-06-11 09:00 GMT **1.15322** < eq → zona discount, favorece long.
 - ✓ Banda equilibrium [45%, 55%] = **[1.15835, 1.16021]**: el precio dentro de ella (#31) resta peso por falta de ventaja de localización.
