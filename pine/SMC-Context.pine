@@ -1050,19 +1050,50 @@ type SMC_Trailing
     int   barIdx     = na
     int   barTime    = na
 
-// f_resetTrailingHigh/Low: ancla un extremo del rango al swing recien confirmado
-// (nivel + barra). barIdx/barTime = ancla izquierda para el dibujo de las zonas.
-f_resetTrailingHigh(SMC_Trailing tr, float price, int barIdx, int barTime) =>
-    tr.top     := price
-    tr.topTime := barTime
-    tr.barIdx  := barIdx
-    tr.barTime := barTime
+// [ADR-021] SMC_PdRange + f_pdRelatch/f_pdBottom/f_pdTop: el dealing range = 2.º extremo
+// estructural (§2.3.2). Sustituyen a f_resetTrailingHigh/Low (el reanclaje por pivote de la
+// Opcion A, eliminado). El UDT viaja por referencia -> una sola definicion sirve a los 4
+// consumidores (f_computeTFState, f_tfExtremes, f_m5Light, chart-TF) en vez de 4 copias del
+// bloque: dieta de tokens (ADR-020: el Visual roza el techo CE10117).
+type SMC_PdRange
+    float runMin = na
+    float runMax = na
+    float min1   = na
+    float min2   = na
+    float max1   = na
+    float max2   = na
 
-f_resetTrailingLow(SMC_Trailing tr, float price, int barIdx, int barTime) =>
-    tr.bottom     := price
-    tr.bottomTime := barTime
-    tr.barIdx     := barIdx
-    tr.barTime    := barTime
+// f_pdRelatch: acumula el origen de la pierna y, SOLO en la barra de un BOS/CHoCH de escala
+// DOMINANTE, lo consagra strong y mantiene el 1.º y el 2.º extremo. O(1), sin arrays.
+// 'strong' es RELACIONAL: lo que la pierna nacida en el nivel rompio despues (§2.3.1).
+// min/max de barras PASADAS fijado en barra confirmada -> anti-repaint [#1].
+f_pdRelatch(SMC_PdRange r, SMC_Event ev, float h, float l) =>
+    r.runMin := na(r.runMin) ? l : math.min(r.runMin, l)
+    r.runMax := na(r.runMax) ? h : math.max(r.runMax, h)
+    if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
+        if ev.dir == DIR_BULL
+            if na(r.min1) or r.runMin < r.min1
+                r.min2 := na(r.min1) ? r.min2 : r.min1
+                r.min1 := r.runMin
+            else if na(r.min2) or r.runMin < r.min2
+                r.min2 := r.runMin
+            r.runMin := l
+        else
+            if na(r.max1) or r.runMax > r.max1
+                r.max2 := na(r.max1) ? r.max2 : r.max1
+                r.max1 := r.runMax
+            else if na(r.max2) or r.runMax > r.max2
+                r.max2 := r.runMax
+            r.runMax := h
+    r
+
+// f_pdBottom/f_pdTop: el rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en
+// cascada -> pct en [0,1] por construccion: en la franja historica el rango se estira al 1.º;
+// si el precio rompe el historico, expande con el trailing hasta el pivote nuevo (§2.3.2).
+f_pdBottom(SMC_PdRange r, float px, float trailBot) =>
+    na(r.min2) ? trailBot : px >= r.min2 ? r.min2 : px >= r.min1 ? r.min1 : trailBot
+f_pdTop(SMC_PdRange r, float px, float trailTop) =>
+    na(r.max2) ? trailTop : px <= r.max2 ? r.max2 : px <= r.max1 ? r.max1 : trailTop
 
 // f_updateTrailing: expande el rango con el precio de la barra (cf. LuxAlgo
 // updateTrailingExtremes). top = max(high desde el ultimo reset); bottom = min(low).
@@ -1496,15 +1527,8 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
     // rango sale LOCAL (319 pips) = el bug de S021 reencarnado. `pdLen` NO desaparece: cambia de
     // significado (era la escala del pivote de reanclaje; ahora es la escala de la estructura).
     var SMC_Structure structPd = SMC_Structure.new()
-    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2). 6 floats, O(1) por evento:
-    // runMin/runMax = origen de la pierna en curso; min1/max1 = 1.er extremo (HISTORICO, NO entra al
-    // rango); min2/max2 = 2.º extremo = EL RANGO. Mantener los dos mas bajos no requiere ordenar.
-    var float runMin = na
-    var float runMax = na
-    var float min1   = na
-    var float min2   = na
-    var float max1   = na
-    var float max2   = na
+    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2).
+    var SMC_PdRange pdR = SMC_PdRange.new()
     var array<SMC_Zone> zonesTf = array.new<SMC_Zone>()
     var array<SMC_Pool> poolsTf = array.new<SMC_Pool>()
     var array<float> obBufHigh = array.new<float>()
@@ -1537,33 +1561,11 @@ f_computeTFState(int swingLen, int pdLen, float dispFactor, float bodyPct, int e
         f_setStructureLow(structPd, pdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(trailTf, high, low, time)
     if barstate.isconfirmed
-        // [ADR-021 §2.3.1] Origen de la pierna en curso. min/max de barras PASADAS -> anti-repaint [#1].
-        runMin := na(runMin) ? low  : math.min(runMin, low)
-        runMax := na(runMax) ? high : math.max(runMax, high)
-        SMC_Event ev   = f_detectStructure(structTf, bar_index, time, true, true)
-        SMC_Event evPd = f_detectStructure(structPd, bar_index, time, true, true)
-        // [ADR-021 §2.3.1] Un strong nace SOLO cuando la pierna que empezo en el ROMPIO ESTRUCTURA (de
-        // escala P/D): 'strong' es RELACIONAL, no una propiedad local del nivel. El 1.º y el 2.º: O(1).
-        if not na(evPd) and (evPd.kind == KIND_BOS or evPd.kind == KIND_CHOCH)
-            if evPd.dir == DIR_BULL
-                if na(min1) or runMin < min1
-                    min2 := na(min1) ? min2 : min1
-                    min1 := runMin
-                else if na(min2) or runMin < min2
-                    min2 := runMin
-                runMin := low
-            else
-                if na(max1) or runMax > max1
-                    max2 := na(max1) ? max2 : max1
-                    max1 := runMax
-                else if na(max2) or runMax > max2
-                    max2 := runMax
-                runMax := high
-        // [ADR-021 §2.3.2] El rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en cascada
-        // -> pct en [0,1] por construccion: si el precio entra en la franja historica el rango se estira
-        // al 1.º, y si rompe el historico expande con el trailing hasta que se confirme el pivote nuevo.
-        st.pdLow  := na(min2) ? trailTf.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailTf.bottom
-        st.pdHigh := na(max2) ? trailTf.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailTf.top
+        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        // [ADR-021] El relatch lo dispara la estructura de escala P/D (dominante), NO structTf (=5).
+        f_pdRelatch(pdR, f_detectStructure(structPd, bar_index, time, true, true), high, low)
+        st.pdLow  := f_pdBottom(pdR, close, trailTf.bottom)
+        st.pdHigh := f_pdTop(pdR, close, trailTf.top)
         f_updateTFState(st, ev)
         if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
             int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
@@ -1817,15 +1819,8 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
     // rango sale LOCAL (319 pips) = el bug de S021 reencarnado. `pdLen` NO desaparece: cambia de
     // significado (era la escala del pivote de reanclaje; ahora es la escala de la estructura).
     var SMC_Structure structPd = SMC_Structure.new()
-    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2). 6 floats, O(1) por evento:
-    // runMin/runMax = origen de la pierna en curso; min1/max1 = 1.er extremo (HISTORICO, NO entra al
-    // rango); min2/max2 = 2.º extremo = EL RANGO. Mantener los dos mas bajos no requiere ordenar.
-    var float runMin = na
-    var float runMax = na
-    var float min1   = na
-    var float min2   = na
-    var float max1   = na
-    var float max2   = na
+    // [ADR-021] Dealing range = 2.º extremo estructural (§2.3.1/§2.3.2).
+    var SMC_PdRange pdR = SMC_PdRange.new()
     var array<SMC_Zone> zonesTf = array.new<SMC_Zone>()
     var array<SMC_Pool> poolsTf = array.new<SMC_Pool>()
     var array<float> obBufHigh = array.new<float>()
@@ -1858,33 +1853,11 @@ f_tfExtremes(int swingLen, int pdLen, float dispFactor, float bodyPct, int eqlLe
         f_setStructureLow(structPd, pdL, bar_index - pdLen, time[pdLen])
     f_updateTrailing(trailTf, high, low, time)
     if barstate.isconfirmed
-        // [ADR-021 §2.3.1] Origen de la pierna en curso. min/max de barras PASADAS -> anti-repaint [#1].
-        runMin := na(runMin) ? low  : math.min(runMin, low)
-        runMax := na(runMax) ? high : math.max(runMax, high)
-        SMC_Event ev   = f_detectStructure(structTf, bar_index, time, true, true)
-        SMC_Event evPd = f_detectStructure(structPd, bar_index, time, true, true)
-        // [ADR-021 §2.3.1] Un strong nace SOLO cuando la pierna que empezo en el ROMPIO ESTRUCTURA (de
-        // escala P/D): 'strong' es RELACIONAL, no una propiedad local del nivel. El 1.º y el 2.º: O(1).
-        if not na(evPd) and (evPd.kind == KIND_BOS or evPd.kind == KIND_CHOCH)
-            if evPd.dir == DIR_BULL
-                if na(min1) or runMin < min1
-                    min2 := na(min1) ? min2 : min1
-                    min1 := runMin
-                else if na(min2) or runMin < min2
-                    min2 := runMin
-                runMin := low
-            else
-                if na(max1) or runMax > max1
-                    max2 := na(max1) ? max2 : max1
-                    max1 := runMax
-                else if na(max2) or runMax > max2
-                    max2 := runMax
-                runMax := high
-        // [ADR-021 §2.3.2] El rango es el 2.º extremo; el 1.º (historico) NO entra. Fallback en cascada
-        // -> pct en [0,1] por construccion: si el precio entra en la franja historica el rango se estira
-        // al 1.º, y si rompe el historico expande con el trailing hasta que se confirme el pivote nuevo.
-        st.pdLow  := na(min2) ? trailTf.bottom : close >= min2 ? min2 : close >= min1 ? min1 : trailTf.bottom
-        st.pdHigh := na(max2) ? trailTf.top    : close <= max2 ? max2 : close <= max1 ? max1 : trailTf.top
+        SMC_Event ev = f_detectStructure(structTf, bar_index, time, true, true)
+        // [ADR-021] El relatch lo dispara la estructura de escala P/D (dominante), NO structTf (=5).
+        f_pdRelatch(pdR, f_detectStructure(structPd, bar_index, time, true, true), high, low)
+        st.pdLow  := f_pdBottom(pdR, close, trailTf.bottom)
+        st.pdHigh := f_pdTop(pdR, close, trailTf.top)
         f_updateTFState(st, ev)
         if not na(ev) and (ev.kind == KIND_BOS or ev.kind == KIND_CHOCH)
             int origT = ev.dir == DIR_BULL ? structTf.highTime : structTf.lowTime
