@@ -3505,33 +3505,36 @@ if i_showOTE and barstate.islast
 f_drawPDLine(int leftTime, float level, color col, string lineStyle) =>
     line.new(leftTime, level, time, level, xloc = xloc.bar_time, color = col, style = lineStyle, width = 1)
 
-// En la ultima barra limpia y repinta las 3 lineas P/D + las etiquetas. Premium = linea
-// solida roja en trailing.top desde la barra del high (trailing.topTime, cf. LuxAlgo
-// lastTopTime :725); Discount = linea solida verde en trailing.bottom desde la barra del
-// low (trailing.bottomTime, cf. :730); Equilibrium = punteada gris en el 50% desde el
-// extremo mas antiguo. La banda [45%,55%] (i_pdEqBand) ya no se dibuja: solo alimenta la
-// clasificacion del panel (#31). Sin cajas -> sin ruido.
+// En la ultima barra limpia y repinta las 3 lineas P/D + las etiquetas sobre el DEALING RANGE
+// [ADR-021]: chartState.pdHigh/pdLow (2.º extremo estructural, §2.3.2). Premium = solida roja en
+// pdHigh; Discount = solida verde en pdLow; Equilibrium = punteada gris al 50%. La banda [45%,55%]
+// (i_pdEqBand) no se dibuja: solo alimenta la clasificacion del panel (#31). Sin cajas -> sin ruido.
+// [S134] Hasta aqui este bloque pintaba trailing.top/bottom (la Opcion A que el ADR-021 sustituyo):
+// el panel leia el rango nuevo y las LINEAS el viejo. Medido en D1 EURUSD: dibujaba Premium 1.60389
+// con el techo real en 1.51441 (~900 pips). No salto en toda S133 porque el pct casi coincide
+// (35% dibujado vs 34% del panel) -> el pct NO discrimina dos rangos distintos; solo los niveles.
+// ANCLA neutra (chart.left_visible_bar_time): SMC_PdRange no guarda el tiempo del extremo y el UDT
+// vive en el CORE (:1176) -> anadirselo rompe el SHA. Dibujar desde el borde visible no afirma una
+// barra de origen que no tenemos. DEUDA: ancla real al 2.º extremo si algun dia se re-baselinea.
 var array<line>  SMC_pdLines  = array.new<line>()
 var array<label> SMC_pdLabels = array.new<label>()
-if i_showPD and barstate.islast and not na(trailing.top) and not na(trailing.bottom) and trailing.top > trailing.bottom
+if i_showPD and barstate.islast and not na(chartState.pdHigh) and not na(chartState.pdLow) and chartState.pdHigh > chartState.pdLow
     for l in SMC_pdLines
         line.delete(l)
     for lb in SMC_pdLabels
         label.delete(lb)
     array.clear(SMC_pdLines)
     array.clear(SMC_pdLabels)
-    float eqLvl    = (trailing.top + trailing.bottom) / 2.0
-    int   topLeft  = nz(trailing.topTime, time)
-    int   botLeft  = nz(trailing.bottomTime, time)
-    int   eqLeft   = topLeft < botLeft ? topLeft : botLeft
-    array.push(SMC_pdLines, f_drawPDLine(topLeft, trailing.top,    color.new(COL_PREM, 0),  line.style_solid))
-    array.push(SMC_pdLines, f_drawPDLine(eqLeft,  eqLvl,           color.new(COL_GHOST, 20), line.style_dotted))
-    array.push(SMC_pdLines, f_drawPDLine(botLeft, trailing.bottom, color.new(COL_DISC, 0),  line.style_solid))
+    float eqLvl  = (chartState.pdHigh + chartState.pdLow) / 2.0
+    int   pdLeft = nz(chart.left_visible_bar_time, time)
+    array.push(SMC_pdLines, f_drawPDLine(pdLeft, chartState.pdHigh, color.new(COL_PREM, 0),   line.style_solid))
+    array.push(SMC_pdLines, f_drawPDLine(pdLeft, eqLvl,             color.new(COL_GHOST, 20), line.style_dotted))
+    array.push(SMC_pdLines, f_drawPDLine(pdLeft, chartState.pdLow,  color.new(COL_DISC, 0),   line.style_solid))
     // Tarjetas P/D/EQ a la DERECHA de la vela (style_label_left) y 2 velas de margen (bar_index + 2),
     // como las de BSL/SSL (pref. usuario): siguen el precio pero por el lado derecho, sin quedar pegadas.
-    array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.top,    "Premium "  + str.tostring(trailing.top, format.mintick),    style = label.style_label_left, color = color.new(COL_PREM, 80),  textcolor = COL_PREM,  size = size.small))
-    array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,           "EQ "       + str.tostring(eqLvl, format.mintick),           style = label.style_label_left, color = color.new(COL_GHOST, 80), textcolor = COL_GHOST, size = size.small))
-    array.push(SMC_pdLabels, label.new(bar_index + 2, trailing.bottom, "Discount " + str.tostring(trailing.bottom, format.mintick), style = label.style_label_left, color = color.new(COL_DISC, 80), textcolor = COL_DISC, size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index + 2, chartState.pdHigh, "Premium "  + str.tostring(chartState.pdHigh, format.mintick), style = label.style_label_left, color = color.new(COL_PREM, 80),  textcolor = COL_PREM,  size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index + 2, eqLvl,             "EQ "       + str.tostring(eqLvl, format.mintick),             style = label.style_label_left, color = color.new(COL_GHOST, 80), textcolor = COL_GHOST, size = size.small))
+    array.push(SMC_pdLabels, label.new(bar_index + 2, chartState.pdLow,  "Discount " + str.tostring(chartState.pdLow, format.mintick),  style = label.style_label_left, color = color.new(COL_DISC, 80), textcolor = COL_DISC, size = size.small))
 
 // --- Gradient Levels: grid PRIMARIO seleccionado + ghosts [§5.16 · T41] (Visual-only) ---
 // Dibuja el grid del rango-fuente PRIMARIO elegido por f_selectGradientSource (P1 dealing range o P2
