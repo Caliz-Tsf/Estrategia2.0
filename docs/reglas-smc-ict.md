@@ -344,6 +344,20 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 
 **Anidamiento MTF gratis:** cada TF usa la escala de sus propios pivotes ⇒ el 2.º extremo de M5 está más cerca del precio que el de H1, y el de H1 más que el de D1. **La cascada D1 ⊃ H1 ⊃ M5 sale sola, sin código por-TF ni parámetro de escalado.**
 
+**La VENTANA — el único parámetro** *(corregido en S133 tras medir NAS100; la v1 de esta sección decía "no hay parámetro de escala" y es **falso**)*. Los strong lows/highs se buscan **dentro de una ventana declarada de N velas del TF**, no en toda la historia disponible.
+
+**Por qué es obligatoria (medido, NAS100USD D1 vs H1):**
+
+| | D1 (feed de ~24 años) | H1 (feed de ~1.5 años) |
+|---|---|---|
+| `pdLow` | **1021.1** *(de 2001)* | 19013 *(reciente)* |
+| rango | 29752 pts | 11709 pts |
+| `pct` | **0.958 — clavado, no rota** | 0.898 |
+
+En un símbolo de tendencia secular fuerte, **el 2.º extremo del lado que el precio nunca vuelve a visitar se fosiliza en el arranque del feed** ⇒ el rango deja de ser operable. **H1 no lo sufre solo porque su feed es corto** — es decir, la ventana ya estaba actuando de hecho, sin declararse. Dejarla implícita hace que el resultado dependa de **cuánta historia sirva el bróker**, lo cual no es una regla: es un accidente.
+
+> **Nota histórica.** `i_pdSwingLen`=1000 (S130) acertaba el rango D1 de EURUSD **por este mismo mecanismo, sin saberlo**: no era una escala de pivote, actuaba como ventana de facto. Ver `decisiones-pd-rango.md` nota S133(b).
+
 **Contraejemplo `[cuantificado]`.** Reanclar el rango en **cualquier** swing confirmado (sin exigir que haya roto estructura) hace que el lado strong camine hacia el precio: **medido en S133**, el techo así calculado queda a **9-13×ATR** del strong high real. Tampoco vale tomar **el último** strong high en vez del 2.º más alto: cada evento lo re-fija más abajo → mismo defecto (medido, 4 configuraciones).
 
 **Parámetros default.**
@@ -351,7 +365,7 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 |---|---|---|
 | `eqBand` | **45–55%** | ancho de la banda de equilibrium. |
 | rango | `[pdLow, pdHigh]` = **2.º** strong low / **2.º** strong high de la escala del TF | se actualiza **solo** con un nuevo strong high/low (§2.3.1), **no** con pivotes. |
-| ventana | toda la historia disponible del TF | **no hay parámetro de escala**: la escala la fija el TF, no un input. |
+| `pdWindow` | **por calibrar** (velas del TF) | **el único parámetro libre.** Acota dónde se buscan los strong. Sin él, el rango depende de cuánta historia sirva el bróker. |
 
 **Contraejemplo.** Comprar en **premium** (precio en el 80% del rango) porque "hay un OB alcista" es operar contra la localización — el OB en premium tiene mucha menor probabilidad. Premium/Discount es el filtro que evita entradas caras.
 
