@@ -125,22 +125,39 @@ def lastre(n_unidades):
     in functions". El propio mensaje da el remedio.
 
     FIX (intento 3): el lastre vive DENTRO de una funcion (cuerpo principal corto) y su resultado
-    alimenta un plot (no se puede tree-shakear). Las dos trampas cubiertas a la vez."""
+    alimenta un plot (no se puede tree-shakear).
+
+    TROCEADO: para medir Context hace falta MUCHO mas lastre, y una sola funcion con miles de
+    sentencias vuelve a topar el limite de tamano => se reparte en funciones de CHUNK sentencias
+    que se suman todas en el plot."""
+    CHUNK = 200
     ls = ["", "// --- [S135 · LASTRE de ablacion: empuja sobre el techo para que el numero sea VISIBLE] ---",
-          "// DOS trampas medidas y cubiertas: (1) sin el plot, Pine tree-shakea el lastre entero;",
-          "// (2) en el cuerpo principal revienta 'main body too long' => va dentro de una funcion.",
-          "zz_lastre(float c, float o) =>",
-          "    float acc = 0.0"]
-    for i in range(n_unidades):
-        ls.append(f"    acc := acc + c * {1.0 + i * 0.001} - o * {0.5 + i * 0.001}")
-    ls.append("    acc")
-    ls.append('plot(zz_lastre(close, open), "zzbal", display = display.none)')
+          "// TRES trampas medidas y cubiertas: (1) sin el plot, Pine tree-shakea el lastre entero;",
+          "// (2) en el cuerpo principal revienta 'main body too long'; (3) una sola funcion gigante",
+          "// vuelve a toparlo => se trocea en funciones de 200 sentencias."]
+    n_fn = (n_unidades + CHUNK - 1) // CHUNK
+    for f in range(n_fn):
+        ls.append(f"zz_lastre{f}(float c, float o) =>")
+        ls.append("    float acc = 0.0")
+        for i in range(f * CHUNK, min((f + 1) * CHUNK, n_unidades)):
+            ls.append(f"    acc := acc + c * {1.0 + i * 0.001} - o * {0.5 + i * 0.001}")
+        ls.append("    acc")
+    suma = " + ".join(f"zz_lastre{f}(close, open)" for f in range(n_fn))
+    ls.append(f'plot({suma}, "zzbal", display = display.none)')
     return ls
 
 
-MODOS = ("base", "sin-farthest", "con-copia36")
+MODOS = ("base", "sin-farthest", "con-copia36", "context")
 modo = sys.argv[1] if len(sys.argv) > 1 else ""
 n_lastre = int(sys.argv[2]) if len(sys.argv) > 2 else 300
+
+# El modo `context` mide el OTRO consumidor: cuanto gasta hoy y cuanto dibujo VIVO puede absorber.
+# Dos corridas con lastre distinto dan la calibracion sin suponer nada:
+#   unit  = (X2 - X1) / (N2 - N1)        <- coste real de una unidad de lastre
+#   base  = X1 - N1 * unit               <- lo que gasta Context por si solo
+#   hueco = 100256 - base
+if modo == "context":
+    SRC = RAIZ / "pine" / "SMC-Context.pine"
 
 if modo not in MODOS:
     print(f"uso: python {pathlib.Path(__file__).name} <{'|'.join(MODOS)}> [n_lastre]")
