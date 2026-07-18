@@ -72,13 +72,30 @@ Esto abrió una opción de coste cero que S133 no había considerado, frente a l
 - §2.3.2 deja de contradecirse (6.ª y última corrección del hilo `pdWindow`).
 - Cero parámetros nuevos ⇒ la cascada sigue anidando y rotando sin calibración por símbolo (ADR-001).
 
-**Deuda aceptada (explícita, no oculta)**
-- El 2.º extremo sigue dependiendo de **cuánta historia sirva TV en el TF más bajo** — una holgura del
-  determinismo de la **regla dura #1**. Está **acotada**: solo muerde si el 2.º extremo strong cae
-  fuera de la historia servida, y S133 midió que la regla base cumple sin ventana en EURUSD.
-- **Se reevalúa en Fase 3**, con datos de calibración reales en lugar de a ojo sobre un símbolo
-  (ADR-002, anti-overfitting). Si allí aparece un símbolo donde la holgura muerde, `pdWindow` vuelve a
-  la mesa **con evidencia**, que es lo que le faltaba aquí.
+**Deuda — BLOQUEANTE, NO ACEPTADA** *(corregido por decisión del usuario, S135)*
+- El 2.º extremo sigue dependiendo de **cuánta historia sirva TV en el TF más bajo** — una violación de
+  la **regla dura #1** (determinismo). **NO se acepta como deuda permanente: hay que cerrarla.**
+- **Criterio de cierre medible:** el dealing range debe ser **reproducible dado un conteo mínimo de
+  barras declarado por TF**. Mientras no se verifique, la regla dura #1 no está satisfecha.
+- **Es precondición de dos gates**, no un detalle de Fase 1 (ver §Riesgo aguas abajo).
+
+### ⚠️ Riesgo aguas abajo — corrección a la §Decisión
+
+El argumento *"el artefacto no existe en MQL5"* de arriba es **cierto solo del artefacto chart-TF**
+(leer M5 desde un chart D1). **La dependencia de la profundidad de historia NO desaparece en MQL5, y
+además se agrava:**
+
+- **Fase 3 — reproducibilidad del backtest.** Si el rango depende de la historia servida, dos corridas
+  separadas en el tiempo pueden diferir, y los pesos se calibran contra eso. El corte IS/OOS
+  (`F3-T01`) presupone determinismo.
+- **Fase 4 — paridad de golden tests.** Los golden tests comparan Pine contra MQL5. Si Pine calcula el
+  2.º extremo sobre la historia que TV le sirvió y el EA sobre un conteo de barras fijo, **no tienen
+  por qué coincidir**. `F4-GATE-A` exige golden tests al 100%. ⇒ la dependencia de historia es
+  **exactamente** un riesgo de paridad, no algo que Fase 4 resuelva sola.
+
+⇒ La decisión de **no construir `pdWindow` en S135** sigue en pie (no cabe en el presupuesto de tokens
+y no hay datos de calibración), pero **la justificación de que la deuda era inocua era demasiado
+cómoda y queda corregida aquí.**
 - **Restricción operativa nueva:** validaciones visuales y capturas del P/D multi-TF deben hacerse
   **desde chart M5**. Leer desde D1 o H1 produce celdas truncadas que parecen datos válidos — es
   exactamente cómo S133 entregó un gate correcto que pareció defectuoso.
