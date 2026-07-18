@@ -344,26 +344,10 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 
 **Anidamiento MTF gratis:** cada TF usa la escala de sus propios pivotes ⇒ el 2.º extremo de M5 está más cerca del precio que el de H1, y el de H1 más que el de D1. **La cascada D1 ⊃ H1 ⊃ M5 sale sola, sin código por-TF ni parámetro de escalado.**
 
-> ## ⚠️ LA VENTANA ES OBLIGATORIA — corregido por 3.ª vez (S133, medido EN VIVO tras implementar)
+> ## 📐 REGLA DE LECTURA DEL PANEL — el panel se lee desde el TF más bajo *(decisión S135; contradicción de §2.3.2 RESUELTA)*
 >
-> **MEDIDO en el indicador real:** la columna **M5 del panel** da **Discount 21%** con el chart en H1 y
-> **Premium 90%** con el chart en M5. **El mismo TF, dos veredictos**, según dónde estés mirando. (El 90%
-> es el correcto: coincide con el probe del gate, `pct`=0.929.)
->
-> **Causa:** `request.security("5", …)` desde un chart H1 recibe **mucha más historia M5** que un chart M5
-> nativo (5253 barras). Más historia ⇒ más strong acumulados ⇒ **el 2.º extremo se va más lejos** ⇒ el
-> rango se ensancha y el veredicto cambia.
->
-> **Consecuencia doctrinal:** sin ventana, el 2.º extremo depende de **cuántas barras sirva el
-> bróker/TV**, no de la estructura ⇒ **el resultado no es determinista** y viola la regla dura #1
-> (determinismo) y el espíritu de ADR-001. **La ventana no es un remedio del fósil: es lo que hace que
-> "el M5" sea M5.** Lo de abajo queda como registro de las dos correcciones previas; **la ventana
-> declarada por TF es obligatoria** y su calibración está **pendiente**.
-
-> ## ⚠️ CORRECCIÓN DE ALCANCE — el defecto NO es solo del M5 *(S134, matriz de 9 celdas medida)*
->
-> El aviso de arriba señala solo el M5. **Es incompleto: el H1 también falla.** Medido en vivo
-> (EURUSD, instancia limpia, sin overrides), veredicto por columna × chart-TF:
+> **El hecho medido** (S134, matriz de 9 celdas, EURUSD, instancia limpia sin overrides). Veredicto
+> por columna del panel × TF del chart:
 >
 > | Columna | Chart D1 | Chart H1 | Chart M5 |
 > |---|---|---|---|
@@ -371,25 +355,43 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 > | **H1** | *Discount 34%* | Premium 74% | Premium 74% |
 > | **M5** | *Premium 58%* | *Discount 21%* | **Premium 91%** |
 >
-> **La regla:** una columna se lee correcta **si y solo si `chart-TF <= TF de la columna`**. El D1 es
-> estable en las tres (TV sirve su historia completa desde cualquier chart); el H1 solo falla desde un
-> chart D1; el M5 solo acierta desde un chart M5.
+> **La regla empírica:** una columna se lee correcta **si y solo si `chart-TF <= TF de la columna`**.
+> El D1 es estable en las tres (TV sirve su historia completa desde cualquier chart); el H1 falla desde
+> un chart D1; el M5 solo acierta desde un chart M5.
+>
+> **Causa:** `request.security("5", …)` desde un chart H1 recibe **mucha más historia M5** que un chart
+> M5 nativo (5253 barras). Más historia ⇒ más strong acumulados ⇒ el 2.º extremo se va más lejos ⇒ el
+> rango se ensancha. **Es un artefacto de `request.security`, no un defecto de la regla del §2.3.1.**
 >
 > **La regla base FUNCIONA:** desde **chart M5** las tres columnas dan **34/74/91** = la tabla del gate
-> de aquí abajo, celda por celda. La cascada anida y rota con cero parámetros.
+> de aquí abajo, celda por celda. La cascada anida y rota con **cero parámetros**.
 >
-> **⇒ Aparece un remedio de coste cero que no estaba considerado:** declarar que **el panel es válido
-> leído desde el TF más bajo** (regla de operación, no código), frente a la ventana real (array de
-> strong con `barIdx` en el CORE ⇒ SHA + riesgo OOM de S105 + tokens contra el CE10117). **DECISIÓN
-> ABIERTA.** Ver `docs/planes/MEDICION-matriz-chart-tf-S134.md`.
+> ### La decisión (S135)
 >
-> ⚠️ **Contradicción viva en esta misma sección, sin resolver:** el aviso de arriba dice que la ventana
-> es **obligatoria**; la tabla de parámetros de abajo sigue diciendo `pdWindow` = *"desactivada ·
-> **OPCIONAL** y por-TF"*. Son incompatibles. Resolverlo es una **decisión de diseño**, no un hecho
-> medible ⇒ no se toca aquí. §2.3.2 lleva 4 correcciones en una sesión (S133); esta es la 5.ª y es
-> **solo de alcance**, no de diseño.
+> **`pdWindow` sigue OPCIONAL.** El remedio adoptado es una **regla de operación, no código**:
+>
+> > **El panel y el dibujo del P/D son válidos leídos desde el TF más bajo de los que se muestran.**
+> > Con las 3 columnas activas (D1/H1/M5) ⇒ el chart debe estar en **M5**. Leído desde un chart más
+> > alto, las columnas por debajo del chart-TF quedan **truncadas y no deben usarse**.
+>
+> **Por qué esta y no la ventana real:**
+> - La Strategy de Fase 2 corre sobre **un** chart-TF —el de entrada, M5— donde las 3 columnas ya son
+>   correctas ⇒ el defecto **no alcanza al motor de decisión**, solo a la lectura visual multi-TF.
+> - El artefacto **no existe en MQL5**: el EA lee barras por TF con conteo fijo, sin `request.security`
+>   ⇒ arreglarlo en el CORE sería pagar SHA + re-baseline ×3 + contrato MQL5 por algo que desaparece
+>   en Fase 4.
+> - La ventana real (array de strong con `barIdx` **en el CORE**) arrastra riesgo OOM de S105 y tokens
+>   contra el CE10117, donde el headroom medido es **~0** (100615 vs límite 100256).
+>
+> **Lo que esta decisión NO resuelve (deuda aceptada, explícita):** el 2.º extremo sigue dependiendo de
+> cuánta historia sirva TV en el TF más bajo — una holgura del determinismo de la regla dura #1. Está
+> **acotada**: solo muerde si el 2.º extremo strong cae fuera de la historia servida, y S133 midió que
+> la regla base cumple sin ventana. **Se reevalúa en Fase 3**, con datos de calibración reales en vez de
+> a ojo sobre un símbolo (ADR-002, anti-overfitting).
+>
+> Evidencia: `docs/planes/MEDICION-matriz-chart-tf-S134.md`.
 
-**La VENTANA `pdWindow`** *(historial de correcciones en S133: v1 "no hay parámetro de escala" (**falso**); v2 "obligatoria por el fósil" (**falso: no era esa la razón**); v3 "opcional" (**falso**, ver el aviso de arriba); **v4: obligatoria, por determinismo**)*.
+**La VENTANA `pdWindow`** *(historial de correcciones: S133 v1 "no hay parámetro de escala" (**falso**); v2 "obligatoria por el fósil" (**falso: no era esa la razón**); v3 "opcional"; v4 "obligatoria, por determinismo"; S134 v5 corrección de alcance (el defecto también hita H1); **S135 v6 — RESUELTA: OPCIONAL**, el defecto se acota con la regla de lectura de arriba, no con la ventana)*.
 
 **MEDIDO — la regla base, SIN ventana, ya cumple todo** (EURUSD, S133):
 
@@ -424,7 +426,7 @@ Por cada TF, sobre los strong lows/highs **de su propia escala**, acumulados en 
 |---|---|---|
 | `eqBand` | **45–55%** | ancho de la banda de equilibrium. |
 | rango | `[pdLow, pdHigh]` = **2.º** strong low / **2.º** strong high de la escala del TF | se actualiza **solo** con un nuevo strong high/low (§2.3.1), **no** con pivotes. |
-| `pdWindow` | **desactivada** (toda la historia del TF) | **OPCIONAL y por-TF.** Solo para el fósil en símbolos seculares. **Nunca menor que la ventana que contiene ≥2 strong del lado** (si no, la regla se queda sin candidatos). |
+| `pdWindow` | **desactivada** (toda la historia del TF) | **OPCIONAL y por-TF** *(confirmado S135 — ver la regla de lectura del panel arriba; el defecto chart-TF se acota por operación, no por ventana)*. Solo para el fósil en símbolos seculares. **Nunca menor que la ventana que contiene ≥2 strong del lado** (si no, la regla se queda sin candidatos). |
 
 **Contraejemplo.** Comprar en **premium** (precio en el 80% del rango) porque "hay un OB alcista" es operar contra la localización — el OB en premium tiene mucha menor probabilidad. Premium/Discount es el filtro que evita entradas caras.
 
