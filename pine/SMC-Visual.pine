@@ -2196,10 +2196,6 @@ if barstate.isconfirmed
     f_pdRelatch(cPdR, evStructMajor, high, low)
     chartState.pdLow  := f_pdBottom(cPdR, close, trailing.bottom)
     chartState.pdHigh := f_pdTop(cPdR, close, trailing.top)
-    // pdMid nunca se asignaba aqui (muerto desde el Sprint 1.5, commit 5bc4828): las lecturas
-    // de :2741/:2742 (f_wickNearLevel, Rejection §2.7) recibian el default `na` de :296 => el
-    // nivel EQ nunca participaba en la confluencia de mecha. Mismo idiom que :1748 y :2873.
-    chartState.pdMid  := na(chartState.pdHigh) or na(chartState.pdLow) ? na : (chartState.pdHigh + chartState.pdLow) / 2.0
 
 // --- Order Blocks [T05] ---
 // Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra
