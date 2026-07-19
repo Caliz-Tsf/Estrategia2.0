@@ -1,5 +1,20 @@
 # ADR-022 — `EXTREMES CORE`: un 2.º bloque byte-idéntico para Strategy + Context
 
+> ## 🔴 PREMISA CUESTIONADA POR MEDICIÓN — leer antes de actuar sobre este ADR *(S135, 2026-07-18)*
+>
+> Este ADR se apoya en **"en Pine una función no-llamada SÍ cuenta tokens"** (heredado de ADR-020).
+> En S135 se midió **lo contrario**, tres veces y con el mismo número exacto (107986): las funciones
+> sin call-site **cuestan 0 tokens** — Pine las tree-shakea por completo.
+>
+> **La paradoja abierta es justo este ADR:** si el código muerto cuesta cero, **¿por qué retirar
+> `f_tfExtremes` (139 líneas que el Visual no llamaba) resolvió el `CE10117` en S133?** No se ha
+> re-medido. Hipótesis sin comprobar: que sí tuviera un call-site en Visual, o que la retirada
+> coincidiera con otro cambio.
+>
+> **NO SE REVOCA:** el bloque `EXTREMES CORE` existe, está verificado por `check-core-sync` y
+> funciona. Lo que está en duda es **la explicación de por qué funcionó**, no el hecho.
+> Entregado a Fable: `docs/planes/DOSSIER-FABLE-capacidad-y-codigo-muerto-S135.md` §2.1 y §4.
+
 - **Fecha:** 2026-07-15 (Sesion-133)
 - **Estado:** **ACEPTADA** — ejecutada. Decisión del usuario en S133 entre 4 opciones.
 - **Precisa (no contradice):** **ADR-018** (`f_tfExtremes` sigue siendo lógica compartida y de una sola

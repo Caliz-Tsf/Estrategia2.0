@@ -1,5 +1,22 @@
 # ADR-020 — Dieta de tokens del CORE: sacar funciones de-un-solo-consumidor del bloque byte-idéntico
 
+> ## 🔴 PREMISA CUESTIONADA POR MEDICIÓN — leer antes de actuar sobre este ADR *(S135, 2026-07-18)*
+>
+> Este ADR afirma abajo que **"las funciones no-llamadas SÍ cuentan tokens en Pine"**. En S135 se
+> midió **lo contrario**, tres veces y con el mismo número exacto (107986): quitar 101 líneas de
+> funciones sin call-site → **0 tokens**; añadir 590 líneas de funciones duplicadas sin llamar →
+> **0 tokens**. ⇒ **Pine hace tree-shaking completo de las funciones sin call-site.** Concuerda con
+> lo que S121 ya había medido ("la dieta S120 fue no-op").
+>
+> **NO SE REVOCA ESTE ADR AÚN:** queda sin explicar por qué la dieta pareció funcionar en S120 y por
+> qué el fix de **ADR-022** resolvió el `CE10117`. Está entregado a Fable para auditoría
+> adversarial: `docs/planes/DOSSIER-FABLE-capacidad-y-codigo-muerto-S135.md` §2.1.
+>
+> **Mientras tanto:** no planifiques ahorro de tokens retirando código muerto — **medido, no ahorra
+> nada**. La formulación provisional correcta es *"solo retirar código **que se ejecuta** ahorra"*.
+> La separación de bloques que este ADR introdujo sigue siendo válida por **mantenibilidad**;
+> lo que está en duda es su justificación **por tokens**.
+
 - **Fecha:** 2026-07-13 (Sesion-120)
 - **Estado:** **ACEPTADA** — ejecutada y verificada en vivo (S120). SHA del CORE re-baselined
   `d86bf37aacbd25cf` → **`752b4083a7db419d`** (CORE **1952 → 1866 líneas**).
