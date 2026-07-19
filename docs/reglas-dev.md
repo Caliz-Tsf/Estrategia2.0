@@ -83,6 +83,12 @@ Visual y Strategy siguen el mismo esqueleto; el CORE es idéntico en ambos.
 - Objetivo: cargar 20k barras M5 sin "Calculation takes too long".
 - Loops acotados; nada de recorrer arrays completos en cada vela si se puede mantener estado incremental.
 
+### 1.6b Medición de tokens `[S136 — regla del lastre desplazado]`
+- Los tokens **no se predicen, se miden** (5 predicciones muertas de 5). El número real solo está en `pine_get_console`; `pine_check` NO cuenta tokens y `pine_get_errors` tampoco lo ve.
+- **Lastre desplazado (obligatorio en toda ablación):** los dos builds de un par llevan lastres **distintos** (N y N+5 unidades), de forma que los números esperados difieran en una cantidad conocida (~130-150) **aunque el bloque medido cueste cero**. El bloque se sigue midiendo con `coste = ΔT − Δlastre`.
+- **Por qué:** sin desplazar el lastre, el resultado esperado de "el bloque cuesta 0" (dos lecturas idénticas) es **indistinguible de la firma de la consola rancia**. Un experimento cuyo éxito luce igual que el fallo del instrumento no puede autovalidarse — y las repeticiones no ayudan: son justo lo que el fallo produce gratis.
+- Corolario: **dos lecturas iguales = consola rancia**, detectada en el acto. Además, marcador nuevo por build para confirmar que el apply ocurrió ("Compilado" + "Añadido al gráfico", no solo "guardado").
+
 ### 1.7 Prohibiciones
 - ❌ Hardcodear umbrales en pips fijos → siempre múltiplos de ATR. `[reglas-smc-ict §0]`
 - ❌ Hardcodear EURUSD, sesiones GMT fijas sin DST, o cualquier constante por-símbolo. `[ADR-001, P-25]`
