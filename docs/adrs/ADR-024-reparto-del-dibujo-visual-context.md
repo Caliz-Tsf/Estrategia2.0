@@ -1,8 +1,42 @@
 # ADR-024 — Reparto del dibujo entre Visual y Context: el eje es **heredado vs nativo**, y la unidad de reparto es el **call-site**, no el bloque de dibujo
 
 - **Fecha:** 2026-07-20 (Sesion-139)
-- **Estado:** **PROPUESTA** — diseño. `pine/` NO se toca en esta sesión. Requiere aprobación del
-  usuario + medición por apply real antes de ejecutarse.
+- **Estado:** 🔴 **PREMISA CENTRAL REFUTADA (S139, mismo día) — NO EJECUTAR SIN REDISEÑO.**
+
+> ## 🔴 El "corte limpio" NO existe — el panel también consume la GEOMETRÍA
+>
+> Este ADR afirma como hallazgo central que *"Panel T14 (columnas D1/H1) → **solo los 17 escalares**"*.
+> **Es falso.** Se verificó `:4782-4836` (Bias/BOS/CHoCH/MSS/P-D/EMAs) y se dio la lista por cerrada
+> **sin mirar las filas de arriba y de abajo**. Cinco filas del panel se alimentan del buffer de
+> geometría heredada:
+>
+> | Fila del panel | Consume | Línea |
+> |---|---|---|
+> | `OB cercano` | `f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_OB)` | `:4811` |
+> | `FVG cercano` | `f_bufZoneCell(d1Kind, …)` | `:4817` |
+> | `Pool cercano` | `f_bufNear(d1Kind, …)` | `:4756` |
+> | `Último Sweep` | `f_bufNear(d1Kind, …)` | `:4758` |
+> | `EQ H/L` | `f_bufCountEQ(d1Kind)` | `:4841` |
+>
+> **Comprobado ejecutando el paso 2:** al sustituir las llamadas por `f_m5Light`, `f_computeTFState`
+> queda sin call-site — pero el archivo **no compila**, porque `d1Kind`/`d1Top`/`d1Bot` quedan sin
+> definir en el panel. Revertido (`git checkout`), árbol limpio en `9d41479`.
+>
+> **La evidencia estaba a la vista desde la primera captura de la sesión** (el panel mostraba
+> `OB cercano [1.15726, 1.16221]`, `Pool cercano 1.13246 SSL`, `EQ H/L 4` — cifras que solo pueden
+> salir de la geometría). No se conectó.
+>
+> **Qué sobrevive del ADR:** el eje `heredado vs nativo`, el principio de que la unidad de reparto es
+> el **call-site** (no el bloque de dibujo), y la §Frontera dura. **Qué cae:** que exista un corte
+> barato que deje el panel intacto.
+>
+> **Opciones para el rediseño** (ninguna medida todavía):
+> 1. Mover al Context también esas 5 filas ⇒ el panel queda partido en dos indicadores. Choca con
+>    ADR-023 y con la identidad del Visual.
+> 2. Aceptar perder esas 5 filas en las columnas D1/H1 (mostrarían "—"). Pérdida funcional real.
+> 3. **Reducir el número de RANURAS del transporte** (hoy 12: `k0..k11` ⇒ 89 identificadores por
+>    llamada × 2 llamadas). Es un **dial**, no cirugía: no cambia arquitectura, conserva panel y mapa,
+>    y recorta muchos identificadores. **No medido — candidato más barato a probar primero.**
 - **Precisa (no contradice):** **ADR-017** (el Context ya es el consumidor de lo heredado — esto lo
   lleva a su conclusión), **ADR-018/ADR-022** (el CORE sigue byte-idéntico ×3), **ADR-023** (el panel
   se lee desde el TF más bajo — el panel **no se mueve**).
