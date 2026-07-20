@@ -2196,6 +2196,7 @@ if barstate.isconfirmed
     f_pdRelatch(cPdR, evStructMajor, high, low)
     chartState.pdLow  := f_pdBottom(cPdR, close, trailing.bottom)
     chartState.pdHigh := f_pdTop(cPdR, close, trailing.top)
+    chartState.pdMid  := (chartState.pdHigh + chartState.pdLow) / 2.0
 
 // --- Order Blocks [T05] ---
 // Buffers ROLLING de barras (high/low/barIdx/time/ATR200) poblados cada barra
@@ -4464,7 +4465,7 @@ if i_showFVG and barstate.islast
 // presentacion -> vive fuera del LIBRARY CORE byte-identico (no rompe check-core-sync).
 f_drawMTFState(SMC_TFState s, string tf, color col, array<line> lines, array<label> labels) =>
     if not na(s.pdHigh) and not na(s.pdLow) and s.pdHigh > s.pdLow
-        float mid = na(s.pdMid) ? (s.pdHigh + s.pdLow) / 2.0 : s.pdMid
+        float mid = s.pdMid
         array.push(lines, line.new(bar_index - 1, s.pdHigh, bar_index, s.pdHigh, xloc = xloc.bar_index, color = color.new(col, 35), style = line.style_dotted, width = 1, extend = extend.left))
         array.push(lines, line.new(bar_index - 1, mid,      bar_index, mid,      xloc = xloc.bar_index, color = color.new(col, 60), style = line.style_dotted, width = 1, extend = extend.left))
         array.push(lines, line.new(bar_index - 1, s.pdLow,  bar_index, s.pdLow,  xloc = xloc.bar_index, color = color.new(col, 35), style = line.style_dotted, width = 1, extend = extend.left))
