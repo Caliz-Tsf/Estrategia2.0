@@ -102,8 +102,51 @@ Visual restaurado a HEAD y **verificado en pantalla**: dibujo completo, panel de
 (D1 Discount 34% · H1 Discount 33% · M5 Premium 56%), sin error rojo, 2 slots
 (Context + Visual). Chart en 1D ⇒ por ADR-023 solo la columna D1 es de lectura válida.
 
+## BLOQUE FINAL — la deuda de `pdMid` SE CIERRA (commit `28136e6`)
+
+Tras el cierre del hilo de tokens, el usuario preguntó qué hacer con `pdMid`. Trazando el
+código apareció una vía que nadie había mirado: **financiar el fix retirando una rama
+inalcanzable del mismo concepto.**
+
+`pine/SMC-Visual.pine:4467`, dentro de `f_drawMTFState`:
+```pine
+float mid = na(s.pdMid) ? (s.pdHigh + s.pdLow) / 2.0 : s.pdMid   →   float mid = s.pdMid
+```
+**Es inalcanzable, verificado por trazado completo:** `f_drawMTFState` solo se llama con
+`d1State`/`h1State` (`:4578`/`:4581`), **nunca con `chartState`**; ambos vienen de
+`f_computeTFState`, cuyo `:1748` pone `pdMid = na` **solo si** `pdHigh` o `pdLow` son `na`;
+y el `if` que envuelve la línea ya exige que ambos sean no-`na` ⇒ `na(s.pdMid)` siempre falso.
+
+Es **exactamente** el *"código que se EJECUTA"* que hacía falta liberar.
+
+**Cambio (2 líneas, ambas fuera del CORE 151..~1927 ⇒ SHA intacto):**
+- `:2199` `chartState.pdMid := (chartState.pdHigh + chartState.pdLow) / 2.0` (sin guard — la
+  aritmética de Pine ya propaga `na`)
+- `:4467` la rama muerta fuera
+
+**MEDIDO CON APPLY REAL:** `1:44:57` compilado **sin CE10117** ⇒ entra bajo el techo;
+`1:49:27` `"Compilado." + "Añadido al gráfico."`. **P1 (pre-registrada) VERDE: el swap se
+autofinancia.**
+
+**VERIFICADO EN VIVO (chart M5, ADR-023):** **P3 VERDE** — `data_get_pine_lines` devuelve
+**1.51 / 1.23 / 0.95**, el P/D de D1 documentado en S134 (Premium 1.51441 · **EQ 1.23400** ·
+Discount 0.95360). **El 1.23 ES la línea `mid`**: si el cambio la hubiera roto sería `na` y
+no existiría. Panel de 3 columnas coherente con la matriz de S134 leído desde M5
+(D1 Discount 34% · H1 Premium 72% · M5 Premium 74%). Sin error rojo, 2 slots.
+
+**Efecto funcional a corto plazo: nulo** (S135 midió 0 de 1235 rejections alteradas). El
+valor es de **doctrina y paridad**: evita llegar a los golden tests de Fase 4 con `pdMid=na`
+y construir el EA *bug-compatible*. **El vencimiento que fijó Fable queda CUMPLIDO.**
+
+⚠️ **Nota de método:** no incluí un marcador nuevo por build en el swap, y durante un rato
+no pude distinguir qué build estaba vivo en el chart (el dibujo es idéntico por diseño).
+Se resolvió quitando el estudio y re-añadiéndolo para forzar un `"Añadido al gráfico"`
+inequívoco. **La regla del marcador aplica también cuando el cambio es invisible — sobre
+todo entonces.**
+
 ## Siguiente
 - **El hilo del presupuesto de tokens queda CERRADO.** No quedan mediciones pendientes en él.
+- **La deuda de `pdMid` queda CERRADA** (`28136e6`).
 - (1) Matriz concepto × TF × {nativo, heredado} — es lo que bloquea la F1-GATE.
 - (2) ADR del reparto del dibujo (eje TF/rol; nombrar sin disfraz la restricción de 2 slots
   del plan gratuito).
