@@ -78,10 +78,35 @@ ahorraría casi nada: `f_computeTFState` seguiría ejecutándose para alimentar 
    el panel no se mueve ni cambia de forma.
 4. **El `LIBRARY CORE` no se toca.** `check-core-sync` ×3 debe seguir dando el SHA `9559a0d7fe58b213`.
    Si el SHA cambia, la ejecución está mal hecha y se revierte.
-5. **La fusión de dibujo heredado vive en el Context.** El Context ya dibuja extremos HTF
-   (`:1989-2138`) con reglas de solape MTF declaradas (colapso >70% en cajas, 0.3·ATR en líneas). El
-   mapa MTF entrante **debe pasar por esas mismas reglas**, no crear un segundo sistema de solape.
-   Esto es trabajo de diseño de la sesión de ejecución, no de este ADR.
+5. **La fusión de dibujo heredado NO se hace aquí.** El mapa MTF se traslada al Context **tal cual**,
+   sin rediseñar sus reglas de solape. Ver §Frontera dura.
+
+---
+
+## Frontera dura — este ADR MUEVE maquinaria, no DECIDE la herencia
+
+*(Instrucción del usuario, S139. Restringe el alcance de este ADR.)*
+
+**La herencia se decide después de que todos los conceptos estén verificados en su TF propio y
+nativo.** Recién entonces se decide *cuáles* se heredan y *por qué*, y luego se revisa cada uno **en
+cada TF al que se herede**. ⇒ La matriz `concepto × TF × nativo` es el **prerrequisito**, no un
+trabajo paralelo.
+
+Consecuencia sobre este ADR — y es lo que lo salva, no lo que lo estorba:
+
+- Mover la maquinaria de herencia **fuera del Visual** es exactamente lo que libera espacio para
+  verificar los nativos. El reparto **sirve a** ese orden en vez de adelantarse a él.
+- Pero el traslado debe ser **verbatim**: mismas reglas, mismo dibujo, mismo comportamiento. **No se
+  fija qué se hereda ni cómo se resuelve el solape heredado.** Eso queda para después de los nativos.
+- ⇒ **La ejecución para en el paso 4.** Los pasos 5-6 de la versión inicial (fusionar con las reglas
+  de solape del Context) quedan **fuera de este ADR**.
+
+**Y el solape que de verdad duele no es el que este ADR tocaría.** No es zona-contra-zona del mismo
+rango (colapso >70%, 0.3·ATR): es el **anidamiento** — se hereda p. ej. un **OB de H1** y **dentro**
+caen otros OB/FVG más **sus etiquetas**. **La familia de etiquetas es la que más ruido hace.** El
+criterio actual mide pares comparables y **no ve el caso contenedor ⊃ contenido**. Es un problema
+propio, y se ataca cuando toque la curación de lo heredado — no ahora, y no como un ajuste de
+porcentaje.
 
 ### Predicción pre-registrada (escribir ANTES de medir, norma del proyecto)
 
@@ -161,8 +186,10 @@ Orden obligatorio — cada paso con apply real antes del siguiente:
    aparecer P1 (el tree-shaking de `f_computeTFState`), porque el mapa MTF queda sin datos y sin
    call-site útil. *Esta es la medición que decide el ADR.*
 3. Verificar P2 (panel 34/33/56) antes de mover nada al Context.
-4. Trasladar transporte + dibujo al Context, fusionar con sus reglas de solape → apply real, P3.
-5. `scripts/check-core-sync.ps1` ×3 (SHA `9559a0d7fe58b213` intacto) → commit.
+4. Trasladar transporte + dibujo al Context **verbatim** (sin fusionar reglas de solape, §Frontera
+   dura) → apply real, P3.
+5. `scripts/check-core-sync.ps1` ×3 (SHA `9559a0d7fe58b213` intacto) → commit. **Aquí termina el ADR.**
+   La curación de lo heredado (anidamiento, etiquetas) es trabajo posterior a la matriz de nativos.
 
 Si el paso 2 no produce la señal de P1, **se detiene y se revierte**: el ADR se apoya en esa premisa
 y no se ajusta el criterio para salvarlo (regla dura #8).
