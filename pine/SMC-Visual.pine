@@ -3344,43 +3344,17 @@ if barstate.islast and array.size(SMC_zones) > 0
 // cuya ancla no es la vela de creación (FVG = vela media = z.barTime - barMs; IPR = ventana = barTime - N*barMs).
 int barMs = timeframe.in_seconds(timeframe.period) * 1000
 
-// === §6.5 · PRESUPUESTO GLOBAL DE TINTA (desalojo determinista) [Eje2 · Paso 6 · S090] ================
-// El budget de labels es GLOBAL por modo (Operación 25 / Estudio 60 / Todo 150). La herencia MTF (§7.1)
-// y las anclas (§2.3) son MANDATORIAS y NUNCA se desalojan; el excedente se corta de las familias L3
-// nativas discrecionales (EQHL/pools/sweep/flip/gaps) por orden inverso de frescura (las mas viejas
-// primero). En M5 se heredan DOS capas MTF (D1+H1) -> el chart limpio se logra soltando el ruido nativo
-// del TF activo, NO la herencia. Sin arrays nuevos (contador int + dedup string) -> no dispara RE10045.
-// Hallazgo S090: el budget ≤25 se cumplia en H1/D1 por aritmetica del top-N, pero M5 (doble capa MTF)
-// llegaba a 35 labels sin este desalojo (§6.5 estaba marcado [impl] sin implementar).
-// f_mtfLblYield: cuenta los labels que EMITIRA la capa MTF (mirror del label-yield de f_drawMTFZones:
-// labelKinds distintos por (kind,dir)). Sobre-cuenta los BOS/CHoCH que luego se fusionan (no dibujan
-// label) -> reserva CONSERVADORA (corta un pelo mas de nativo = seguro para el budget).
-// curate (M5 doble-MTF, §7 curado por importancia): la capa MTF suelta EQH/EQL y sweeps heredados
-// -> el yield solo cuenta pool/BOS/CHoCH (mirror exacto del skip en f_drawMTFZones), asi eventCap no
-// sobre-reserva. En H1 (curate=false) cuenta todo (herencia D1 completa).
-f_mtfLblYield(array<int> kinds, array<int> dirs, array<float> tops, bool curate) =>
-    string seen = ""
-    int n = 0
-    if array.size(kinds) > 0
-        for i = 0 to array.size(kinds) - 1
-            int k = array.get(kinds, i)
-            float tp = array.get(tops, i)
-            int dr = array.get(dirs, i)
-            bool labelKind = curate ? (k == KIND_POOL or k == KIND_BOS or k == KIND_CHOCH) : (k == KIND_EQH or k == KIND_EQL or k == KIND_POOL or k == KIND_SWEEP or k == KIND_BOS or k == KIND_CHOCH)
-            string key = "|" + str.tostring(k) + "_" + str.tostring(dr) + "|"
-            if labelKind and not na(tp) and not str.contains(seen, key)
-                seen := seen + key
-                n += 1
-    n
-// Reserva MTF + presupuesto de eventos nativos. mtfShow* se recomputa aqui (los flags viven mas abajo).
-bool budMtfD1 = i_showD1 and timeframe.in_seconds() < timeframe.in_seconds("D")
-bool budMtfH1 = i_showH1 and timeframe.in_seconds() < timeframe.in_seconds("60")
-int budgetLbl = i_densidad == "Operación" ? 25 : i_densidad == "Estudio" ? 60 : 150
-int FRAME_RESERVE = 8                                                                                       // P/D nativo(3)+grid(2)+estructura ancla(~3); default congelado §11.3
+// === §6.5 · PRESUPUESTO GLOBAL DE TINTA — RETIRADO [S139] ============================================
+// El mecanismo de cobro se eliminó en S125; su ANDAMIAJE siguió vivo hasta S139: budgetLbl / FRAME_RESERVE
+// / budMtfD1 / budMtfH1 / mtfReserve se calculaban EN CADA VELA sin un solo consumidor, y mtfReserve era el
+// único call-site de f_mtfLblYield (loop + str.contains + str.tostring). Código muerto que SÍ SE EJECUTA ->
+// es de lo único que libera tokens (S135: el no-llamado ya cuesta 0 por tree-shaking). Retirado entero.
+// Las CAJAS nunca estuvieron bajo presupuesto; quien acota hoy el dibujo es el band-pick (§7.1) y el
+// anti-solape por ranura Y (f_ySlot). SOBREVIVE mtfCurate: no es del presupuesto — alimenta el curado §7
+// de f_drawMTFZones (:4580/:4583).
 // §7 curado M5: por debajo de H1 (=M5) en Operación se hereda solo lo IMPORTANTE (P/D + pool objetivo +
 // BOS/CHoCH); EQH/EQL y sweeps HTF se sueltan. H1 conserva la herencia D1 completa (timeframe==H1 -> false).
 bool mtfCurate = i_densidad == "Operación" and timeframe.in_seconds() < timeframe.in_seconds("60")
-int mtfReserve = (budMtfD1 ? f_mtfLblYield(d1Kind, d1Dir, d1Top, mtfCurate) + 2 : 0) + (budMtfH1 ? f_mtfLblYield(h1Kind, h1Dir, h1Top, mtfCurate) + 2 : 0)
 
 // === L0 · FONDO TEMPORAL [Eje2 · Paso 5 · ESQUELETO-FABLE §3/§F9/§6.3] ================================
 // Contexto de TIEMPO (Kill Zones, macros, RTH/ETH). Regla "un solo fondo de area" (§6.3): la KZ se rinde
@@ -4179,7 +4153,12 @@ if i_showOB and barstate.islast
     array.clear(SMC_obLabels)
     string obSeenY = ""
     if array.size(SMC_zones) > 0
-        for i = 0 to array.size(SMC_zones) - 1
+        // [S139] Recorrido de NUEVA a VIEJA (antes 0 -> n-1). f_pushZoneV hace array.push => el indice 0 es
+        // la zona MAS VIEJA; con el orden ascendente la ranura Y la reclamaba el OB de 2015 y el OB reciente
+        // cedia el nombre, o sea el anti-solape S120 operaba al REVES de su intencion. Contrapartida a vigilar
+        // cuando se reenciendan familias: Pine desaloja los labels CREADOS PRIMERO al tope de 500, y ahora los
+        // recientes se crean primero (con solo OB son 23 labels, lejos del tope; ver nota gemela en swings).
+        for i = array.size(SMC_zones) - 1 to 0
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_OB and z.state != ZS_INVALID
                 bool obAnchor = i == anchorHiIdx or i == anchorLoIdx
