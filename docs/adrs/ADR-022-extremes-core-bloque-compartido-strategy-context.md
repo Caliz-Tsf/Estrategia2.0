@@ -104,3 +104,29 @@ exactamente el fallo que la regla dura #2 existe para prevenir:
 | **Revertir ADR-021** | Tirar una regla que pasó su gate (anida, rota, clava el suelo de H1 a 0.3 pips) por un problema de presupuesto **resuelto y medido**. |
 | **Reducir comentarios** | **No cuentan tokens** en Pine (ADR-020) ⇒ cero efecto. |
 | **Refactorizar (UDT/helpers)** | **Medido: 0 tokens.** La forma no cambia el coste (S125, y esta sesión otra vez). |
+
+---
+
+## ANEXO S136 — resuelto el pendiente 1, y la premisa de tokens era falsa
+
+**Pendiente 1 de esta ADR ("el número de tokens del Visual final en vivo") — RESUELTO y medido:**
+
+- `Visual(HEAD) + lastre(300)` = **107986** (referencia S135, medida ×3)
+- `Visual(HEAD) + lastre(300) + fix-slim de pdMid` = **108031** (S136, 00:45:09)
+- ⇒ `coste(fix-slim)` = **45 tokens** ⇒ **`base_V` = 100217** y **headroom real del Visual = 39
+  tokens** (límite 100256).
+
+Legitimidad de la resta verificada antes de medir: `git log 42207ea..HEAD -- pine/SMC-Visual.pine`
+**vacío** ⇒ el Visual no cambió desde la medición de referencia.
+
+⇒ El *"el fix de `pdMid` falla por 6"* era **numéricamente correcto pero por la razón equivocada**
+(lo había señalado la auditoría de Fable, §3): no es que el fix cueste 6 — **cuesta 45 y solo hay 39
+libres**. Para que quepa hay que liberar **≥6 tokens de código que se EJECUTA**.
+
+**La premisa de tokens de esta ADR era falsa.** La alternativa descartada *"el Visual seguiría
+cargando 139 líneas muertas ⇒ el techo vuelve"* asumía que el muerto costaba ~700 tokens. **Medido
+en S136: costaba CERO** (ver ANEXO S136 de ADR-020, `ΔT = 142` sobre `aee69a7` vs `f91a2bd`).
+
+**NO se revoca la ADR.** El bloque `EXTREMES CORE` se queda: **dos copias verificadas son mejores
+que tres aunque los tokens no lo exijan**. Lo que cae es la justificación por presupuesto, no la
+arquitectura.

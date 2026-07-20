@@ -75,3 +75,38 @@ vive local en ese consumidor. El CORE es para lógica que ≥2 consumidores comp
 - **Reducir solo comentarios:** los comentarios **no cuentan tokens** en Pine → cero efecto.
 - **Romper la regla dura #2** (CORE distinto por consumidor): rompería single-source-of-truth y la
   traducción MQL5. La dieta mantiene la regla; solo mueve funciones de-un-consumidor a su consumidor.
+
+---
+
+## ANEXO S136 — la justificación por TOKENS cae; la decisión SE MANTIENE
+
+**Medido en S136 sobre los artefactos exactos del episodio** (`aee69a7` vs `f91a2bd`, que difieren
+en exactamente las 139 líneas, verificado +139/−0), con la **regla del lastre desplazado**:
+
+| Build | Lastre | Tokens | Timestamp |
+|---|---|---|---|
+| A = `aee69a7:pine/SMC-Visual.pine` (CON el muerto) | 305 | **108071** | 00:32:43 |
+| B = `f91a2bd:pine/SMC-Visual.pine` (SIN el muerto) | 300 | **107929** | 00:35:43 |
+| | | **ΔT = 142** | |
+
+Predicciones **pre-registradas** (`docs/planes/RESPUESTA-FABLE-S135.md` §2.3): 130-150 si el muerto
+cuesta cero; 830-850 si costaba. Salió **142** ⇒ rama 1, con la rama 2 excluida por factor ~6. Los
+142 son las 5 unidades extra de lastre (~28 tokens/unidad).
+
+⇒ **Las 139 líneas muertas costaban CERO tokens. Pine tree-shakea lo que no se llama.** El build
+"100952" que motivó esta dieta fue **fantasma** (lectura de consola contaminada — mismo patrón que
+S120 y S133). El "headroom recuperado ~2-3k tokens" que declara la sección de consecuencias
+**no ocurrió**.
+
+**La regla provisional queda sustituida por:** *solo retirar código que se **EJECUTA** ahorra
+tokens.*
+
+**NO se revoca la ADR.** La decisión arquitectónica (funciones de-un-consumidor viven en su
+consumidor) se sostiene por **mantenibilidad y claridad de propiedad**, que nunca dependieron del
+conteo de tokens.
+
+**Matiz añadido por el usuario (S136), no medido todavía:** "cero tokens" **no es** "cero coste" —
+el compilador igual **parsea** lo que luego tree-shakea, así que el muerto pesa en
+compilación/carga (no en runtime). Los tiempos observados en S136 fueron planos (~70s entre 4982 y
+5435 líneas) pero el rango es demasiado estrecho para concluir. Pendiente: ablación grande
+cronometrada.
