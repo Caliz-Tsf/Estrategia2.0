@@ -89,6 +89,13 @@ Visual y Strategy siguen el mismo esqueleto; el CORE es idéntico en ambos.
 - **Por qué:** sin desplazar el lastre, el resultado esperado de "el bloque cuesta 0" (dos lecturas idénticas) es **indistinguible de la firma de la consola rancia**. Un experimento cuyo éxito luce igual que el fallo del instrumento no puede autovalidarse — y las repeticiones no ayudan: son justo lo que el fallo produce gratis.
 - Corolario: **dos lecturas iguales = consola rancia**, detectada en el acto. Además, marcador nuevo por build para confirmar que el apply ocurrió ("Compilado" + "Añadido al gráfico", no solo "guardado").
 
+### 1.6c El lastre mide RESTAS, no ABSOLUTOS `[S138 — medido]`
+- ✅ **Válido:** `coste(bloque) = T(con bloque) − T(sin bloque)`, con **el mismo lastre en ambos**. Es la medición más limpia disponible.
+- ❌ **INVÁLIDO: extrapolar la recta de lastre a `N=0`** para obtener el tamaño absoluto de un script. Medido en S138: el ajuste de 3 puntos (lastre 300/400/600 sobre el Visual) da `u=28.83 tok/unidad`, `F=183 tok/chunk`, intercepto **98971**; el ajuste pasa **exacto** por sus tres puntos y aun así predice `Visual+fix-slim = 99016` frente a los **100262 medidos directos** ⇒ **1246 tokens de error**.
+- **Por qué importa:** la recta puede ajustar perfectamente su rango de calibración y seguir siendo falsa fuera de él. Un ajuste exacto con tantas incógnitas como puntos **no valida nada** (no hay residuo).
+- **Trampa asociada:** dos extrapolaciones al origen de la misma recta coinciden porque **comparten el defecto**, no porque se confirmen. En S138 el 98971 y el 99160 de S135 se presentaron como "vías independientes que coinciden" — eran el mismo error dos veces.
+- **Cómo medir un absoluto sin extrapolar:** añadir carga REAL por bloques hasta que aparezca el CE10117. Da una cota inferior directa del hueco, sin modelo. ⚠️ Pendiente de aplicar a `Context ≈ 15.100 tokens / ~85.000 libres` (S135), que es un intercepto extrapolado desde 3000-3800 unidades y **sostiene el plan del reparto del dibujo**.
+
 ### 1.7 Prohibiciones
 - ❌ Hardcodear umbrales en pips fijos → siempre múltiplos de ATR. `[reglas-smc-ict §0]`
 - ❌ Hardcodear EURUSD, sesiones GMT fijas sin DST, o cualquier constante por-símbolo. `[ADR-001, P-25]`

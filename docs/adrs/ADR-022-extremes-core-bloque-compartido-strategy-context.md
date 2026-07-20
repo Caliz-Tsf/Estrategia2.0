@@ -113,8 +113,8 @@ exactamente el fallo que la regla dura #2 existe para prevenir:
 
 - `Visual(HEAD) + lastre(300)` = **107986** (referencia S135, medida ×3)
 - `Visual(HEAD) + lastre(300) + fix-slim de pdMid` = **108031** (S136, 00:45:09)
-- ⇒ `coste(fix-slim)` = **45 tokens** ⇒ **`base_V` = 100217** y **headroom real del Visual = 39
-  tokens** (límite 100256).
+- ⇒ `coste(fix-slim)` = **45 tokens** ⇒ ~~`base_V` = 100217 y headroom real del Visual = 39
+  tokens~~ **← ver CORRECCIÓN S138 al final de este anexo: `base_V` NO es derivable así.**
 
 Legitimidad de la resta verificada antes de medir: `git log 42207ea..HEAD -- pine/SMC-Visual.pine`
 **vacío** ⇒ el Visual no cambió desde la medición de referencia.
@@ -130,3 +130,40 @@ en S136: costaba CERO** (ver ANEXO S136 de ADR-020, `ΔT = 142` sobre `aee69a7` 
 **NO se revoca la ADR.** El bloque `EXTREMES CORE` se queda: **dos copias verificadas son mejores
 que tres aunque los tokens no lo exijan**. Lo que cae es la justificación por presupuesto, no la
 arquitectura.
+
+---
+
+## CORRECCIÓN S138 — `base_V = 100217` / `headroom = 39` NO están medidos
+
+El anexo de arriba deriva `base_V` restando el `coste(fix-slim)` a los **100262** que S135 midió
+para `Visual + fix-slim` sin lastre. S138 puso a prueba esa aritmética por la vía independiente
+(regresión local del Visual con lastre 300/400/600) y el resultado **no cierra**:
+
+| | |
+|---|---|
+| Intercepto de la recta de lastre | 98971 |
+| Predicción `Visual + fix-slim` | 98971 + 45 = 99016 |
+| **Medido directo y fresco (S138, 1:05:08)** | **100262** |
+| Error de la extrapolación | **1246 tokens** |
+
+**El 100262 se reprodujo EXACTO** en sesión, build y timestamp distintos ⇒ no es una lectura
+fantasma, y la hipótesis de contaminación (que S138 llegó a dar por buena durante un rato) queda
+descartada para este número.
+
+**Lo que falla es el instrumento, no el dato:** la recta de lastre ajusta *exacto* sus tres puntos
+y aun así extrapola a lastre cero con 1246 tokens de error ⇒ **el lastre mide restas, no absolutos**
+(regla nueva en `docs/reglas-dev.md` §1.6c). Como `base_V` nunca se ha medido de forma directa —
+por debajo del techo TradingView no da número — **`base_V` y `headroom` siguen siendo desconocidos**.
+
+**Lo que SÍ está medido y no depende de `base_V`:**
+- `coste(fix-slim)` = 45 tokens (resta con lastre igual, la medición más limpia de la campaña).
+- `Visual + fix-slim` = **100262 > 100256** ⇒ **el fix de `pdMid` NO CABE, por 6 tokens.** Medido
+  directo, dos veces, en dos sesiones independientes.
+- La consecuencia accionable del anexo se mantiene intacta: **hay que liberar ≥6 tokens de código
+  que se EJECUTA.**
+
+⚠️ **Arrastre a revisar antes de usarlo:** el número `Context ≈ 15.100 tokens / ~85.000 libres`
+(S135), que sostiene el plan del **reparto del dibujo**, es un intercepto extrapolado de la misma
+forma —calibrado en 3000-3800 unidades y llevado a cero— y por lo medido aquí **no es de fiar**.
+Debe re-medirse añadiendo dibujo real por bloques hasta ver el CE10117 (cota inferior directa, sin
+modelo). Detalle: `docs/planes/MEDICION-base-v-local-S138.md`.
