@@ -155,15 +155,33 @@ y aun así extrapola a lastre cero con 1246 tokens de error ⇒ **el lastre mide
 (regla nueva en `docs/reglas-dev.md` §1.6c). Como `base_V` nunca se ha medido de forma directa —
 por debajo del techo TradingView no da número — **`base_V` y `headroom` siguen siendo desconocidos**.
 
-**Lo que SÍ está medido y no depende de `base_V`:**
-- `coste(fix-slim)` = 45 tokens (resta con lastre igual, la medición más limpia de la campaña).
-- `Visual + fix-slim` = **100262 > 100256** ⇒ **el fix de `pdMid` NO CABE, por 6 tokens.** Medido
-  directo, dos veces, en dos sesiones independientes.
-- La consecuencia accionable del anexo se mantiene intacta: **hay que liberar ≥6 tokens de código
-  que se EJECUTA.**
+**El conteo tampoco es aditivo** (medido después): el mismo `fix-slim` cuesta **45** sobre
+`lastre(300)` y **27** sobre `lastre(400)` ⇒ la resta con lastre igual arrastra ~18 tokens de
+dependencia del contexto. Por eso `base_V` no se puede fijar en un valor exacto.
 
-⚠️ **Arrastre a revisar antes de usarlo:** el número `Context ≈ 15.100 tokens / ~85.000 libres`
-(S135), que sostiene el plan del **reparto del dibujo**, es un intercepto extrapolado de la misma
-forma —calibrado en 3000-3800 unidades y llevado a cero— y por lo medido aquí **no es de fiar**.
-Debe re-medirse añadiendo dibujo real por bloques hasta ver el CE10117 (cota inferior directa, sin
-modelo). Detalle: `docs/planes/MEDICION-base-v-local-S138.md`.
+**CIERRE — lo que queda establecido, sin modelo:**
+
+```
+Visual(HEAD) aplica             ⇒ base_V ≤ 100256
+Visual + fix-slim = 100262      ⇒ base_V = 100262 − coste(fix)
+coste(fix) ∈ [27, 45] medido    ⇒ base_V ∈ [100217, 100235]
+                                ⇒ headroom ∈ [21, 39] tokens
+```
+
+⇒ **El headroom del Visual es de DOS CIFRAS.** El `39` del anexo S136 es el **extremo superior
+del bracket**, no un error: su conclusión práctica era correcta y se mantiene. Lo que se corrige
+es presentarlo como un valor exacto medido. Y **la consecuencia accionable no cambia: hay que
+liberar ≥6 tokens de código que se EJECUTA**; `Visual + fix-slim` = 100262 > 100256 ⇒ el fix de
+`pdMid` **no cabe, por 6 tokens** (medido directo, dos veces, en dos sesiones).
+
+**Precisión del instrumento, ya calibrada:** error de intercepto ~1246 tokens; dependencia de
+contexto en las restas ~18 tokens. ⇒ **el lastre sirve para señales >100 tokens; por debajo de
+eso, y para cualquier valor absoluto, no.** Los hallazgos grandes de la campaña sobreviven
+holgados (código muerto = 0 vs 700 predichos; `ΔT`=142 vs 830 del par histórico).
+
+**Sobre `Context ≈ 85.000 tokens libres` (S135):** es una extrapolación del mismo tipo, pero el
+error del intercepto (~1,2k) es el **1,5%** de 85.000 — fatal para distinguir "39 vs 1285",
+irrelevante aquí. Se mantiene como **~83.000 ± 3.000**, suficiente para sostener el plan del
+reparto del dibujo, y se confirma solo al ejecutarlo (el compilador dice sí o no).
+
+Detalle y predicciones pre-registradas: `docs/planes/MEDICION-base-v-local-S138.md`.

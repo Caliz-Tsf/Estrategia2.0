@@ -205,7 +205,64 @@ del propio aparato de lastre absorbido en el intercepto), el resultado empírico
   consecuencia accionable — *"para meter el fix hay que liberar ≥6 tokens de código que se
   EJECUTA"* — está **confirmada por medición directa** y no depende del valor de `base_V`.
 
-## Estado de la deuda de `pdMid`
+## EXPERIMENTO 5 — ¿es aditivo el coste del fix? NO. Y eso cierra el punto
 
-Sigue abierta y sigue sin caber, por 6 tokens. Vencimiento sin cambios: antes de capturar
-los golden tests de Fase 4 (`RESPUESTA-FABLE-S135.md` §5).
+Se puso a prueba el único supuesto que quedaba en pie: que `coste(fix-slim)` sea el mismo
+con lastre y sin él (es lo que permitiría `base_V = 100262 − 45`).
+
+| Build | Tokens | Δ del fix |
+|---|---|---|
+| `Visual + lastre(300)` | 107986 | — |
+| `Visual + lastre(300) + fix-slim` | 108031 | **45** |
+| `Visual + lastre(400)` | 110869 | — |
+| `Visual + lastre(400) + fix-slim` | **110896** (1:16:41) | **27** |
+
+Predicción escrita antes: 110914 (Δ=45). **FALSA.**
+
+⇒ **El MISMO fix mide 45 o 27 según el build en que se mida. El conteo NO es aditivo.**
+La resta con lastre igual —la operación que dábamos por limpia— tiene una dependencia del
+contexto de **~18 tokens**. No invalida la técnica, la **acota**.
+
+## CIERRE DEL PUNTO — lo que queda establecido
+
+**1. Bracket de `base_V`, sin modelo ninguno:**
+
+```
+Visual(HEAD) aplica              ⇒ base_V ≤ 100256
+Visual + fix-slim = 100262       ⇒ base_V = 100262 − coste(fix)
+coste(fix) ∈ [27, 45] (medido)   ⇒ base_V ∈ [100217, 100235]
+                                 ⇒ headroom ∈ [21, 39] tokens
+```
+
+**El headroom del Visual es de DOS CIFRAS.** El `39` de S137 es el extremo superior del
+bracket, no un error: su conclusión práctica era correcta. Mi `1285` de esta sesión queda
+refutado por dos vías independientes.
+
+**2. La deuda de `pdMid` sigue abierta y sigue sin caber**, por 6 tokens. Vencimiento sin
+cambios: antes de capturar los golden tests de Fase 4 (`RESPUESTA-FABLE-S135.md` §5).
+Sigue haciendo falta liberar **≥6 tokens de código que se EJECUTA**.
+
+**3. Precisión del instrumento, calibrada:** el lastre tiene un error de intercepto de
+~1.246 tokens y una dependencia de contexto de ~18 tokens en las restas.
+
+**Esto NO toca los hallazgos grandes de la campaña** — están todos a un orden de magnitud
+del ruido:
+
+| Hallazgo | Señal | Ruido | ¿Sobrevive? |
+|---|---|---|---|
+| Código muerto = 0 tokens (S135) | 0 vs 700 predichos | ±18 | ✅ |
+| Par histórico ADR-022 (S137) | ΔT=142 vs 830 | ±18 | ✅ |
+| `headroom = 39` (S137) | 39 | ±18 | ⚠️ pasa a `[21,39]` |
+| `base_V` por extrapolación (S138) | 1285 vs 39 | ±1246 | ❌ refutado |
+
+**Regla operativa:** el lastre sirve para señales **>100 tokens**. Por debajo de eso, y para
+cualquier valor absoluto, no.
+
+**4. Sobre `Context ≈ 85.000 tokens libres` — MATIZ IMPORTANTE, no queda invalidado.**
+Es una extrapolación del mismo tipo, sí, pero el error medido del intercepto (~1.2k) es
+**el 1,5% de 85.000**. La extrapolación es fatal cuando la pregunta es *"¿39 o 1285?"*
+—el error es del mismo orden que la respuesta— e **irrelevante** cuando es *"¿tiene Context
+unas 80-85k libres?"*. Se mantiene como **~83.000 ± 3.000**, suficiente para sostener la
+decisión del reparto del dibujo, y se confirmará por la vía model-free natural: al ejecutar
+el reparto, el propio compilador dice sí o no. **No hace falta una sesión de medición extra
+para Context.**
