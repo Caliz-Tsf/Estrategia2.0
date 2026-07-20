@@ -147,9 +147,23 @@ def lastre(n_unidades):
     return ls
 
 
-MODOS = ("base", "sin-farthest", "con-copia36", "context")
+MODOS = ("base", "sin-farthest", "con-copia36", "context", "hist")
 modo = sys.argv[1] if len(sys.argv) > 1 else ""
 n_lastre = int(sys.argv[2]) if len(sys.argv) > 2 else 300
+
+# [S136] modo `hist`: mide un artefacto HISTORICO arbitrario (argv[3] = ruta a un blob de git).
+# Existe para el experimento decisivo de RESPUESTA-FABLE-S135 §2.3: aplicar
+#   A = aee69a7:SMC-Visual.pine (CON f_tfExtremes) + lastre(305)
+#   B = f91a2bd:SMC-Visual.pine (SIN f_tfExtremes) + lastre(300)
+# y resolver si el muerto costaba tokens en los artefactos EXACTOS del episodio ADR-022.
+# LASTRES DISTINTOS A PROPOSITO (regla del lastre desplazado, §4): los numeros esperados
+# difieren en ~130-150 aunque el muerto cueste 0 => dos lecturas IGUALES delatan consola
+# rancia en el acto. La resta sigue midiendo el bloque: coste = dT - d(lastre).
+if modo == "hist":
+    if len(sys.argv) < 4:
+        print("uso: python gen_ablacion_core.py hist <n_lastre> <ruta_al_blob.pine>")
+        sys.exit(1)
+    SRC = pathlib.Path(sys.argv[3])
 
 # El modo `context` mide el OTRO consumidor: cuanto gasta hoy y cuanto dibujo VIVO puede absorber.
 # Dos corridas con lastre distinto dan la calibracion sin suponer nada:
@@ -176,7 +190,8 @@ elif modo == "con-copia36":
     extra, _ = copiar_renombradas(lineas, GRUPO_DETECTORES)
 
 salida = lineas + lastre(n_lastre) + extra
-OUT = pathlib.Path(os.environ.get("TEMP", ".")) / f"ABL-{modo}-S135.pine"
+OUT = pathlib.Path(os.environ.get("TEMP", ".")) / (
+    f"ABL-hist-{SRC.stem}-L{n_lastre}.pine" if modo == "hist" else f"ABL-{modo}-S135.pine")
 OUT.write_text("\n".join(salida) + "\n", encoding="utf-8")
 print(f"[salida] {OUT}  ({len(salida)} lineas)")
 print("\nAplicar en TV y leer el numero en pine_get_console (debe estar POR ENCIMA de 100256).")
