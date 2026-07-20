@@ -10,12 +10,18 @@
 
 ```
 pine/
-├── SMC-Library.pine      ← LIBRERÍA v6: toda la detección SMC/ICT (funciones puras + UDTs)
-├── SMC-Visual.pine       ← INDICATOR: importa librería, dibuja todo, panel de estado, alertas
-├── SMC-Strategy.pine     ← STRATEGY: importa librería, scoring direccional, strategy.entry/exit
+├── SMC-Visual.pine       ← INDICATOR: sección LIBRARY CORE + dibujo, panel de estado, alertas
+├── SMC-Strategy.pine     ← STRATEGY: mismo CORE byte-idéntico + scoring direccional, entry/exit
+├── SMC-Context.pine      ← INDICATOR auxiliar [ADR-017]: mismo CORE + herencia de extremos HTF
 └── reference/
     └── LuxAlgo-SMC-base.pine  ← indicador LuxAlgo v5 original (solo referencia, NO se edita)
 ```
+
+`[S136]` El árbol original listaba `SMC-Library.pine` como librería importada por los consumidores.
+**Ese diseño lo superó D-PINE-01** (§8): durante el desarrollo el core vive como sección
+`// === LIBRARY CORE ===` byte-idéntica en los consumidores, verificada por `check-core-sync.ps1`.
+El archivo quedó sin consumidores y se eliminó en S136 (ver D-PINE-01b); la library se regenerará
+desde el CORE al cerrar Fase 2.
 
 **Por qué esta separación:**
 - La librería es el "cerebro" único: una sola implementación de cada concepto → cero divergencia entre lo que se ve (Visual) y lo que se opera (Strategy).
@@ -311,6 +317,7 @@ Tier 3 (Wyckoff, PO3, Volume Surge, etc.): **pospuesto a post-Fase 3** como expe
 | ID | Decisión | Justificación |
 |---|---|---|
 | D-PINE-01 | Durante desarrollo, el "core" vive como sección idéntica copiada en Visual y Strategy; se migra a library publicada al cerrar Fase 2 | Publicar/actualizar una library en cada iteración añade fricción (cada cambio requiere republicar y re-importar versión). El diff de la sección core se verifica con script en cada commit (`scripts/check-core-sync.ps1` `[NUEVO]`) |
+| D-PINE-01b `[S136]` | `pine/SMC-Library.pine` **eliminado del árbol**; la library se **regenerará desde el CORE vivo al cerrar Fase 2** | El archivo era el andamiaje inicial (`45449f3`, 11-jun) previo a que D-PINE-01 fijara el core-como-sección-copiada. Sin ningún `import` que lo consuma, quedó rancio desde `c35e918` (13-jul): le faltaban las 6 funciones del motor ADR-021 y conservaba las 2 de la Opción A muerta ⇒ **contradecía al código en vivo** para quien auditara. Resincronizarlo institucionalizaba una 4ª copia a mano (lo que la regla dura #2 existe para matar) y no cabía en `check-core-sync` (lleva `export` + anotaciones de tipo ⇒ comparación transformada, no byte-a-byte). Es **derivable**: el CORE vivo es la única fuente de verdad, en 3 copias verificadas. Histórico íntegro en git: `45449f3..c35e918`. **Fase 4 no lo usa** (cero menciones en `MQL5-PLAN.md`; el EA traduce contra el CORE) |
 | D-PINE-02 | Pine v6 (no v5) | Tipos UDT mejorados, `request.security` más estricto y predecible, métodos sobre arrays. La migración del código LuxAlgo v5 es parte del Sprint 1.1 |
 | D-PINE-03 | Eventos solo en `barstate.isconfirmed`; `lookahead_off` siempre | Cero repaint — condición indispensable para que el backtest sea creíble y para que MQL5 (que opera velas cerradas) coincida con TV |
 | D-PINE-04 | Del TF mayor solo se transfiere el elemento más relevante por tipo | Tuples de security son limitados; el scoring solo necesita lo cercano al precio |

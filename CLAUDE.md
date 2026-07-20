@@ -20,7 +20,7 @@ Bot de trading **SMC/ICT** para Forex. Primero un sistema completo y validado en
 
 ## Arquitectura (no re-litigar)
 **1 core de detección + 2 consumidores** `[FIX: comunicación entre indicadores es imposible en TV]`:
-- `pine/SMC-Library.pine` (o sección `// === LIBRARY CORE ===` idéntica en ambos consumidores) — toda la detección como funciones puras + UDTs. No dibuja, no llama `request.security()`.
+- Sección `// === LIBRARY CORE ===` byte-idéntica en los consumidores — toda la detección como funciones puras + UDTs. No dibuja, no llama `request.security()`. (`pine/SMC-Library.pine` se eliminó en S136: sin consumidores y rancio; la library se regenerará desde el CORE al cerrar Fase 2 — D-PINE-01b.)
 - `pine/SMC-Visual.pine` (`indicator`) — dibujo + panel de estado + alertas.
 - `pine/SMC-Strategy.pine` (`strategy`) — scoring direccional + entradas/SL/TP → **Strategy Tester** da el backtesting masivo.
 - **Fase 4:** el EA MQL5 traduce el core función a función (módulos `SMC_*.mqh` + `EA_SMC_ICT.mq5`), con golden tests de paridad construidos desde TradingView.
