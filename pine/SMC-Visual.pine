@@ -4146,8 +4146,14 @@ f_drawOB(SMC_Zone z) =>
 // En la ultima barra limpia y repinta las cajas vivas (evita acumulacion por tick).
 // Cajas <= MAX_ZONES. Las zonas mitigadas se muestran tenues; las invalidadas se
 // omiten (su rol pasa a breaker en §Tier2).
+// [S140] Anti-solape de labels COMPARTIDO en la familia OB (OB/Breaker/MB/Vacuum). Antes cada familia
+// llevaba su propio *SeenY -> limpio dentro de una familia pero los nombres se pisaban ENTRE familias al
+// co-ubicarse (confluencia real). Un unico acumulador top-level (resetea cada barra) hace que la ranura-Y
+// reclamada por cualquiera bloquee el nombre de las demas: el 1.º en orden de dibujo (OB>Breaker>MB>Vacuum)
+// conserva el label, el resto cede (el CUADRO sigue = confluencia visible). Los band-pick/ancla igual fuerzan.
 var array<box>   SMC_obBoxes  = array.new<box>()
 var array<label> SMC_obLabels = array.new<label>()
+string blockSeenY = ""
 if i_showOB and barstate.islast
     for b in SMC_obBoxes
         box.delete(b)
@@ -4155,7 +4161,6 @@ if i_showOB and barstate.islast
         label.delete(lb)
     array.clear(SMC_obBoxes)
     array.clear(SMC_obLabels)
-    string obSeenY = ""
     if array.size(SMC_zones) > 0
         // [S139] Recorrido de NUEVA a VIEJA (antes 0 -> n-1). f_pushZoneV hace array.push => el indice 0 es
         // la zona MAS VIEJA; con el orden ascendente la ranura Y la reclamaba el OB de 2015 y el OB reciente
@@ -4172,12 +4177,12 @@ if i_showOB and barstate.islast
                     // §6 curacion S120 (anti-solape): el IMPORTANTE (band-pick/ancla) se rotula SIEMPRE y marca su
                     // ranura Y; el resto llena la pierna pero cede el nombre si colisiona con uno ya puesto (<0.5×ATR).
                     string obKey = f_ySlot((z.top + z.bottom) / 2.0)
-                    if obBP or obAnchor or (obKey != "" and not str.contains(obSeenY, obKey))
-                        obSeenY := obSeenY + obKey
+                    if obBP or obAnchor or (obKey != "" and not str.contains(blockSeenY, obKey))
+                        blockSeenY := blockSeenY + obKey
                         color obCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                         // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
                         string obTxt = z.propulsion ? "OB⇈" : "OB"
-                        array.push(SMC_obLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, obCol))
+                        array.push(SMC_obLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, color.new(obCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad como su caja
 
 // f_drawBreaker: caja del Breaker [T19 · §2.6] (solo Visual). Un OB invalidado renacido con polaridad
 // invertida. AZUL de familia (§5.2, como el OB) distinguido por borde PUNTEADO + label BRK; borde
@@ -4201,7 +4206,6 @@ if i_showBreaker and barstate.islast
         label.delete(lb)
     array.clear(SMC_brkBoxes)
     array.clear(SMC_brkLabels)
-    string brkSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
@@ -4211,11 +4215,11 @@ if i_showBreaker and barstate.islast
                 if f_densOK(z.strength, brkAnchor) or brkBP
                     array.push(SMC_brkBoxes, f_drawBreaker(z))
                     string brkKey = f_ySlot((z.top + z.bottom) / 2.0)                                            // §6 curacion S120 anti-solape
-                    if brkBP or brkAnchor or (brkKey != "" and not str.contains(brkSeenY, brkKey))
-                        brkSeenY := brkSeenY + brkKey
+                    if brkBP or brkAnchor or (brkKey != "" and not str.contains(blockSeenY, brkKey))
+                        blockSeenY := blockSeenY + brkKey
                         color brkCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                         string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
-                        array.push(SMC_brkLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, brkCol))
+                        array.push(SMC_brkLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, color.new(brkCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad
 
 // f_drawIFVG: caja del Inversion FVG [T27 · §5.2] (solo Visual). Un FVG invalidado renacido con
 // polaridad invertida. NARANJA de familia (§5.2, como el FVG) con borde PUNTEADO + label IFVG para
@@ -4336,7 +4340,6 @@ if i_showMB and barstate.islast
         label.delete(lb)
     array.clear(SMC_mbBoxes)
     array.clear(SMC_mbLabels)
-    string mbSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
@@ -4345,10 +4348,10 @@ if i_showMB and barstate.islast
                 if (f_famOK(FAM_EST) and f_densOK(z.strength, false)) or mbCfg >= 2                              // §7.2.11 promocion por confluencia (requisito >=2)
                     array.push(SMC_mbBoxes, f_drawMB(z))
                     string mbKey = f_ySlot((z.top + z.bottom) / 2.0)                                             // §6 curacion S120 anti-solape
-                    if mbCfg >= 2 or (mbKey != "" and not str.contains(mbSeenY, mbKey))
-                        mbSeenY := mbSeenY + mbKey
+                    if mbCfg >= 2 or (mbKey != "" and not str.contains(blockSeenY, mbKey))
+                        blockSeenY := blockSeenY + mbKey
                         color mbCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
-                        array.push(SMC_mbLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", mbCol))
+                        array.push(SMC_mbLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", color.new(mbCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad
 
 // Cajas de Vacuum Block [T33 · §5.7] (solo Visual). Vacio de apertura (gap grande) = iman de retorno.
 // AZUL de familia (§5.2, base COL_OB), borde punteado. No invalidada. Origen = barra del gap; se extiende a la actual.
@@ -4361,7 +4364,6 @@ if i_showVacuum and barstate.islast
         label.delete(lb)
     array.clear(SMC_vacBoxes)
     array.clear(SMC_vacLabels)
-    string vacSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
@@ -4370,9 +4372,9 @@ if i_showVacuum and barstate.islast
                 int vDim = f_ageDim(z.barIdx)  // [S140] paridad OB/Breaker/MB: vacuums viejos se desvanecen (efecto real en TFs bajos)
                 array.push(SMC_vacBoxes, f_zBox(z.barTime, z.top, z.bottom, f_mitBg(vacMit, COL_OB, math.min(84 + vDim, 96)), f_mitBorder(vacMit, COL_OB, math.min(45 + vDim, 90)), line.style_dotted))
                 string vacKey = f_ySlot((z.top + z.bottom) / 2.0)                                               // §6 curacion S120 anti-solape
-                if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (vacKey != "" and not str.contains(vacSeenY, vacKey))
-                    vacSeenY := vacSeenY + vacKey
-                    array.push(SMC_vacLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", COL_OB_TXT_BULL))
+                if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (vacKey != "" and not str.contains(blockSeenY, vacKey))
+                    blockSeenY := blockSeenY + vacKey
+                    array.push(SMC_vacLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", color.new(COL_OB_TXT_BULL, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad
 
 // Zona IPR vigente [T35 · §5.9] (solo Visual): rango desbalanceado (contexto de bias). Borde fino sin
 // relleno (es contexto, no zona de entrada), color por dir. Solo la actual (currentIpr), repintada-en-islast.
