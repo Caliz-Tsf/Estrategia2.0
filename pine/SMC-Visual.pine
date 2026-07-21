@@ -4228,7 +4228,8 @@ f_drawIFVG(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 50), f_mitStyle(mit, line.style_dashed))
+    int dim = f_ageDim(z.barIdx)  // [S141] atenuado por antigüedad (paridad familia OB/FVG)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(50 + dim, 90)), f_mitStyle(mit, line.style_dashed))
 
 // En la ultima barra limpia y repinta las cajas IFVG vivas (KIND_IFVG, no invalidadas).
 var array<box>   SMC_ifvgBoxes  = array.new<box>()
@@ -4252,7 +4253,7 @@ if i_showIFVG and barstate.islast
                 if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (ifvgKey != "" and not str.contains(ifvgSeenY, ifvgKey))
                     ifvgSeenY := ifvgSeenY + ifvgKey
                     color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                    array.push(SMC_ifvgLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", ifvgCol))
+                    array.push(SMC_ifvgLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", color.new(ifvgCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad
 
 // f_drawBPR: caja del Balanced Price Range [T28 · §5.3] (solo Visual). Interseccion de FVG opuestos =
 // zona de reaccion fuerte. NARANJA de familia (§5.2, base; es bidireccional), borde solido + label BPR
