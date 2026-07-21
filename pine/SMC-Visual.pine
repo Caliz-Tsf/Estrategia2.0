@@ -2884,28 +2884,22 @@ f_m5Light(int swingLen, int pdLen, float dispFactor, float bodyPct) =>
 // INTERNO por-contexto (R-P3-1, spike S039 ✅) -> no contamina el chart. lookahead_off
 // SIEMPRE (regla #1, anti-repaint). Se reconstituyen a SMC_TFState ligeros (orden de campos
 // = orden del tuple, .new posicional) que el dibujo en cascada consume. Mapa rico = T13b.
-[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr, d1_k0, d1_t0, d1_b0, d1_d0, d1_ta0, d1_tb0, d1_k1, d1_t1, d1_b1, d1_d1, d1_ta1, d1_tb1, d1_k2, d1_t2, d1_b2, d1_d2, d1_ta2, d1_tb2, d1_k3, d1_t3, d1_b3, d1_d3, d1_ta3, d1_tb3, d1_k4, d1_t4, d1_b4, d1_d4, d1_ta4, d1_tb4, d1_k5, d1_t5, d1_b5, d1_d5, d1_ta5, d1_tb5, d1_k6, d1_t6, d1_b6, d1_d6, d1_ta6, d1_tb6, d1_k7, d1_t7, d1_b7, d1_d7, d1_ta7, d1_tb7, d1_k8, d1_t8, d1_b8, d1_d8, d1_ta8, d1_tb8, d1_k9, d1_t9, d1_b9, d1_d9, d1_ta9, d1_tb9, d1_k10, d1_t10, d1_b10, d1_d10, d1_ta10, d1_tb10, d1_k11, d1_t11, d1_b11, d1_d11, d1_ta11, d1_tb11] = request.security(syminfo.tickerid, "D", f_computeTFState(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
-[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr, h1_k0, h1_t0, h1_b0, h1_d0, h1_ta0, h1_tb0, h1_k1, h1_t1, h1_b1, h1_d1, h1_ta1, h1_tb1, h1_k2, h1_t2, h1_b2, h1_d2, h1_ta2, h1_tb2, h1_k3, h1_t3, h1_b3, h1_d3, h1_ta3, h1_tb3, h1_k4, h1_t4, h1_b4, h1_d4, h1_ta4, h1_tb4, h1_k5, h1_t5, h1_b5, h1_d5, h1_ta5, h1_tb5, h1_k6, h1_t6, h1_b6, h1_d6, h1_ta6, h1_tb6, h1_k7, h1_t7, h1_b7, h1_d7, h1_ta7, h1_tb7, h1_k8, h1_t8, h1_b8, h1_d8, h1_ta8, h1_tb8, h1_k9, h1_t9, h1_b9, h1_d9, h1_ta9, h1_tb9, h1_k10, h1_t10, h1_b10, h1_d10, h1_ta10, h1_tb10, h1_k11, h1_t11, h1_b11, h1_d11, h1_ta11, h1_tb11] = request.security(syminfo.tickerid, "60", f_computeTFState(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct, i_eqlLength, i_eqThreshold, i_obHighVolFactor, i_obMitClose, i_fvgThreshold, i_poolTol, i_minTouches, i_mtfCapOB, i_mtfCapFVG, i_mtfCapPool, i_mtfCapSweep, i_mtfCapEQ, i_mtfCapBOS, i_mtfCapCHoCH), lookahead = barmerge.lookahead_off)
+[d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr] = request.security(syminfo.tickerid, "D", f_m5Light(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
+[h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr] = request.security(syminfo.tickerid, "60", f_m5Light(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
 SMC_TFState d1State = SMC_TFState.new(d1_bias, d1_bosP, d1_bosD, d1_bosT, d1_chP, d1_chD, d1_chT, d1_mssP, d1_mssD, d1_mssT, d1_pdH, d1_pdL, d1_pdM, d1_e20, d1_e50, d1_e200, d1_atr)
 SMC_TFState h1State = SMC_TFState.new(h1_bias, h1_bosP, h1_bosD, h1_bosT, h1_chP, h1_chD, h1_chT, h1_mssP, h1_mssD, h1_mssT, h1_pdH, h1_pdL, h1_pdM, h1_e20, h1_e50, h1_e200, h1_atr)
 // [S103 · OBS#9] Estado M5 LIGERO (solo escalares) para la 3.a col del panel cuando el chart NO esta
 // en M5. request.security("5", f_m5Light) — tuple de 17, sin geometria -> prueba de memoria.
 [m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr] = request.security(syminfo.tickerid, "5", f_m5Light(i_swingLen, i_majorLen, i_mssDispFactor, i_mssBodyPct), lookahead = barmerge.lookahead_off)
 SMC_TFState m5State = SMC_TFState.new(m5_bias, m5_bosP, m5_bosD, m5_bosT, m5_chP, m5_chD, m5_chT, m5_mssP, m5_mssD, m5_mssT, m5_pdH, m5_pdL, m5_pdM, m5_e20, m5_e50, m5_e200, m5_atr)
-// Buffer generico de ranuras reconstituido por HTF (ADR-009). 2a llamada/TF (mas cupo) se
-// activaria aqui con un 2o request.security cuando Sprint 1.5/1.6 lo exijan (no ahora).
-d1Kind = array.from(d1_k0, d1_k1, d1_k2, d1_k3, d1_k4, d1_k5, d1_k6, d1_k7, d1_k8, d1_k9, d1_k10, d1_k11)
-d1Top  = array.from(d1_t0, d1_t1, d1_t2, d1_t3, d1_t4, d1_t5, d1_t6, d1_t7, d1_t8, d1_t9, d1_t10, d1_t11)
-d1Bot  = array.from(d1_b0, d1_b1, d1_b2, d1_b3, d1_b4, d1_b5, d1_b6, d1_b7, d1_b8, d1_b9, d1_b10, d1_b11)
-d1Dir  = array.from(d1_d0, d1_d1, d1_d2, d1_d3, d1_d4, d1_d5, d1_d6, d1_d7, d1_d8, d1_d9, d1_d10, d1_d11)
-d1TA   = array.from(d1_ta0, d1_ta1, d1_ta2, d1_ta3, d1_ta4, d1_ta5, d1_ta6, d1_ta7, d1_ta8, d1_ta9, d1_ta10, d1_ta11)
-d1TB   = array.from(d1_tb0, d1_tb1, d1_tb2, d1_tb3, d1_tb4, d1_tb5, d1_tb6, d1_tb7, d1_tb8, d1_tb9, d1_tb10, d1_tb11)
-h1Kind = array.from(h1_k0, h1_k1, h1_k2, h1_k3, h1_k4, h1_k5, h1_k6, h1_k7, h1_k8, h1_k9, h1_k10, h1_k11)
-h1Top  = array.from(h1_t0, h1_t1, h1_t2, h1_t3, h1_t4, h1_t5, h1_t6, h1_t7, h1_t8, h1_t9, h1_t10, h1_t11)
-h1Bot  = array.from(h1_b0, h1_b1, h1_b2, h1_b3, h1_b4, h1_b5, h1_b6, h1_b7, h1_b8, h1_b9, h1_b10, h1_b11)
-h1Dir  = array.from(h1_d0, h1_d1, h1_d2, h1_d3, h1_d4, h1_d5, h1_d6, h1_d7, h1_d8, h1_d9, h1_d10, h1_d11)
-h1TA   = array.from(h1_ta0, h1_ta1, h1_ta2, h1_ta3, h1_ta4, h1_ta5, h1_ta6, h1_ta7, h1_ta8, h1_ta9, h1_ta10, h1_ta11)
-h1TB   = array.from(h1_tb0, h1_tb1, h1_tb2, h1_tb3, h1_tb4, h1_tb5, h1_tb6, h1_tb7, h1_tb8, h1_tb9, h1_tb10, h1_tb11)
+// [S139 · ADR-024] Transporte de GEOMETRIA heredada RETIRADO del Visual (12 ranuras x 6 campos x 2 TF).
+// Las llamadas D1/H1 pasan a f_m5Light: los MISMOS 17 escalares, espejo fiel de ADR-021 (f_pdRelatch/
+// f_pdTop/f_pdBottom). Sobreviven intactos: el panel escalar (Bias/P-D/BOS/CHoCH/MSS/EMA), las lineas
+// P/D heredadas (f_drawMTFState solo necesita el SMC_TFState) y f_depthBand (solo usa pdHigh/pdLow).
+// Se pierden temporalmente: el MAPA de zonas heredadas y las 5 filas de geometria del panel.
+// MOTIVO: f_computeTFState se queda sin call-site => tree-shaking la retira entera del Visual (S135), que
+// es el unico ahorro de tokens demostrado. La capa heredada no hace falta mientras se revisan los NATIVOS;
+// se reconstruye cuando se decida QUE se hereda y por que (regla de orden del usuario, S139).
 // --- PALETA CENTRALIZADA (COL_*) + MATRIZ DE RENDER [Eje2 · Paso 3 · ESQUELETO-FABLE §5.2/5.3/5.4] ---
 // 100% render -> vive FUERA del === LIBRARY CORE === (no rompe check-core-sync). Colapsa el "rainbow"
 // disperso a la paleta canonica por FAMILIA (§5.2): el HUE identifica QUE es; la direccion, dentro de
@@ -4556,10 +4550,8 @@ if barstate.islast and (mtfShowD1 or mtfShowH1)
     float mtfMajTol = atr14 * 0.3
     if mtfShowD1
         f_drawMTFState(d1State, "D1", color.new(color.blue, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("D1", color.new(color.blue, 0), d1Kind, d1Top, d1Bot, d1Dir, d1TA, d1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, d1State.lastMSSPrice, d1State.lastMSSDir, mtfCurate)
     if mtfShowH1
         f_drawMTFState(h1State, "H1", color.new(color.fuchsia, 0), SMC_mtfLines, SMC_mtfLabels)
-        f_drawMTFZones("H1", color.new(color.fuchsia, 0), h1Kind, h1Top, h1Bot, h1Dir, h1TA, h1TB, SMC_mtfLines, SMC_mtfLabels, SMC_mtfBoxes, SMC_eventsMajor, mtfMajTol, h1State.lastMSSPrice, h1State.lastMSSDir, mtfCurate)
 
 // f_pushSwingLabel §F1 [S117 · rediseño S118]: dibuja la etiqueta HH/HL/LH/LL de un swing (color
 // direccional, fondo transparente, xloc.bar_time) y la apila. Aquí (tras las declaraciones de color
@@ -4762,12 +4754,12 @@ if i_showPanel and barstate.islast
     [h1Pd, h1PdCol]   = f_pdCell(h1State.pdHigh, h1State.pdLow)
     [d1Ema, d1EmaCol] = f_emaCell(d1State.ema20, d1State.ema50, d1State.ema200)
     [h1Ema, h1EmaCol] = f_emaCell(h1State.ema20, h1State.ema50, h1State.ema200)
-    string d1Pool = (f_bufNear(d1Kind, d1Top, d1Bot, KIND_POOL, close) < 0) ? "—" : str.tostring(array.get(d1Top, f_bufNear(d1Kind, d1Top, d1Bot, KIND_POOL, close)), format.mintick) + (array.get(d1Dir, f_bufNear(d1Kind, d1Top, d1Bot, KIND_POOL, close)) == DIR_BULL ? " BSL" : " SSL")
-    string h1Pool = (f_bufNear(h1Kind, h1Top, h1Bot, KIND_POOL, close) < 0) ? "—" : str.tostring(array.get(h1Top, f_bufNear(h1Kind, h1Top, h1Bot, KIND_POOL, close)), format.mintick) + (array.get(h1Dir, f_bufNear(h1Kind, h1Top, h1Bot, KIND_POOL, close)) == DIR_BULL ? " BSL" : " SSL")
-    int    d1SwI  = f_bufNear(d1Kind, d1Top, d1Bot, KIND_SWEEP, close)
-    int    h1SwI  = f_bufNear(h1Kind, h1Top, h1Bot, KIND_SWEEP, close)
-    string d1Sw   = d1SwI < 0 ? "—" : str.tostring(array.get(d1Top, d1SwI), format.mintick) + (array.get(d1Dir, d1SwI) == DIR_BULL ? " ↑" : " ↓")
-    string h1Sw   = h1SwI < 0 ? "—" : str.tostring(array.get(h1Top, h1SwI), format.mintick) + (array.get(h1Dir, h1SwI) == DIR_BULL ? " ↑" : " ↓")
+    // [S139 · ADR-024] Las 5 filas HEREDADAS del panel (OB/FVG/Pool cercano, Ultimo Sweep, EQ H/L) quedan
+    // en "—" mientras el transporte de GEOMETRIA no se llama. Los helpers f_bufNear/f_bufZoneCell/
+    // f_bufCountEQ y f_drawMTFZones SIGUEN EN EL ARCHIVO sin call-site: por tree-shaking cuestan 0 tokens
+    // (S135) y quedan listos para reconectar cuando se decida la herencia (tras revisar los nativos).
+    // Restaurar = revertir este commit: vuelven las 2 llamadas a f_computeTFState y estas filas.
+
     // --- M5 escalares (transporte ligero request.security "5"): 3.a col cuando el chart NO esta en M5 [S103] ---
     [m5PdT, m5PdColT]   = f_pdCell(m5State.pdHigh, m5State.pdLow)
     [m5EmaT, m5EmaColT] = f_emaCell(m5State.ema20, m5State.ema50, m5State.ema200)
@@ -4817,26 +4809,26 @@ if i_showPanel and barstate.islast
         r := r + 1
         // OB cercano
         table.cell(panel, 0, r, "OB cercano", text_color = color.gray, text_size = tsz)
-        table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_OB), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, chartIsM5 ? m5Ob : "—", text_color = chartIsM5 and not na(obZ) ? f_dirCol(obZ.dir) : color.gray, text_size = tsz)
         r := r + 1
         // FVG cercano
         table.cell(panel, 0, r, "FVG cercano", text_color = color.gray, text_size = tsz)
-        table.cell(panel, 1, r, f_bufZoneCell(d1Kind, d1Top, d1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 2, r, f_bufZoneCell(h1Kind, h1Top, h1Bot, KIND_FVG), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, chartIsM5 ? m5Fvg : "—", text_color = chartIsM5 and not na(fvgZ) ? f_dirCol(fvgZ.dir) : color.gray, text_size = tsz)
         r := r + 1
         // Pool cercano
         table.cell(panel, 0, r, "Pool cercano", text_color = color.gray, text_size = tsz)
-        table.cell(panel, 1, r, d1Pool, text_color = color.gray, text_size = tsz)
-        table.cell(panel, 2, r, h1Pool, text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, chartIsM5 ? m5Pool : "—", text_color = chartIsM5 and not na(poolP) ? f_dirCol(poolP.dir) : color.gray, text_size = tsz)
         r := r + 1
         // Ultimo Sweep
         table.cell(panel, 0, r, "Último Sweep", text_color = color.gray, text_size = tsz)
-        table.cell(panel, 1, r, d1Sw, text_color = d1SwI < 0 ? color.gray : f_dirCol(array.get(d1Dir, d1SwI)), text_size = tsz)
-        table.cell(panel, 2, r, h1Sw, text_color = h1SwI < 0 ? color.gray : f_dirCol(array.get(h1Dir, h1SwI)), text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, chartIsM5 ? m5Sw : "—", text_color = chartIsM5 and not na(swE) ? f_dirCol(swE.dir) : color.gray, text_size = tsz)
         r := r + 1
         // EMA 20/50/200 (alineacion por TF)
@@ -4847,8 +4839,8 @@ if i_showPanel and barstate.islast
         r := r + 1
         // EQ H/L (conteo): D1/H1 del buffer, M5 del array nativo
         table.cell(panel, 0, r, "EQ H/L", text_color = color.gray, text_size = tsz)
-        table.cell(panel, 1, r, str.tostring(f_bufCountEQ(d1Kind)), text_color = color.gray, text_size = tsz)
-        table.cell(panel, 2, r, str.tostring(f_bufCountEQ(h1Kind)), text_color = color.gray, text_size = tsz)
+        table.cell(panel, 1, r, "—", text_color = color.gray, text_size = tsz)
+        table.cell(panel, 2, r, "—", text_color = color.gray, text_size = tsz)
         table.cell(panel, 3, r, chartIsM5 ? str.tostring(array.size(SMC_eqhl)) : "—", text_color = color.gray, text_size = tsz)
         r := r + 1
         // Kill Zone (basada en tiempo: misma para todos los TFs -> solo columna chart)
