@@ -4262,7 +4262,8 @@ f_drawBPR(SMC_Zone z) =>
     col = COL_FVG
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 45), f_mitStyle(mit, line.style_solid))
+    int dim = f_ageDim(z.barIdx)  // [S141] atenuado por antigüedad (paridad familia OB/FVG)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(45 + dim, 90)), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas BPR vivas (KIND_BPR, no invalidadas).
 var array<box>   SMC_bprBoxes  = array.new<box>()
@@ -4285,7 +4286,7 @@ if i_showBPR and barstate.islast
                     string bprKey = f_ySlot((z.top + z.bottom) / 2.0)                                            // §6 curacion S120 anti-solape
                     if bprCfg >= 2 or (bprKey != "" and not str.contains(bprSeenY, bprKey))
                         bprSeenY := bprSeenY + bprKey
-                        array.push(SMC_bprLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", COL_FVG))
+                        array.push(SMC_bprLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", color.new(COL_FVG, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad
 
 // [S107] Drawer de Volume Imbalance [T31 · §5.5] RETIRADO con el concepto (ver nota en la sección de detección).
 
