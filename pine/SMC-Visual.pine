@@ -4367,7 +4367,8 @@ if i_showVacuum and barstate.islast
             SMC_Zone z = array.get(SMC_zones, i)
             if z.kind == KIND_VACUUM and z.state != ZS_INVALID and f_famOK(FAM_EST) and f_densOK(z.strength, false)
                 bool vacMit = z.state == ZS_MITIGATED
-                array.push(SMC_vacBoxes, f_zBox(z.barTime, z.top, z.bottom, f_mitBg(vacMit, COL_OB, 84), f_mitBorder(vacMit, COL_OB, 45), line.style_dotted))
+                int vDim = f_ageDim(z.barIdx)  // [S140] paridad OB/Breaker/MB: vacuums viejos se desvanecen (efecto real en TFs bajos)
+                array.push(SMC_vacBoxes, f_zBox(z.barTime, z.top, z.bottom, f_mitBg(vacMit, COL_OB, math.min(84 + vDim, 96)), f_mitBorder(vacMit, COL_OB, math.min(45 + vDim, 90)), line.style_dotted))
                 string vacKey = f_ySlot((z.top + z.bottom) / 2.0)                                               // §6 curacion S120 anti-solape
                 if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (vacKey != "" and not str.contains(vacSeenY, vacKey))
                     vacSeenY := vacSeenY + vacKey
