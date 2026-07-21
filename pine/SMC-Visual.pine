@@ -3390,6 +3390,9 @@ bgcolor(i_rthEnable and f_famOK(FAM_TODO) and not curIsRTH ? color.new(color.gra
 f_mitBg(bool mit, color col, int transp)     => mit ? color(na) : color.new(col, transp)
 f_mitBorder(bool mit, color col, int transp) => mit ? color.new(color.gray, 55) : color.new(col, transp)
 f_mitStyle(bool mit, string st)              => mit ? line.style_dotted : st
+// [S140] Atenuado por ANTIGUEDAD (dim-to-focus §curacion): rampa 0->i_obAgeDim segun edad en BARRAS
+// (bar_index - barIdx), simbolo-agnostico (ADR-001). Comun a OB/Breaker (y reutilizable por MB/Vacuum).
+f_ageDim(int barIdx) => math.min(int(math.max(0, bar_index - barIdx) * i_obAgeDim / i_obAgeBars), i_obAgeDim)
 
 // f_zBox / f_zLbl §6 refactor S121 (dieta CE10117): base comun de las familias de zona (OTE/OB/Breaker/
 // IFVG/BPR/MB/Vacuum/FVG/IPR). Comparten el mismo esqueleto de box.new (right = time, border_width = 1,
@@ -4137,8 +4140,7 @@ f_drawOB(SMC_Zone z) =>
     // relleno Y su borde -> los OB antiguos que cruzan todo el grafico dejan de competir por atencion sin
     // desaparecer. Discriminador = edad en BARRAS (bar_index - z.barIdx): simbolo-agnostico (ADR-001), no
     // usa precio. Rampa: ~0 reciente -> +i_obAgeDim (clamp) a los i_obAgeBars. Constantes calibrables por input.
-    int  age = math.max(0, bar_index - z.barIdx)
-    int  dim = math.min(int(age * i_obAgeDim / i_obAgeBars), i_obAgeDim)
+    int  dim = f_ageDim(z.barIdx)
     f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(25 + dim, 90)), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas vivas (evita acumulacion por tick).
@@ -4186,7 +4188,8 @@ f_drawBreaker(SMC_Zone z) =>
     color glow = z.dir == DIR_BULL ? COL_OB_GLOW_BULL : COL_OB_GLOW_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), color.new(glow, 45), line.style_dashed)
+    int dim = f_ageDim(z.barIdx)  // [S140] paridad con OB: breakers viejos se desvanecen (relleno + glow)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), color.new(glow, math.min(45 + dim, 90)), line.style_dashed)
 
 // En la ultima barra limpia y repinta las cajas de breaker vivas (KIND_BREAKER, no invalidadas).
 var array<box>   SMC_brkBoxes  = array.new<box>()
