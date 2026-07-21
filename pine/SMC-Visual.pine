@@ -4398,7 +4398,10 @@ f_drawFVG(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
-    f_zBox(z.barTime - barMs, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 60), f_mitStyle(mit, line.style_solid))
+    // [S141] Atenuado por ANTIGÜEDAD (paridad familia OB, S139-S140): los FVG viejos que cruzan todo el
+    // gráfico dejan de competir por atención sin desaparecer. Discriminador = edad en BARRAS (símbolo-agnóstico).
+    int dim = f_ageDim(z.barIdx)
+    f_zBox(z.barTime - barMs, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(60 + dim, 90)), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas FVG + lineas CE vivas. Las mitigadas se
 // muestran tenues sin CE; las invalidadas se omiten (el gap quedo rellenado por completo).
@@ -4432,7 +4435,7 @@ if i_showFVG and barstate.islast
                         color fvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                         // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
                         string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
-                        array.push(SMC_fvgLabels, f_zLbl(math.round((z.barTime - barMs + time) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, fvgCol))
+                        array.push(SMC_fvgLabels, f_zLbl(math.round((z.barTime - barMs + time) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, color.new(fvgCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad como su caja (paridad OB)
                     if i_showCE and z.state != ZS_MITIGATED
                         float ce = (z.top + z.bottom) / 2.0
                         color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
