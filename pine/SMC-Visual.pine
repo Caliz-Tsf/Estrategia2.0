@@ -68,6 +68,8 @@ i_maxShowID       = input.int(10,     "Max marcadores de Inside Day (recientes)"
 i_showOB         = input.bool(true,  "Mostrar Order Blocks",              group = GRP_OB)
 i_obHighVolFactor = input.float(2.0, "Filtro volatilidad (x ATR200)", minval = 0.5, step = 0.1, group = GRP_OB)
 i_obMitClose     = input.bool(false, "Mitigacion por cierre (vs mecha)",  group = GRP_OB)
+i_obAgeBars      = input.int(2000, "Atenuado por antigüedad: barras hasta el máximo [S139]", minval = 20, group = GRP_OB)
+i_obAgeDim       = input.int(40,  "Atenuado por antigüedad: transparencia extra máx (0=off)", minval = 0, maxval = 60, group = GRP_OB)
 i_showBreaker    = input.bool(true,  "Mostrar Breakers (OB invalidado, §2.6)", group = GRP_OB)
 i_showMB         = input.bool(true,  "Mostrar Mitigation Blocks (§2.8 #24)", group = GRP_OB)
 i_propOverlap    = input.float(0.5,  "Propulsion: solape mínimo en OB previo (§5.8)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_OB)
@@ -4131,7 +4133,13 @@ f_drawOB(SMC_Zone z) =>
     col = z.dir == DIR_BULL ? COL_OB_BULL : COL_OB_BEAR
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 45 : z.state == ZS_PARTIAL ? 62 : 78
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), f_mitBorder(mit, col, 25), f_mitStyle(mit, line.style_solid))
+    // [S139] Atenuado por ANTIGÜEDAD (dim-to-focus, rubrica curacion): cuanto mas viejo el OB, mas tenues su
+    // relleno Y su borde -> los OB antiguos que cruzan todo el grafico dejan de competir por atencion sin
+    // desaparecer. Discriminador = edad en BARRAS (bar_index - z.barIdx): simbolo-agnostico (ADR-001), no
+    // usa precio. Rampa: ~0 reciente -> +i_obAgeDim (clamp) a los i_obAgeBars. Constantes calibrables por input.
+    int  age = math.max(0, bar_index - z.barIdx)
+    int  dim = math.min(int(age * i_obAgeDim / i_obAgeBars), i_obAgeDim)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(25 + dim, 90)), f_mitStyle(mit, line.style_solid))
 
 // En la ultima barra limpia y repinta las cajas vivas (evita acumulacion por tick).
 // Cajas <= MAX_ZONES. Las zonas mitigadas se muestran tenues; las invalidadas se
