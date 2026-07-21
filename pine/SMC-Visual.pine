@@ -4323,7 +4323,8 @@ f_drawMB(SMC_Zone z) =>
     bool mit = z.state == ZS_MITIGATED
     // Bull (#0C3A14 verde muy oscuro) se difumina mas con el fondo -> mas opaco que bear (#7A1212, ok tal cual).
     int transp = z.dir == DIR_BULL ? (z.state == ZS_ACTIVE ? 50 : z.state == ZS_PARTIAL ? 65 : 80) : (z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92)
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, transp), color.new(glow, 45), line.style_dotted)
+    int dim = f_ageDim(z.barIdx)  // [S140] paridad con OB/Breaker: MB viejos se desvanecen (relleno + glow)
+    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), color.new(glow, math.min(45 + dim, 90)), line.style_dotted)
 
 // En la ultima barra limpia y repinta las cajas de mitigation block vivas (KIND_MITIGATION, no invalidadas).
 var array<box>   SMC_mbBoxes  = array.new<box>()
