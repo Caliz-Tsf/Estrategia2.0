@@ -4232,8 +4232,15 @@ f_drawIFVG(SMC_Zone z) =>
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 80 : z.state == ZS_PARTIAL ? 86 : 92
     int dim = f_ageDim(z.barIdx)  // [S141] atenuado por antigüedad (paridad familia OB/FVG)
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(50 + dim, 90)), f_mitStyle(mit, line.style_dashed))
+    f_zBox(z.barTime - 2 * barMs, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(50 + dim, 90)), f_mitStyle(mit, line.style_dashed))  // [S141] C2 por tiempo (imperfecto en finde)
 
+// [S141 · tarea 4] Anti-solape de labels COMPARTIDO en la familia FVG (FVG/IFVG/BPR): antes cada variante
+// llevaba su propio *SeenY -> limpio DENTRO de una variante pero los nombres se pisaban ENTRE variantes (un
+// IFVG y un FVG en la misma ranura-Y ambos rotulaban -> texto ilegible). Acumulador compartido (resetea cada
+// barra); prioridad de orden de dibujo IFVG > BPR > FVG: el 1.º conserva el nombre, el resto CEDE la etiqueta
+// (la CAJA sigue -> la co-ubicacion IFVG/FVG, que es señal SMC, se mantiene). Separado del blockSeenY de OB
+// (la union FVG<->OB se decide en la comparacion cross-familia, tarea 6).
+string fvgFamSeenY = ""
 // En la ultima barra limpia y repinta las cajas IFVG vivas (KIND_IFVG, no invalidadas).
 var array<box>   SMC_ifvgBoxes  = array.new<box>()
 var array<label> SMC_ifvgLabels = array.new<label>()
@@ -4244,7 +4251,6 @@ if i_showIFVG and barstate.islast
         label.delete(lb)
     array.clear(SMC_ifvgBoxes)
     array.clear(SMC_ifvgLabels)
-    string ifvgSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
@@ -4253,8 +4259,8 @@ if i_showIFVG and barstate.islast
                 // §6 curacion S120 (anti-solape): IFVG no participa en band-pick -> IMPORTANTE = confluencia >=2
                 // familias apiladas (§7.0.2); el resto llena la pierna pero cede el nombre si colisiona (<0.5×ATR).
                 string ifvgKey = f_ySlot((z.top + z.bottom) / 2.0)
-                if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (ifvgKey != "" and not str.contains(ifvgSeenY, ifvgKey))
-                    ifvgSeenY := ifvgSeenY + ifvgKey
+                if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (ifvgKey != "" and not str.contains(fvgFamSeenY, ifvgKey))
+                    fvgFamSeenY := fvgFamSeenY + ifvgKey
                     color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                     array.push(SMC_ifvgLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", color.new(ifvgCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad
 
@@ -4266,7 +4272,7 @@ f_drawBPR(SMC_Zone z) =>
     bool mit = z.state == ZS_MITIGATED
     int transp = z.state == ZS_ACTIVE ? 78 : z.state == ZS_PARTIAL ? 85 : 91
     int dim = f_ageDim(z.barIdx)  // [S141] atenuado por antigüedad (paridad familia OB/FVG)
-    f_zBox(z.barTime, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(45 + dim, 90)), f_mitStyle(mit, line.style_solid))
+    f_zBox(z.barTime - 2 * barMs, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(45 + dim, 90)), f_mitStyle(mit, line.style_solid))  // [S141] C2 por tiempo (imperfecto en finde)
 
 // En la ultima barra limpia y repinta las cajas BPR vivas (KIND_BPR, no invalidadas).
 var array<box>   SMC_bprBoxes  = array.new<box>()
@@ -4278,7 +4284,6 @@ if i_showBPR and barstate.islast
         label.delete(lb)
     array.clear(SMC_bprBoxes)
     array.clear(SMC_bprLabels)
-    string bprSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
@@ -4287,8 +4292,8 @@ if i_showBPR and barstate.islast
                 if (f_famOK(FAM_EST) and f_densOK(z.strength, false)) or bprCfg >= 2                             // §7.2.18 promocion por confluencia
                     array.push(SMC_bprBoxes, f_drawBPR(z))
                     string bprKey = f_ySlot((z.top + z.bottom) / 2.0)                                            // §6 curacion S120 anti-solape
-                    if bprCfg >= 2 or (bprKey != "" and not str.contains(bprSeenY, bprKey))
-                        bprSeenY := bprSeenY + bprKey
+                    if bprCfg >= 2 or (bprKey != "" and not str.contains(fvgFamSeenY, bprKey))
+                        fvgFamSeenY := fvgFamSeenY + bprKey
                         array.push(SMC_bprLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", color.new(COL_FVG, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad
 
 // [S107] Drawer de Volume Imbalance [T31 · §5.5] RETIRADO con el concepto (ver nota en la sección de detección).
@@ -4406,7 +4411,7 @@ f_drawFVG(SMC_Zone z) =>
     // [S141] Atenuado por ANTIGÜEDAD (paridad familia OB, S139-S140): los FVG viejos que cruzan todo el
     // gráfico dejan de competir por atención sin desaparecer. Discriminador = edad en BARRAS (símbolo-agnóstico).
     int dim = f_ageDim(z.barIdx)
-    f_zBox(z.barTime - barMs, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(60 + dim, 90)), f_mitStyle(mit, line.style_solid))
+    f_zBox(z.barTime - 2 * barMs, z.top, z.bottom, f_mitBg(mit, col, math.min(transp + dim, 96)), f_mitBorder(mit, col, math.min(60 + dim, 90)), f_mitStyle(mit, line.style_solid))  // [S141] C2 por tiempo (imperfecto en finde; el fix robusto pide guardar el timestamp origen en el CORE)
 
 // En la ultima barra limpia y repinta las cajas FVG + lineas CE vivas. Las mitigadas se
 // muestran tenues sin CE; las invalidadas se omiten (el gap quedo rellenado por completo).
@@ -4423,7 +4428,6 @@ if i_showFVG and barstate.islast
     array.clear(SMC_fvgBoxes)
     array.clear(SMC_fvgCELines)
     array.clear(SMC_fvgLabels)
-    string fvgSeenY = ""
     if array.size(SMC_zones) > 0
         for i = 0 to array.size(SMC_zones) - 1
             SMC_Zone z = array.get(SMC_zones, i)
@@ -4435,8 +4439,8 @@ if i_showFVG and barstate.islast
                     // §6 curacion S120 (anti-solape): el IMPORTANTE (band-pick/ancla) se rotula SIEMPRE; el resto
                     // llena la pierna pero cede el nombre si colisiona con uno ya puesto (<0.5×ATR) -> mata la pila cerca del precio.
                     string fvgKey = f_ySlot((z.top + z.bottom) / 2.0)
-                    if fvgBP or fvgAnchor or (fvgKey != "" and not str.contains(fvgSeenY, fvgKey))
-                        fvgSeenY := fvgSeenY + fvgKey
+                    if fvgBP or fvgAnchor or (fvgKey != "" and not str.contains(fvgFamSeenY, fvgKey))
+                        fvgFamSeenY := fvgFamSeenY + fvgKey
                         color fvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                         // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
                         string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
