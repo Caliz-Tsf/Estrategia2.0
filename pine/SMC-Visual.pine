@@ -3900,6 +3900,7 @@ if i_showIDM and barstate.islast
 // Marcadores de Immediate Rebalance [T29 · §5.4]. Mismo patron repintado-en-islast (acotado a
 // i_maxShowIR). NARANJA (familia imbalance, §5.2, COL_FVG). Anclado al 50% de la vela de impulso rebalanceada;
 // desplazado ~3 barras a la derecha (no tapa la vela). La flecha marca el dir del impulso.
+float IR_MIN_STRENGTH = 0.5  // [S141] umbral de fuerza PROPIA del IR para dibujarlo (reemplaza el gate de confluencia cruzada)
 var array<label> SMC_irLabels = array.new<label>()
 if i_showIR and f_famOK(FAM_EST) and barstate.islast                                                        // IR = Estudio+ (§F4)
     for lb in SMC_irLabels
@@ -3907,17 +3908,19 @@ if i_showIR and f_famOK(FAM_EST) and barstate.islast                            
     array.clear(SMC_irLabels)
     int nIR = array.size(SMC_ir)
     if nIR > 0
-        // Poblar hacia atras: recorre TODOS los IR pero SOLO dibuja los que importan (confluencia >= 2 familias
-        // activas apiladas §7.0.2). Un IR suelto a mitad de rango (deg 0-1) = ruido -> se descarta. Es un EVENTO
-        // terciario, no zona: marca = triangulo direccional SIN texto (verde alcista / rojo bajista, tono OB).
-        // Del mas reciente hacia atras: i_maxShowIR cuenta los DIBUJADOS (no los recorridos) y corta en cuanto
-        // se llena -> respeta "poblar hacia atras" y ahorra las llamadas caras a f_confDegree. El propio array
-        // hace de contador (sin variable extra: el script vive pegado al techo de tokens CE10117).
+        // Poblar hacia atras: recorre TODOS los IR pero SOLO dibuja los que importan. [S141] El criterio ya NO es
+        // confluencia CRUZADA (>=2 familias en el precio) sino la fuerza PROPIA del IR (f_eventStrength: 40% tamano
+        // del impulso xATR + 20% cuerpo + 20% sweep + 20% alineacion bias). Motivo: §5.4/§6.3.25 -> el IR es matiz
+        // de contexto informativo cuyo valor es INTRINSECO (que tan fuerte fue el impulso rebalanceado), no depende
+        // de co-ubicacion con otras familias; el gate cruzado escondia justo los IR recientes y limpios. Es un
+        // EVENTO terciario, no zona: marca = triangulo direccional SIN texto (verde alcista / rojo bajista, tono OB).
+        // Del mas reciente hacia atras: i_maxShowIR cuenta los DIBUJADOS (no los recorridos) y corta en cuanto se
+        // llena -> respeta "poblar hacia atras". El propio array hace de contador (sin variable extra).
         for i = nIR - 1 to 0
             if array.size(SMC_irLabels) >= i_maxShowIR
                 break
             SMC_Event ir = array.get(SMC_ir, i)
-            if f_confDegree(ir.price) >= 2
+            if ir.strength >= IR_MIN_STRENGTH
                 bool bullIr = ir.dir == DIR_BULL
                 // Evento terciario: glifo triangulo pequeño (▲/▼ a size.tiny) FUERA de la vela (alcista debajo / bajista encima).
                 array.push(SMC_irLabels, label.new(ir.barTime, ir.price, bullIr ? "▲" : "▼", yloc = bullIr ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = bullIr ? #00C853 : #FF1744, size = size.tiny, xloc = xloc.bar_time))
