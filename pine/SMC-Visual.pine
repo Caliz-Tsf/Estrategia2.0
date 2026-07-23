@@ -318,6 +318,12 @@ type SMC_FBreak
 // IS/OOS. Cada tipo aporta solo los primitivos que su UDT porta (zona: rango/state/dist/
 // alineacion + bonus refinamiento; evento: rango/cuerpo/sweep/alineacion; §5.2). No se
 // renormaliza: strength es senal RELATIVA y los umbrales 0.33/0.66 tambien son candidatos.
+// [S142] Peso candidato Fase 3 (congelado, ADR-002): crédito de "ORIGEN DE REACCIÓN/DISPLACEMENT". Una zona
+// institucional (OB/Breaker/MB) o un FVG de displacement (trueFvg/propulsion) conserva fuerza aunque el precio
+// se ALEJE tras reaccionar (compensa la pérdida del término de cercanía) -> no la degrada a Secundario solo por
+// haberse ido. W=0.0 -> INERTE hasta calibrar IS/OOS. Refinamiento F3 (narrativa SMC del usuario): creditar la
+// secuencia toque->MSS->retorno->BRK+displacement->salida, no solo el tipo de zona.
+float W_ZREACT = 0.0
 f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
     float s = 0.0
     if atr14 > 0
@@ -329,6 +335,7 @@ f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
         s += 0.10 * (biasDir == 0 ? 0.5 : z.dir == biasDir ? 1.0 : 0.0)                                   // alineacion con bias
         if z.trueFvg or z.propulsion or z.gradedFvg
             s += 0.10                                                                                     // refinamiento [FIX P-05]
+        s += W_ZREACT * (z.kind == KIND_OB or z.kind == KIND_BREAKER or z.kind == KIND_MITIGATION or z.trueFvg or z.propulsion ? 1.0 : 0.0)  // [S142] origen de reacción/displacement (candidato F3, off por W=0)
     math.min(s, 1.0)
 
 f_eventStrength(SMC_Event e, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
@@ -3385,14 +3392,18 @@ bgcolor(i_rthEnable and f_famOK(FAM_TODO) and not curIsRTH ? color.new(color.gra
 // grande (§6.3) -> se dibuja PRIMERO (detras de zonas L2 y estructura L3). Reubicado aqui en Paso 5b
 // (antes se dibujaba al final = encima de todo; corrige la inversion grid-sobre-zonas). Ver §3/§7.4.
 // §5.4 ciclo de vida visual (decaimiento — checklist §10-#9): una zona MITIGADA pierde el fill
-// (bg = na) y queda como borde PUNTEADO GRIS; la forma persiste degradada, sin tinta de area (0
+// (bg = na) y queda como borde PUNTEADO BLANCO [S142] (ghost "gastado"); la forma persiste degradada, sin tinta de area (0
 // zonas mitigadas con fill en Operacion/Estudio). Activa/parcial conservan su render normal. PURAS.
 f_mitBg(bool mit, color col, int transp)     => mit ? color(na) : color.new(col, transp)
-f_mitBorder(bool mit, color col, int transp) => mit ? color.new(color.gray, 55) : color.new(col, transp)
+f_mitBorder(bool mit, color col, int transp) => mit ? color.new(color.white, 72) : color.new(col, transp)  // [S142] mitigado = borde BLANCO suave (ghost "gastado"), antes gris
 f_mitStyle(bool mit, string st)              => mit ? line.style_dotted : st
 // [S140] Atenuado por ANTIGUEDAD (dim-to-focus §curacion): rampa 0->i_obAgeDim segun edad en BARRAS
 // (bar_index - barIdx), simbolo-agnostico (ADR-001). Comun a OB/Breaker (y reutilizable por MB/Vacuum).
 f_ageDim(int barIdx) => math.min(int(math.max(0, bar_index - barIdx) * i_obAgeDim / i_obAgeBars), i_obAgeDim)
+// [S142] Color de etiqueta de zona: BLANCO si la zona esta mitigada (ghost "gastado", paridad con el borde
+// blanco de f_mitBorder), si no el color de familia; en ambos casos atenuado por antiguedad (f_ageDim*2, tope 85).
+// Unifica el patron repetido en los 7 sitios de label (OB/Breaker/IFVG/BPR/MB/Vacuum/FVG) -> ahorra tokens.
+f_zLblCol(color base, SMC_Zone z) => z.state == ZS_MITIGATED ? color.new(color.white, 72) : color.new(base, math.min(f_ageDim(z.barIdx) * 2, 85))
 
 // f_zBox / f_zLbl §6 refactor S121 (dieta CE10117): base comun de las familias de zona (OTE/OB/Breaker/
 // IFVG/BPR/MB/Vacuum/FVG/IPR). Comparten el mismo esqueleto de box.new (right = time, border_width = 1,
@@ -4154,6 +4165,8 @@ f_drawOB(SMC_Zone z) =>
 // co-ubicarse (confluencia real). Un unico acumulador top-level (resetea cada barra) hace que la ranura-Y
 // reclamada por cualquiera bloquee el nombre de las demas: el 1.º en orden de dibujo (OB>Breaker>MB>Vacuum)
 // conserva el label, el resto cede (el CUADRO sigue = confluencia visible). Los band-pick/ancla igual fuerzan.
+// [S142] Opción 1 (unificar nombres cross-familia) REVERTIDA: perdía información (etiquetas caían y el nombre
+// del slot flickeaba VAC->BRK->FVG). Cada caja conserva SU nombre; la familia FVG vuelve a su propio fvgFamSeenY.
 var array<box>   SMC_obBoxes  = array.new<box>()
 var array<label> SMC_obLabels = array.new<label>()
 string blockSeenY = ""
@@ -4185,7 +4198,7 @@ if i_showOB and barstate.islast
                         color obCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                         // Propulsion [T34]: OB de continuacion anidado -> etiqueta "OB⇈" (mayor peso) vs "OB".
                         string obTxt = z.propulsion ? "OB⇈" : "OB"
-                        array.push(SMC_obLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, color.new(obCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad como su caja
+                        array.push(SMC_obLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, obTxt, f_zLblCol(obCol, z)))  // [S140] atenuado por edad · [S142] blanco si mitigado
 
 // f_drawBreaker: caja del Breaker [T19 · §2.6] (solo Visual). Un OB invalidado renacido con polaridad
 // invertida. AZUL de familia (§5.2, como el OB) distinguido por borde PUNTEADO + label BRK; borde
@@ -4222,7 +4235,7 @@ if i_showBreaker and barstate.islast
                         blockSeenY := blockSeenY + brkKey
                         color brkCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
                         string brkTxt = z.dir == DIR_BULL ? "BRK ↑" : "BRK ↓"
-                        array.push(SMC_brkLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, color.new(brkCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad
+                        array.push(SMC_brkLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, brkTxt, f_zLblCol(brkCol, z)))  // [S140] atenuado por edad · [S142] blanco si mitigado
 
 // f_drawIFVG: caja del Inversion FVG [T27 · §5.2] (solo Visual). Un FVG invalidado renacido con
 // polaridad invertida. NARANJA de familia (§5.2, como el FVG) con borde PUNTEADO + label IFVG para
@@ -4239,7 +4252,7 @@ f_drawIFVG(SMC_Zone z) =>
 // IFVG y un FVG en la misma ranura-Y ambos rotulaban -> texto ilegible). Acumulador compartido (resetea cada
 // barra); prioridad de orden de dibujo IFVG > BPR > FVG: el 1.º conserva el nombre, el resto CEDE la etiqueta
 // (la CAJA sigue -> la co-ubicacion IFVG/FVG, que es señal SMC, se mantiene). Separado del blockSeenY de OB
-// (la union FVG<->OB se decide en la comparacion cross-familia, tarea 6).
+// (cada caja conserva su nombre; la union cross-familia se descarto en S142, ver nota arriba).
 string fvgFamSeenY = ""
 // En la ultima barra limpia y repinta las cajas IFVG vivas (KIND_IFVG, no invalidadas).
 var array<box>   SMC_ifvgBoxes  = array.new<box>()
@@ -4262,7 +4275,7 @@ if i_showIFVG and barstate.islast
                 if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (ifvgKey != "" and not str.contains(fvgFamSeenY, ifvgKey))
                     fvgFamSeenY := fvgFamSeenY + ifvgKey
                     color ifvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
-                    array.push(SMC_ifvgLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", color.new(ifvgCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad
+                    array.push(SMC_ifvgLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "IFVG", f_zLblCol(ifvgCol, z)))  // [S141] atenuado por edad · [S142] blanco si mitigado
 
 // f_drawBPR: caja del Balanced Price Range [T28 · §5.3] (solo Visual). Interseccion de FVG opuestos =
 // zona de reaccion fuerte. NARANJA de familia (§5.2, base; es bidireccional), borde solido + label BPR
@@ -4294,7 +4307,7 @@ if i_showBPR and barstate.islast
                     string bprKey = f_ySlot((z.top + z.bottom) / 2.0)                                            // §6 curacion S120 anti-solape
                     if bprCfg >= 2 or (bprKey != "" and not str.contains(fvgFamSeenY, bprKey))
                         fvgFamSeenY := fvgFamSeenY + bprKey
-                        array.push(SMC_bprLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", color.new(COL_FVG, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad
+                        array.push(SMC_bprLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "BPR", f_zLblCol(COL_FVG, z)))  // [S141] atenuado por edad · [S142] blanco si mitigado
 
 // [S107] Drawer de Volume Imbalance [T31 · §5.5] RETIRADO con el concepto (ver nota en la sección de detección).
 
@@ -4361,7 +4374,7 @@ if i_showMB and barstate.islast
                     if mbCfg >= 2 or (mbKey != "" and not str.contains(blockSeenY, mbKey))
                         blockSeenY := blockSeenY + mbKey
                         color mbCol = z.dir == DIR_BULL ? COL_OB_TXT_BULL : COL_OB_TXT_BEAR
-                        array.push(SMC_mbLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", color.new(mbCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad
+                        array.push(SMC_mbLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "MB", f_zLblCol(mbCol, z)))  // [S140] atenuado por edad · [S142] blanco si mitigado
 
 // Cajas de Vacuum Block [T33 · §5.7] (solo Visual). Vacio de apertura (gap grande) = iman de retorno.
 // AZUL de familia (§5.2, base COL_OB), borde punteado. No invalidada. Origen = barra del gap; se extiende a la actual.
@@ -4384,7 +4397,7 @@ if i_showVacuum and barstate.islast
                 string vacKey = f_ySlot((z.top + z.bottom) / 2.0)                                               // §6 curacion S120 anti-solape
                 if f_confDegree((z.top + z.bottom) / 2.0) >= 2 or (vacKey != "" and not str.contains(blockSeenY, vacKey))
                     blockSeenY := blockSeenY + vacKey
-                    array.push(SMC_vacLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", color.new(COL_OB_TXT_BULL, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S140] label atenuado por edad
+                    array.push(SMC_vacLabels, f_zLbl(math.round((z.barTime + time) / 2.0), (z.top + z.bottom) / 2.0, "VAC", f_zLblCol(COL_OB_TXT_BULL, z)))  // [S140] atenuado por edad · [S142] blanco si mitigado
 
 // Zona IPR vigente [T35 · §5.9] (solo Visual): rango desbalanceado (contexto de bias). Borde fino sin
 // relleno (es contexto, no zona de entrada), color por dir. Solo la actual (currentIpr), repintada-en-islast.
@@ -4444,7 +4457,7 @@ if i_showFVG and barstate.islast
                         color fvgCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR
                         // True FVG [T26]: vela media = displacement -> etiqueta "T.FVG" (alta calidad) vs "FVG".
                         string fvgTxt = (z.trueFvg ? "T.FVG" : "FVG") + (z.gradedFvg ? "·g" : "")
-                        array.push(SMC_fvgLabels, f_zLbl(math.round((z.barTime - barMs + time) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, color.new(fvgCol, math.min(f_ageDim(z.barIdx) * 2, 85))))  // [S141] label atenuado por edad como su caja (paridad OB)
+                        array.push(SMC_fvgLabels, f_zLbl(math.round((z.barTime - barMs + time) / 2.0), (z.top + z.bottom) / 2.0, fvgTxt, f_zLblCol(fvgCol, z)))  // [S141] atenuado por edad · [S142] blanco si mitigado
                     if i_showCE and z.state != ZS_MITIGATED
                         float ce = (z.top + z.bottom) / 2.0
                         color ceCol = z.dir == DIR_BULL ? COL_FVG_BULL : COL_FVG_BEAR

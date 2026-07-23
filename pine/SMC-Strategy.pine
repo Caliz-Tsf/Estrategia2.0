@@ -248,6 +248,12 @@ type SMC_FBreak
 // IS/OOS. Cada tipo aporta solo los primitivos que su UDT porta (zona: rango/state/dist/
 // alineacion + bonus refinamiento; evento: rango/cuerpo/sweep/alineacion; §5.2). No se
 // renormaliza: strength es senal RELATIVA y los umbrales 0.33/0.66 tambien son candidatos.
+// [S142] Peso candidato Fase 3 (congelado, ADR-002): crédito de "ORIGEN DE REACCIÓN/DISPLACEMENT". Una zona
+// institucional (OB/Breaker/MB) o un FVG de displacement (trueFvg/propulsion) conserva fuerza aunque el precio
+// se ALEJE tras reaccionar (compensa la pérdida del término de cercanía) -> no la degrada a Secundario solo por
+// haberse ido. W=0.0 -> INERTE hasta calibrar IS/OOS. Refinamiento F3 (narrativa SMC del usuario): creditar la
+// secuencia toque->MSS->retorno->BRK+displacement->salida, no solo el tipo de zona.
+float W_ZREACT = 0.0
 f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
     float s = 0.0
     if atr14 > 0
@@ -259,6 +265,7 @@ f_zoneStrength(SMC_Zone z, float curPrice, float atr14, int biasDir) =>
         s += 0.10 * (biasDir == 0 ? 0.5 : z.dir == biasDir ? 1.0 : 0.0)                                   // alineacion con bias
         if z.trueFvg or z.propulsion or z.gradedFvg
             s += 0.10                                                                                     // refinamiento [FIX P-05]
+        s += W_ZREACT * (z.kind == KIND_OB or z.kind == KIND_BREAKER or z.kind == KIND_MITIGATION or z.trueFvg or z.propulsion ? 1.0 : 0.0)  // [S142] origen de reacción/displacement (candidato F3, off por W=0)
     math.min(s, 1.0)
 
 f_eventStrength(SMC_Event e, float rangeAtr, float bodyPct, bool hadSweep, int biasDir) =>
