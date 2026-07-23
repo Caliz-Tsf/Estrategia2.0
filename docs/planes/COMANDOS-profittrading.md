@@ -11,7 +11,7 @@
 | INTENSIVOS DE SMC | agregado (intensivo SMC) | 23 | `profittrading intensivos` | https://www.youtube.com/playlist?list=PLk7TdJSck21O4AF5Da89q4S3RtpAE72nc |
 | Domina el Trading con SMC2026 | agregado (SMC actualizado) | 14 | `profittrading smc2026` | https://www.youtube.com/playlist?list=PLk7TdJSck21Op-XbQHnOaBZ3F8EQ27jhN |
 | Sesiones en vivo (Zoom) | agregado (ejecución/aplicación en vivo) | 27 | `profittrading live` | https://www.youtube.com/playlist?list=PLk7TdJSck21OSfvM7Lpdmq12P6I3_h83c |
-| Scalping 1min | agregado (método extra) | 6 | `profittrading scalping` | https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra |
+| Scalping 1min | agregado (método extra) | 14 | `profittrading scalping` | https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra |
 
 > Canal con 14 playlists; se omiten básicos/broker/shorts por ahora.
 
@@ -63,11 +63,13 @@ powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLk7TdJSck21OSfvM7Lpdmq12P6I3_h83c" -Mentor "profittrading live" -Model small -PlaylistItems "26-27"
 ```
 
-## 6. AGREGADO — Scalping 1min (6 → 2 lotes)
+## 6. AGREGADO — Scalping 1min (14 → 3 lotes)
 URL: https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra
+> [S142 · 2026-07-22] La playlist creció de 6 → 14 videos (+8 nuevos, chequeo yt-dlp). Re-loteado 6→2 lotes a 14→3 lotes.
 ```powershell
 powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra" -Mentor "profittrading scalping" -Model small -PlaylistItems "1-5"
-powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra" -Mentor "profittrading scalping" -Model small -PlaylistItems "6"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra" -Mentor "profittrading scalping" -Model small -PlaylistItems "6-10"
+powershell -ExecutionPolicy Bypass -File "D:\CODE\Estrategia2.0\scripts\process-channel.ps1" -ChannelUrl "https://www.youtube.com/playlist?list=PLk7TdJSck21OPnVD7LRr3Uh6VeBEAtpra" -Mentor "profittrading scalping" -Model small -PlaylistItems "11-14"
 ```
 
 ---
