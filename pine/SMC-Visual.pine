@@ -2222,6 +2222,17 @@ var array<int>   obBufTime = array.new<int>()
 var array<float> obBufVol  = array.new<float>()
 float volMeasure = ta.atr(200)
 float atr14      = ta.atr(14)
+// [S145 · ADR-026 D3/D4] BANDA DE DIBUJO SEGURO. La escala del grafico la fuerza CUALQUIER primitiva
+// emitida a su precio: en D1 EURUSD UNA sola linea (BSL 1.51) impuso una escala de 4400 pips sobre
+// velas de 500 -> las velas ocupaban el 11% del panel (medido S145). Ningun nivel se dibuja a su
+// precio fuera de [dolLo, dolHi]; el que cae fuera se comunica por TEXTO anclado dentro de la banda
+// (marcador de borde). Asi el objetivo lejano se conserva SIN poder tocar la escala.
+// Lookback FIJO (no chart.*_visible_bar_time): esa via recalcula el script en cada scroll/zoom y no
+// esta medida (P-DOL-1). Constante, no input: candidato congelado hasta Fase 3 (ADR-002), y ademas
+// no corre los in_N de indicator_set_inputs.
+int   DOL_BAND_BARS = 200
+float dolHi = ta.highest(high, DOL_BAND_BARS)
+float dolLo = ta.lowest(low,   DOL_BAND_BARS)
 // [S103 · BUG#1] Poblar el escalar de suavizado en el estado del chart. Sin gate isconfirmed:
 // atr14 es escalar de PRESENTACION que el path islast necesita SIEMPRE (asimetria deliberada con
 // pdHigh/pdLow, que son snapshot al cierre). Sin esto queda na -> colapsa band-pick/posRole/
@@ -3772,27 +3783,28 @@ if i_showPools and barstate.islast
     array.clear(SMC_poolLabels)
     hidPools := 0
     // §8.2 F8: en Operacion solo el "pool objetivo" por lado (BSL vivo mas cercano arriba, SSL abajo).
-    // §7.1 guardian de draws [A-6]: ademas, el draw ALINEADO AL BIAS mas lejano (poolDrawIdx) por lado y
-    // todo pool con confDegree>=2 son INMUNES al recorte (rescata el "adios al BSL 1.51": un old-high/pool
-    // fuera del rango P/D pero objetivo de proyeccion sobrevive). El rango P/D es contexto, JAMAS tijera.
+    // §7.1 guardian de draws [A-6]: ademas las ANCLAS de la escalera (alto mas alto / bajo mas bajo) son
+    // INMUNES al recorte — de ahi sale el "adios al BSL 1.51" resuelto: un old-high fuera del rango P/D
+    // pero objetivo de proyeccion sobrevive. El rango P/D es contexto, JAMAS tijera.
     int poolBSLIdx = -1
     int poolSSLIdx = -1
-    int poolDrawIdx = -1
-    // [S106 Paso C · render LP-Pro] top-2 pools VIVOS de mayor strength por lado (arriba/abajo del precio).
-    // Además del "objetivo más cercano" clásico, se muestran los 2 imanes más fuertes de cada lado (línea +
-    // magnitud=touches + estado swept), estilo Liquidity-Pools-Pro. Arrays fijos de 2 (RE10045-safe).
-    int upS1 = -1
-    int upS2 = -1
-    int loS1 = -1
-    int loS2 = -1
-    float upS1v = -1.0
-    float upS2v = -1.0
-    float loS1v = -1.0
-    float loS2v = -1.0
+    // [S145 · ADR-026 D1] ANCLAS DE LA ESCALERA. El usuario lee el draw "desde el alto MAS ALTO hacia
+    // el precio, y desde el bajo MAS BAJO hacia el precio". Por eso el ancla NO es "el mas lejano
+    // alineado al bias" (poolDrawIdx, que dependia del bias y podia no existir): es el BSL mas ALTO y
+    // el SSL mas BAJO vivos, siempre, con bias o sin el. Al ser la CABEZA de la escalera, el far pivot
+    // (BSL 1.51) no puede ser recortado por construccion -> muere el "guardian con inmunidad" §7.1.
+    // Si aparece un BSL vivo mas alto, el ancla se recalcula sola: no hay nivel hardcodeado.
+    // [S145] Retirado el top-2 por strength (upS1/upS2/loS1/loS2, S106 LP-Pro): un objetivo de liquidez
+    // se alcanza en ORDEN GEOMETRICO (no se llega al 3.o sin cruzar el 1.o), asi que ordenar por
+    // strength producia una lista que el precio no puede recorrer. strength sigue decidiendo COMO se
+    // dibuja (ADR-014), no CUAL.
+    int poolTopIdx = -1
+    int poolBotIdx = -1
     if array.size(SMC_pools) > 0 and not f_famOK(FAM_EST)
         float bslD = 1e9
         float sslD = 1e9
-        float drawFar = -1.0
+        float topL = -1e9
+        float botL = 1e9
         for i = 0 to array.size(SMC_pools) - 1
             SMC_Pool pp = array.get(SMC_pools, i)
             if pp.touches >= i_minTouches and not pp.swept
@@ -3802,48 +3814,35 @@ if i_showPools and barstate.islast
                 else if pp.dir == DIR_BEAR and pp.level <= close and (close - pp.level) < sslD
                     sslD := close - pp.level
                     poolSSLIdx := i
-                // draw alineado al bias: BSL arriba si bias alcista / SSL abajo si bias bajista, el mas lejano
-                bool aligned = (chartState.bias == DIR_BULL and pp.dir == DIR_BULL and pp.level > close) or (chartState.bias == DIR_BEAR and pp.dir == DIR_BEAR and pp.level < close)
-                float distp = math.abs(pp.level - close)
-                if aligned and distp > drawFar
-                    drawFar := distp
-                    poolDrawIdx := i
-                // top-2 por strength por lado (LP-Pro)
-                if pp.level >= close
-                    if pp.strength > upS1v
-                        upS2 := upS1
-                        upS2v := upS1v
-                        upS1 := i
-                        upS1v := pp.strength
-                    else if pp.strength > upS2v
-                        upS2 := i
-                        upS2v := pp.strength
-                else
-                    if pp.strength > loS1v
-                        loS2 := loS1
-                        loS2v := loS1v
-                        loS1 := i
-                        loS1v := pp.strength
-                    else if pp.strength > loS2v
-                        loS2 := i
-                        loS2v := pp.strength
+                if pp.dir == DIR_BULL and pp.level > topL
+                    topL := pp.level
+                    poolTopIdx := i
+                if pp.dir == DIR_BEAR and pp.level < botL
+                    botL := pp.level
+                    poolBotIdx := i
     if array.size(SMC_pools) > 0
         for i = 0 to array.size(SMC_pools) - 1
             SMC_Pool p = array.get(SMC_pools, i)
             bool eligible   = p.touches >= i_minTouches and not p.swept                                          // [S144] barridos NO se dibujan (redundante con marcador de sweep)
-            bool guardian   = not p.swept and (i == poolDrawIdx or f_confDegree(p.level) >= 2)                    // §7.1 inmune al recorte
-            bool strongLP   = not p.swept and (i == upS1 or i == upS2 or i == loS1 or i == loS2)                  // [S106 Paso C] top-2 fuertes/lado (LP-Pro)
-            bool isObjetivo = f_famOK(FAM_EST) or i == poolBSLIdx or i == poolSSLIdx or guardian or strongLP
+            bool guardian   = not p.swept and (i == poolTopIdx or i == poolBotIdx)                                // [S145 ADR-026] anclas: alto mas alto / bajo mas bajo
+            bool isObjetivo = f_famOK(FAM_EST) or i == poolBSLIdx or i == poolSSLIdx or guardian
             if eligible and not p.swept and not isObjetivo
                 hidPools += 1
             if eligible and isObjetivo
                 bool isBSL = p.dir == DIR_BULL
                 color col = isBSL ? COL_BSL : COL_SSL
-                array.push(SMC_poolLines, f_drawPools(p))
-                if not p.swept
+                // [S145 · ADR-026 D3] Puerta de banda: SOLO se emite la linea al precio real si el nivel
+                // cae dentro de [dolLo, dolHi]. Fuera de banda no se crea NINGUNA primitiva a ese precio
+                // -> la escala no puede ser forzada. El objetivo se comunica por texto en el borde, con
+                // su precio real y la distancia: se conserva la informacion, se pierde solo la geometria
+                // (que a esa distancia era ilegible de todos modos).
+                if p.level <= dolHi and p.level >= dolLo
+                    array.push(SMC_poolLines, f_drawPools(p))
                     // Etiqueta 2 velas a la derecha del borde (bar_index + 2): margen para que no
                     // quede pegada a la vela (pref. usuario); style_label_left = cuerpo a la derecha.
                     array.push(SMC_poolLabels, label.new(bar_index + 2, p.level, (isBSL ? "BSL ·" : "SSL ·") + str.tostring(p.touches), style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
+                else
+                    array.push(SMC_poolLabels, label.new(bar_index + 2, isBSL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (isBSL ? "▲ BSL " : "▼ SSL ") + str.tostring(p.level, format.mintick) + " ·" + str.tostring(p.touches), style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
 
 // Marcadores de sweep (trampa) [T10, Propuesta B]: cada SMC_sweeps es un pool barrido cuyo close
 // volvio dentro (trampa). Sweep de BSL = sesgo bajista (rojo, marca arriba); sweep de SSL = sesgo
@@ -4569,8 +4568,15 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                         array.push(lines, line.new(tA, tp, rgt, tp, xloc = xloc.bar_time, color = color.new(col, 20), style = line.style_solid, width = mtfW))
                         array.push(labels, label.new(mid, tp, baseTxt + " (" + tf + ")", xloc = xloc.bar_time, style = dr == DIR_BULL ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = col, size = size.small))
                 k == KIND_POOL =>
-                    array.push(lines, line.new(tA, tp, nowT, tp, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dashed, width = mtfW))
-                    array.push(labels, label.new(nowT, tp, tf + ": " + (dr == DIR_BULL ? "BSL" : "SSL"), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
+                    // [S145 · ADR-026 D3/D7] Misma puerta de banda que el pool NATIVO, pero aqui importa
+                    // MAS: cuanto mas bajo el TF del chart, mas estrecha la banda -> un BSL de D1 visto
+                    // desde M5 esta siempre fuera, y dibujarlo a su precio aplastaria el M5 mucho peor
+                    // que el D1. Fuera de banda -> marcador de borde con el precio real y el TF de origen.
+                    if tp <= dolHi and tp >= dolLo
+                        array.push(lines, line.new(tA, tp, nowT, tp, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dashed, width = mtfW))
+                        array.push(labels, label.new(nowT, tp, tf + ": " + (dr == DIR_BULL ? "BSL" : "SSL"), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
+                    else
+                        array.push(labels, label.new(nowT, dr == DIR_BULL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (dr == DIR_BULL ? "▲ " : "▼ ") + tf + ": " + (dr == DIR_BULL ? "BSL " : "SSL ") + str.tostring(tp, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
                 k == KIND_SWEEP =>
                     // §7.2: el sweep era la unica marca sin tag de TF -> se anade "(D1)"/"(H1)".
                     string mk = i_mtfSweepMark ? ((dr == DIR_BULL ? "▲" : "▼") + " (" + tf + ")") : (tf + ": Sweep")

@@ -191,6 +191,37 @@ tres selectores de §1.3 (§4).
 > ⚠️ **Esto es una predicción, y en este proyecto las predicciones de tokens mueren** (5 de 5, S133).
 > No se implementa "porque debería salir gratis": se mide (**P-DOL-3**) y si no cabe, se para.
 
+### D7 — La escalera **se hereda**, y en TF bajo el marcador de borde pasa a ser el modo PRINCIPAL
+
+> **Requisito del usuario (S145, literal):** «los más importantes se deben heredar a H1 y en H1 se deben
+> heredar los más importantes M5 junto a los de D1.»
+
+Dos consecuencias, una ya ejecutada y otra que abre trabajo:
+
+**(a) La puerta de banda también aplica al dibujo HEREDADO — ejecutado en S145.** Los pools heredados se
+dibujan por una ruta **distinta** de la nativa (`f_drawMTFBuf`, rama `KIND_POOL`, `:4570`) que **no
+tenía** ninguna puerta. Ahí el problema es **peor**, no igual: *cuanto más bajo el TF del chart, más
+estrecha la banda*, así que un BSL de D1 visto desde M5 está **siempre** fuera de banda. Sin la puerta,
+heredar la escalera a M5 aplastaría el M5 mucho más de lo que el 1.51 aplastaba el D1.
+
+> **Corolario de diseño:** en TF bajo el marcador de borde deja de ser el caso excepcional y se vuelve
+> **la forma normal** de mostrar liquidez heredada. Eso es coherente con lo que se quiere leer en M5:
+> no la geometría del nivel de D1 (inútil a esa escala), sino *que existe, a qué precio y de qué TF viene*.
+
+**(b) Hueco abierto: el transporte MTF hereda los pools MÁS CERCANOS, no las ANCLAS.** `f_computeTFState`
+llama a `f_nearestNPools(..., capPool, ...)` (`:1770`) con `i_mtfCapPool = 2`: se transportan los 2 pools
+**más cercanos** del HTF. Pero el ancla de la escalera (D1) es por definición el **más lejano**. Con el
+transporte actual, **el "alto más alto" de D1 nunca llega a H1 ni a M5** — justo lo que el requisito pide
+que llegue.
+
+- **La pieza ya existe:** `f_farthestPool(src, px, up, minT, bound, inclSwept)` está en el CORE desde
+  S115/ADR-018 (`:1858-1872`) y es exactamente el selector de ancla. No hay que escribir el algoritmo,
+  hay que **darle una ranura en el transporte**.
+- Coste: es un cambio de **CORE** (byte-idéntico ×3) y de ranuras del buffer MTF — ADR-024 §3 advierte
+  que las ranuras son hoy el dial más caro (12 ranuras × 89 identificadores × 2 llamadas). **No medido.**
+- **Orden (S139):** la herencia se decide **después** de verificar el concepto en su TF nativo. El nativo
+  (D1) queda verificado en S145; H1 y M5 nativos **no**. Por eso (b) queda en Paso 2, no se improvisa.
+
 ### D6 — Abrir el CORE arrastra la deuda parqueada
 
 Tocar el CORE exige `check-core-sync` ×3 y un apply real. Si se abre, **se cierra en el mismo movimiento
@@ -264,6 +295,7 @@ No abrir el CORE dos veces para dos cosas.
 | **P-DOL-1** | Probe aislado: script mínimo con `chart.left/right_visible_bar_time` → medir si el recálculo en scroll es perceptible y si `nVis` es fiable en D1/H1/M5. | Si el recálculo molesta o `nVis` es inestable ⇒ **D4 fallback** (`i_dolBandBars` fijo). Decisión, no debate. |
 | **P-DOL-2** | ✅ **MEDIDO Y PASADO (S145, D1)** — ver §1.2.1. Banda de velas 500 pips vs escala impuesta 4400; **1 nivel horizontal vivo (`1.51`) causa el 89% de pérdida vertical**. El sujeto existe y es de una sola primitiva. **Pendiente repetir en H1/M5.** | — |
 | **P-DOL-3** | **Medir** el coste en tokens: (a) build con los 3 selectores retirados, (b) build con la escalera. Apply real + `pine_get_console` (el número real **no** está en `pine_get_errors`). | Saldo neto > headroom ⇒ **parar** y evaluar alternativa F. Escribir la predicción **antes** de medir. |
+| **I-0** | ⏳ **EN CURSO (S145)** — **Paso 1, Visual-only, sin tocar el CORE**: anclas `poolTopIdx`/`poolBotIdx` (alto más alto / bajo más bajo) + puerta de banda `[dolLo, dolHi]` + marcador de borde, financiado retirando el top-2 por `strength` y la lógica `aligned/drawFar`. `check-core-sync` OK (SHA `7ad95b3e612d041a`, sin cambios), `pine_check` 0/0. | Saldo de tokens con **apply real** (predicción escrita antes de medir: ahorro neto 20-60). |
 | **I-1** | `f_dolLadder` al CORE + deuda weekend-safe FVG (§D6). `check-core-sync` ×3. | 0/0 con apply real. |
 | **I-2** | Dibujo: escalera + marcadores de borde. Validación visual D1/H1/M5 con el usuario. | Aprobación humana explícita (incluye el cambio de §D2). |
 | **I-3** | Commit por concepto + actualizar `reglas-smc-ict.md` §3.1 con la sección DOL. | `pine_check` 0/0 + core-sync verde. |
