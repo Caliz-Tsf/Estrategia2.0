@@ -2100,10 +2100,18 @@ if barstate.islast
     // Visibilidad base por lado (revelado ya calculado): slots up (0,2,4,6) usan showXUp; down usan showXDn.
     array<bool> vD1 = array.new<bool>(8, false)
     array<bool> vH1 = array.new<bool>(8, false)
+    // [S145 · ADR-026 D7 · opcion A] EXCEPCION AL REVELADO para las ANCLAS DE LIQUIDEZ (slots 4=POOL^
+    // y 5=POOLv, que f_farthestPool entrega como el pool mas lejano vivo de cada lado). El revelado-al-
+    // romper de ADR-017 sigue rigiendo para OB/FVG (0-3) y EQH/EQL (6-7): esos son CONTEXTO, y tiene
+    // sentido que aparezcan solo cuando el precio rompe la frontera del rango HTF. Las anclas NO son
+    // contexto: son el DRAW, la lectura de hacia donde va el precio. Ocultarlas hasta que haya ruptura
+    // vacia de sentido la escalera justo cuando mas se necesita (antes de la ruptura). Con la puerta de
+    // banda ya en f_ctxLine, mostrarlas siempre NO puede estirar la escala.
     for s = 0 to 7
         bool up = s % 2 == 0
-        array.set(vD1, s, (up ? showD1Up : showD1Dn) and not na(array.get(dTop, s)))
-        array.set(vH1, s, (up ? showH1Up : showH1Dn) and not na(array.get(hTop, s)))
+        bool ancla = s == 4 or s == 5
+        array.set(vD1, s, (ancla or (up ? showD1Up : showD1Dn)) and not na(array.get(dTop, s)))
+        array.set(vH1, s, (ancla or (up ? showH1Up : showH1Dn)) and not na(array.get(hTop, s)))
     // Colapso solape MTF: H1 (menor) cede ante D1 (mayor). Cajas (0-3): solape vertical > 70% del rango H1.
     for j = 0 to 3
         if array.get(vH1, j)
