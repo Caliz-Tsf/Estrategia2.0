@@ -113,7 +113,6 @@ i_eqlLength    = input.int(3,      "Barras confirmacion EQH/EQL", minval = 1, gr
 i_showPools    = input.bool(true,  "Mostrar pools de liquidez (BSL/SSL)", group = GRP_LIQ)
 i_poolTol      = input.float(0.1,  "Tolerancia cluster (x ATR14)", minval = 0.0, maxval = 0.5, step = 0.05, group = GRP_LIQ)
 i_minTouches   = input.int(2,      "Toques minimos para pool", minval = 2, group = GRP_LIQ)
-i_showSwept    = input.bool(true,  "Mostrar pools barridos (historial)", group = GRP_LIQ)
 i_showSweeps   = input.bool(true,  "Mostrar marcadores de sweep (trampa/Spring/Raid)", group = GRP_LIQ)
 i_maxShowSweeps= input.int(20,     "Max marcadores de sweep (recientes)", minval = 1, group = GRP_LIQ)
 i_raidTouches  = input.int(3,      "Raid: toques minimos del pool (§3.7 #16)", minval = 2, group = GRP_LIQ)
@@ -3748,17 +3747,17 @@ if barstate.islast
     while array.size(SMC_eqLevels) > array.size(SMC_eqLabels)
         array.pop(SMC_eqLevels)
 
-// f_drawPools [T09b]: linea horizontal del nivel del pool. VIVO (swept==false): dashed de barTime
-// -> barra actual (la liquidez vive hasta ser barrida). BARRIDO (swept==true): dotted tenue de
-// barTime -> sweptBarTime (la linea TERMINA en el barrido, Propuesta B; no se extiende a la
-// derecha). BSL (sobre highs) ROJO suave = liquidez tomada para VENTAS / SSL (bajo lows) VERDE suave
-// = liquidez tomada para COMPRAS (pref. usuario): son lineas de objetivo de precio -> SEMITRANSPARENTES
-// (vivo transp 35, barrido 75). Solo touches >= minTouches.
+// f_drawPools [T09b]: linea horizontal dashed del nivel del pool VIVO (swept==false), de barTime ->
+// barra actual (la liquidez vive hasta ser barrida). BSL (sobre highs) ROJO suave = liquidez tomada
+// para VENTAS / SSL (bajo lows) VERDE suave = liquidez tomada para COMPRAS (pref. usuario): son
+// lineas de objetivo de precio -> SEMITRANSPARENTES (transp 35). Solo touches >= minTouches.
+// [S144] Los pools BARRIDOS ya NO se dibujan: su historial era invisible en la practica (segmentos
+// cortos transp 75) y redundante con el MARCADOR de sweep (f_detectSweep, trampa/Spring/Raid). El
+// barrido se sigue MARCANDO en el array (lo necesita f_detectSweep) — solo se retira su DIBUJO.
 f_drawPools(SMC_Pool p) =>
     bool isBSL = p.dir == DIR_BULL
     col = isBSL ? COL_BSL : COL_SSL
-    int xEnd = p.swept ? p.sweptBarTime : time
-    line.new(p.barTime, p.level, xEnd, p.level, xloc = xloc.bar_time, color = color.new(col, p.swept ? 75 : 35), style = p.swept ? line.style_dotted : line.style_dashed, width = 1)
+    line.new(p.barTime, p.level, time, p.level, xloc = xloc.bar_time, color = color.new(col, 35), style = line.style_dashed, width = 1)
 
 // En la ultima barra limpia y repinta las lineas + etiquetas de los pools (vivos + barridos).
 var array<line>  SMC_poolLines  = array.new<line>()
@@ -3831,7 +3830,7 @@ if i_showPools and barstate.islast
     if array.size(SMC_pools) > 0
         for i = 0 to array.size(SMC_pools) - 1
             SMC_Pool p = array.get(SMC_pools, i)
-            bool eligible   = p.touches >= i_minTouches and (not p.swept or (i_showSwept and f_famOK(FAM_EST)))   // pools barridos = Estudio+ (§F8)
+            bool eligible   = p.touches >= i_minTouches and not p.swept                                          // [S144] barridos NO se dibujan (redundante con marcador de sweep)
             bool guardian   = not p.swept and (i == poolDrawIdx or f_confDegree(p.level) >= 2)                    // §7.1 inmune al recorte
             bool strongLP   = not p.swept and (i == upS1 or i == upS2 or i == loS1 or i == loS2)                  // [S106 Paso C] top-2 fuertes/lado (LP-Pro)
             bool isObjetivo = f_famOK(FAM_EST) or i == poolBSLIdx or i == poolSSLIdx or guardian or strongLP
