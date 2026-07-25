@@ -2009,6 +2009,17 @@ color CTX_FVG_BEAR = color.rgb(239, 108, 0)
 color CTX_LIQ      = #9C27B0
 color CTX_MIT      = color.rgb(120, 120, 120)   // frontera mitigada gris degradada (F1-CTX-04)
 
+// [S145 · ADR-026 D3/D7] BANDA DE DIBUJO SEGURO del Context — mismo invariante que el Visual: ninguna
+// primitiva se emite a su precio fuera de [dolLo, dolHi], porque una sola linea lejana fuerza la escala
+// del grafico (medido S145: en D1 el BSL 1.51 impuso 4400 pips sobre velas de 500 -> velas al 11% del
+// panel). Aqui es MAS critico que en el Visual: el Context es justo el que trae los extremos MAS
+// LEJANOS del HTF (f_tfExtremes -> f_farthestPool/f_farthestZone), y cuanto mas bajo el TF del chart
+// mas estrecha es la banda. Sin esto, revelar el ancla de D1 en M5 aplasta el M5.
+int   DOL_BAND_BARS = 200
+float ctxAtr = ta.atr(14)
+float dolHi  = ta.highest(high, DOL_BAND_BARS)
+float dolLo  = ta.lowest(low,   DOL_BAND_BARS)
+
 // f_ctxBox: dibuja u oculta un slot-caja de contexto (OB/FVG heredado). pf=transp fill, pb=transp borde.
 f_ctxBox(box bx, bool vis, float top, float bot, float tA, float tB, color fam, string tag, int pf, int pb, int w) =>
     if vis and not na(top) and not na(bot) and not na(tA)
@@ -2029,7 +2040,7 @@ f_ctxBox(box bx, bool vis, float top, float bot, float tA, float tB, color fam, 
 // f_ctxLine: dibuja u oculta un slot-linea de contexto (POOL/EQ heredado) + su label. Pool = se
 // extiende hasta 'now' (objetivo vivo); EQ = tramo tA->tB (dos pivotes iguales del HTF, patron Visual).
 f_ctxLine(line ln, label lb, bool vis, float lvl, float tA, float tB, bool isPool, color fam, string tag, int pb, int w) =>
-    if vis and not na(lvl) and not na(tA)
+    if vis and not na(lvl) and not na(tA) and lvl <= dolHi and lvl >= dolLo
         int rgt = isPool ? time : (na(tB) ? time : int(tB))
         line.set_xy1(ln, int(tA), lvl)
         line.set_xy2(ln, rgt, lvl)
@@ -2038,6 +2049,17 @@ f_ctxLine(line ln, label lb, bool vis, float lvl, float tA, float tB, bool isPoo
         label.set_x(lb, rgt)
         label.set_y(lb, lvl)
         label.set_text(lb, tag)
+        label.set_textcolor(lb, fam)
+        label.set_color(lb, color.new(fam, 90))
+    else if vis and not na(lvl) and not na(tA)
+        // FUERA DE BANDA -> marcador de borde: la linea NO se emite (no puede tocar la escala) y el
+        // label se ancla dentro de la banda con el precio REAL + la distancia en ATR. En M5 este es el
+        // caso NORMAL para todo lo heredado de D1, no la excepcion.
+        bool arriba = lvl > dolHi
+        line.set_color(ln, na)
+        label.set_x(lb, time)
+        label.set_y(lb, arriba ? dolHi - 0.5 * ctxAtr : dolLo + 0.5 * ctxAtr)
+        label.set_text(lb, (arriba ? "▲ " : "▼ ") + tag + " " + str.tostring(lvl, format.mintick) + "  (" + str.tostring(math.round(math.abs(lvl - close) / ctxAtr)) + "×ATR)")
         label.set_textcolor(lb, fam)
         label.set_color(lb, color.new(fam, 90))
     else
