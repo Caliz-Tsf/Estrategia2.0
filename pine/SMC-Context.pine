@@ -2033,6 +2033,10 @@ f_ctxBox(box bx, bool vis, float top, float bot, float tA, float tB, color fam, 
         box.set_text(bx, tag)
         box.set_text_color(bx, fam)
     else
+        // [S145] Ver nota en f_ctxLine: aparcar la geometria en 'close', no dejarla donde se creo
+        // (close de la primera barra), para que un slot invisible no arrastre la auto-escala.
+        box.set_top(bx, close)
+        box.set_bottom(bx, close)
         box.set_bgcolor(bx, na)
         box.set_border_color(bx, na)
         box.set_text(bx, "")
@@ -2055,15 +2059,24 @@ f_ctxLine(line ln, label lb, bool vis, float lvl, float tA, float tB, bool isPoo
         // FUERA DE BANDA -> marcador de borde: la linea NO se emite (no puede tocar la escala) y el
         // label se ancla dentro de la banda con el precio REAL + la distancia en ATR. En M5 este es el
         // caso NORMAL para todo lo heredado de D1, no la excepcion.
+        // [S145 FIX] NO se antepone flecha: el 'tag' del Context ya la trae (salia "▲ D1 ▲ BSL").
         bool arriba = lvl > dolHi
         line.set_color(ln, na)
         label.set_x(lb, time)
         label.set_y(lb, arriba ? dolHi - 0.5 * ctxAtr : dolLo + 0.5 * ctxAtr)
-        label.set_text(lb, (arriba ? "▲ " : "▼ ") + tag + " " + str.tostring(lvl, format.mintick) + "  (" + str.tostring(math.round(math.abs(lvl - close) / ctxAtr)) + "×ATR)")
+        label.set_text(lb, tag + " " + str.tostring(lvl, format.mintick) + "  (" + str.tostring(math.round(math.abs(lvl - close) / ctxAtr)) + "×ATR)")
         label.set_textcolor(lb, fam)
         label.set_color(lb, color.new(fam, 90))
     else
+        // [S145] Un slot NO usado se aparca en el precio actual, no donde se creo. Los slots se
+        // precrean en barstate.isfirst con y = close de la PRIMERA barra (0.92 en EURUSD D1) y ahi se
+        // quedaban: aunque son invisibles (texto vacio + color na), su Y sigue siendo un precio y puede
+        // arrastrar la auto-escala ~2000 pips hacia abajo. Aparcarlos en 'close' los deja siempre
+        // dentro de la banda.
+        line.set_xy1(ln, int(time), close)
+        line.set_xy2(ln, int(time), close)
         line.set_color(ln, na)
+        label.set_y(lb, close)
         label.set_text(lb, "")
         label.set_color(lb, na)
         label.set_textcolor(lb, na)
@@ -2107,11 +2120,17 @@ if barstate.islast
     // contexto: son el DRAW, la lectura de hacia donde va el precio. Ocultarlas hasta que haya ruptura
     // vacia de sentido la escalera justo cuando mas se necesita (antes de la ruptura). Con la puerta de
     // banda ya en f_ctxLine, mostrarlas siempre NO puede estirar la escala.
+    // [S145 FIX] La excepcion del ancla se salta SOLO el revelado, NUNCA la cascada por chart-TF ni el
+    // interruptor maestro. La 1a version usaba `ancla or (...)`, que se saltaba las tres cosas: en un
+    // chart D1 aparecian el ancla de D1 y la de H1, violando "un TF no hereda de si mismo ni de uno
+    // menor" (ctxD1Applies/ctxH1Applies, §Paso E). Regla: D1 -> sin contexto; H1 -> solo D1; M5 -> D1+H1.
+    bool anclaD1Ok = i_extOn and ctxD1Applies
+    bool anclaH1Ok = i_extOn and ctxH1Applies
     for s = 0 to 7
         bool up = s % 2 == 0
         bool ancla = s == 4 or s == 5
-        array.set(vD1, s, (ancla or (up ? showD1Up : showD1Dn)) and not na(array.get(dTop, s)))
-        array.set(vH1, s, (ancla or (up ? showH1Up : showH1Dn)) and not na(array.get(hTop, s)))
+        array.set(vD1, s, (ancla ? anclaD1Ok : (up ? showD1Up : showD1Dn)) and not na(array.get(dTop, s)))
+        array.set(vH1, s, (ancla ? anclaH1Ok : (up ? showH1Up : showH1Dn)) and not na(array.get(hTop, s)))
     // Colapso solape MTF: H1 (menor) cede ante D1 (mayor). Cajas (0-3): solape vertical > 70% del rango H1.
     for j = 0 to 3
         if array.get(vH1, j)
