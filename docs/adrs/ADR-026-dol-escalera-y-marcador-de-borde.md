@@ -208,7 +208,21 @@ heredar la escalera a M5 aplastaría el M5 mucho más de lo que el 1.51 aplastab
 > **la forma normal** de mostrar liquidez heredada. Eso es coherente con lo que se quiere leer en M5:
 > no la geometría del nivel de D1 (inútil a esa escala), sino *que existe, a qué precio y de qué TF viene*.
 
-**(b) Hueco abierto: el transporte MTF hereda los pools MÁS CERCANOS, no las ANCLAS.** `f_computeTFState`
+**(a-bis) Precisión del usuario (S145) que REDUCE el alcance de (b):**
+
+> «con que se marque el alto más alto de esa temporalidad —que debe ser uno de los pool que tenemos
+> identificados— está bien, y así para M5.»
+
+Es decir: en H1 el ancla es **el alto más alto de H1**, no el de D1 heredado. Y eso **ya funciona sin
+tocar nada**: cuando el chart está en H1, `SMC_pools` se construye nativamente sobre H1, así que
+`poolTopIdx`/`poolBotIdx` (a-ejecutado) devuelven el ancla **propia de H1**. Lo mismo en M5.
+
+⇒ **El Paso 2 deja de ser un cambio de CORE y pasa a ser una VERIFICACIÓN** de que el ancla + el
+marcador de borde se comportan en H1 y M5 nativos. El hueco (b) sigue existiendo pero deja de estar
+en el camino crítico: es "además del ancla propia, ¿quiero ver la de D1?", una pregunta abierta, no
+un bloqueante.
+
+**(b) Hueco abierto (ya NO bloqueante): el transporte MTF hereda los pools MÁS CERCANOS, no las ANCLAS.** `f_computeTFState`
 llama a `f_nearestNPools(..., capPool, ...)` (`:1770`) con `i_mtfCapPool = 2`: se transportan los 2 pools
 **más cercanos** del HTF. Pero el ancla de la escalera (D1) es por definición el **más lejano**. Con el
 transporte actual, **el "alto más alto" de D1 nunca llega a H1 ni a M5** — justo lo que el requisito pide

@@ -3824,7 +3824,7 @@ if i_showPools and barstate.islast
         for i = 0 to array.size(SMC_pools) - 1
             SMC_Pool p = array.get(SMC_pools, i)
             bool eligible   = p.touches >= i_minTouches and not p.swept                                          // [S144] barridos NO se dibujan (redundante con marcador de sweep)
-            bool guardian   = not p.swept and (i == poolTopIdx or i == poolBotIdx)                                // [S145 ADR-026] anclas: alto mas alto / bajo mas bajo
+            bool guardian   = not p.swept and (i == poolTopIdx or i == poolBotIdx or f_confDegree(p.level) >= 2)  // [S145 ADR-026] anclas: alto mas alto / bajo mas bajo (+ confluencia: dossier §2.3, un draw con confluencia NO se recorta)
             bool isObjetivo = f_famOK(FAM_EST) or i == poolBSLIdx or i == poolSSLIdx or guardian
             if eligible and not p.swept and not isObjetivo
                 hidPools += 1
@@ -3842,7 +3842,11 @@ if i_showPools and barstate.islast
                     // quede pegada a la vela (pref. usuario); style_label_left = cuerpo a la derecha.
                     array.push(SMC_poolLabels, label.new(bar_index + 2, p.level, (isBSL ? "BSL ·" : "SSL ·") + str.tostring(p.touches), style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
                 else
-                    array.push(SMC_poolLabels, label.new(bar_index + 2, isBSL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (isBSL ? "▲ BSL " : "▼ SSL ") + str.tostring(p.level, format.mintick) + " ·" + str.tostring(p.touches), style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
+                    // La DISTANCIA es el dato que comunica la lejania: sin ella el marcador se lee como
+                    // un nivel al precio del borde. En multiplos de ATR, no en pips: el pip por simbolo
+                    // es exactamente la trampa que ADR-001 prohibe hardcodear (mintick != pip en brokers
+                    // de 5 digitos) y ATR es la unidad relativa canonica del proyecto.
+                    array.push(SMC_poolLabels, label.new(bar_index + 2, isBSL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (isBSL ? "▲ BSL " : "▼ SSL ") + str.tostring(p.level, format.mintick) + " ·" + str.tostring(p.touches) + "  (" + str.tostring(math.round(math.abs(p.level - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
 
 // Marcadores de sweep (trampa) [T10, Propuesta B]: cada SMC_sweeps es un pool barrido cuyo close
 // volvio dentro (trampa). Sweep de BSL = sesgo bajista (rojo, marca arriba); sweep de SSL = sesgo
@@ -4576,7 +4580,7 @@ f_drawMTFZones(string tf, color col, array<int> kinds, array<float> tops, array<
                         array.push(lines, line.new(tA, tp, nowT, tp, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dashed, width = mtfW))
                         array.push(labels, label.new(nowT, tp, tf + ": " + (dr == DIR_BULL ? "BSL" : "SSL"), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
                     else
-                        array.push(labels, label.new(nowT, dr == DIR_BULL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (dr == DIR_BULL ? "▲ " : "▼ ") + tf + ": " + (dr == DIR_BULL ? "BSL " : "SSL ") + str.tostring(tp, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
+                        array.push(labels, label.new(nowT, dr == DIR_BULL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (dr == DIR_BULL ? "▲ " : "▼ ") + tf + ": " + (dr == DIR_BULL ? "BSL " : "SSL ") + str.tostring(tp, format.mintick) + "  (" + str.tostring(math.round(math.abs(tp - close) / atr14)) + "×ATR)", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(col, 90), textcolor = col, size = size.tiny))
                 k == KIND_SWEEP =>
                     // §7.2: el sweep era la unica marca sin tag de TF -> se anade "(D1)"/"(H1)".
                     string mk = i_mtfSweepMark ? ((dr == DIR_BULL ? "▲" : "▼") + " (" + tf + ")") : (tf + ": Sweep")
