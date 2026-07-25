@@ -3758,6 +3758,39 @@ if barstate.islast
     while array.size(SMC_eqLevels) > array.size(SMC_eqLabels)
         array.pop(SMC_eqLevels)
 
+// --- Escalera de EXTREMOS NO BARRIDOS [S145 · ADR-026 D8] ---
+// PROBLEMA QUE RESUELVE (medido S145 en D1 EURUSD): con TODO aislado solo hay UN pool vivo, el BSL
+// 1.51421 ·3, y CERO SSL. No es un bug: los EQL de abajo existen a montones pero el precio los
+// atraveso todos (barridos), y el 1.51 sobrevive porque nadie lo toco desde 2008. Peor: el minimo de
+// 0.95444 (2022) NO esta barrido -el precio nunca bajo de ahi- pero es un pico de UN SOLO toque, y un
+// pool exige touches >= 2, asi que la regla de pools NO PUEDE VERLO. Ya se midio en S131: "los TOQUES
+// miden congestion, el usuario marca EXTREMOS - son propiedades opuestas". El 1.51 aparece por ser
+// CONGESTION (3 toques), no por ser el extremo: en un mercado en maximos historicos estariamos igual
+// de ciegos hacia ARRIBA. El fallo no es del lado bajista, es del EXTREMO en cualquier direccion.
+//
+// QUE ES UN EXTREMO NO BARRIDO: un pivote que ninguna vela posterior perforo. Recorriendo los pivotes
+// de MAS NUEVO a MAS VIEJO con el extremo corrido, los que van apareciendo son exactamente esa
+// secuencia -y es una ESCALERA COMPLETA, no un solo nivel:
+//   abajo:  1.137 -> 1.0230 (min 2025) -> 0.95444 (2022) -> 0.8225 (2000)
+//   arriba: 1.137 -> 1.2349 (max 2025) -> 1.51421 (2008)
+// Empezar el corrido en 'px' garantiza que solo entren niveles del lado correcto. Los escalones
+// intermedios salen GRATIS del mismo recorrido: llenan el tramo medio que el transporte por cercania
+// (mas cercanos) y f_farthestPool (el mas lejano) dejaban vacio.
+// PURA (solo lee el array por parametro, no dibuja, no toca series) -> promovible al CORE y portable a
+// golden tests MQL5 cuando la Strategy la necesite para el bias (Sprint 2.1). Hoy vive fuera del CORE
+// para no abrirlo (byte-identico x3) mientras se valida.
+f_unsweptLadder(array<SMC_Swing> sw, bool up, float px, int maxN, array<float> outLvl, array<int> outTA) =>
+    float run = px
+    int   n   = array.size(sw)
+    if n > 0
+        for j = 0 to n - 1
+            SMC_Swing s = array.get(sw, n - 1 - j)                                                       // recorrido NUEVO -> VIEJO
+            bool isHigh = s.kind == KIND_HH or s.kind == KIND_LH
+            if (up ? isHigh : not isHigh) and (up ? s.price > run : s.price < run) and array.size(outLvl) < maxN
+                run := s.price
+                array.push(outLvl, s.price)
+                array.push(outTA, s.barTime)
+
 // f_drawPools [T09b]: linea horizontal dashed del nivel del pool VIVO (swept==false), de barTime ->
 // barra actual (la liquidez vive hasta ser barrida). BSL (sobre highs) ROJO suave = liquidez tomada
 // para VENTAS / SSL (bajo lows) VERDE suave = liquidez tomada para COMPRAS (pref. usuario): son
@@ -3847,6 +3880,40 @@ if i_showPools and barstate.islast
                     // es exactamente la trampa que ADR-001 prohibe hardcodear (mintick != pip en brokers
                     // de 5 digitos) y ATR es la unidad relativa canonica del proyecto.
                     array.push(SMC_poolLabels, label.new(bar_index + 2, isBSL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (isBSL ? "▲ BSL " : "▼ SSL ") + str.tostring(p.level, format.mintick) + " ·" + str.tostring(p.touches) + "  (" + str.tostring(math.round(math.abs(p.level - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
+
+// Dibujo de la escalera de extremos no barridos [S145 · ADR-026 D8]. ESTILO PROPIO, deliberadamente
+// distinto del pool: mismo HUE (es la misma familia, liquidez) pero PUNTEADO y mas transparente. Un
+// pool es liquidez ACUMULADA (varios toques = mas stops apilados); un extremo de un toque es liquidez
+// ESTRUCTURAL. Misma funcion de objetivo, distinta densidad — y esa diferencia importa al calibrar
+// probabilidad en Fase 3, asi que no deben verse iguales.
+var array<line>  SMC_extLines  = array.new<line>()
+var array<label> SMC_extLabels = array.new<label>()
+int DOL_LADDER_N = 4                                                                                    // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
+if i_showPools and barstate.islast
+    for l in SMC_extLines
+        line.delete(l)
+    for lb in SMC_extLabels
+        label.delete(lb)
+    array.clear(SMC_extLines)
+    array.clear(SMC_extLabels)
+    array<float> ladL = array.new<float>()
+    array<int>   ladT = array.new<int>()
+    for side = 0 to 1
+        bool up = side == 0
+        array.clear(ladL)
+        array.clear(ladT)
+        f_unsweptLadder(SMC_swings, up, close, DOL_LADDER_N, ladL, ladT)
+        color colE = up ? COL_BSL : COL_SSL
+        if array.size(ladL) > 0
+            for k = 0 to array.size(ladL) - 1
+                float lvl = array.get(ladL, k)
+                string tg = (up ? "▲ OH " : "▼ OL ") + str.tostring(lvl, format.mintick)
+                if lvl <= dolHi and lvl >= dolLo
+                    array.push(SMC_extLines, line.new(array.get(ladT, k), lvl, time, lvl, xloc = xloc.bar_time, color = color.new(colE, 55), style = line.style_dotted, width = 1))
+                    array.push(SMC_extLabels, label.new(bar_index + 2, lvl, tg, style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
+                else
+                    // Fuera de banda: apilado por escalon (0.4*ATR entre marcadores) para que T1..Tn no se solapen.
+                    array.push(SMC_extLabels, label.new(bar_index + 2, up ? dolHi - (0.5 + 0.4 * k) * atr14 : dolLo + (0.5 + 0.4 * k) * atr14, tg + "  (" + str.tostring(math.round(math.abs(lvl - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
 
 // Marcadores de sweep (trampa) [T10, Propuesta B]: cada SMC_sweeps es un pool barrido cuyo close
 // volvio dentro (trampa). Sweep de BSL = sesgo bajista (rojo, marca arriba); sweep de SSL = sesgo
