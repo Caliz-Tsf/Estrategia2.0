@@ -208,7 +208,28 @@ heredar la escalera a M5 aplastaría el M5 mucho más de lo que el 1.51 aplastab
 > **la forma normal** de mostrar liquidez heredada. Eso es coherente con lo que se quiere leer en M5:
 > no la geometría del nivel de D1 (inútil a esa escala), sino *que existe, a qué precio y de qué TF viene*.
 
-**(a-bis) Precisión del usuario (S145) que REDUCE el alcance de (b):**
+**(a-ter) CORRECCIÓN del usuario (S145, la lectura definitiva) — la escalera es UNA y es MTF:**
+
+> «Cuando dije que marques solo los HH y LL de cada temporalidad es que desde ahí hacia abajo o hacia
+> arriba deben comenzar a salir los pools hacia donde irá el precio. Buscamos hacer la escalera desde
+> el HH de D1 hasta M5, y así de LL de D1 hasta M5.»
+
+**No son tres escaleras independientes (una por TF). Es UNA escalera que atraviesa temporalidades:**
+
+```
+CABEZA:  HH de D1  ──┐
+                     ├─ escalones D1  (gruesos, lejos del precio)
+                     ├─ escalones H1  (medios)
+                     └─ escalones M5  (finos, pegados al precio)  ──> PRECIO
+   (y simétrico desde el LL de D1 hacia arriba)
+```
+
+La resolución del escalón **aumenta al acercarse al precio**. Esto deja obsoleto (a-bis): el ancla de
+H1 **no** es el alto de H1, es el **HH de D1**, y H1/M5 solo aportan escalones intermedios.
+
+⇒ **(b) vuelve al camino crítico.**
+
+**(a-bis) [OBSOLETO por (a-ter), se conserva por trazabilidad] Precisión del usuario que reducía el alcance de (b):**
 
 > «con que se marque el alto más alto de esa temporalidad —que debe ser uno de los pool que tenemos
 > identificados— está bien, y así para M5.»
@@ -228,11 +249,26 @@ llama a `f_nearestNPools(..., capPool, ...)` (`:1770`) con `i_mtfCapPool = 2`: s
 transporte actual, **el "alto más alto" de D1 nunca llega a H1 ni a M5** — justo lo que el requisito pide
 que llegue.
 
+**Medido en S145 — no es "poco probable", es IMPOSIBLE.** El transporte (`:1782-1783`) hace:
+
+```pine
+ordG = array.sort_indices(cDist, order.ascending)   // TODOS los candidatos por cercanía
+for s = 0 to MTF_K - 1                              // se queda con los 12 MÁS CERCANOS
+```
+
+`MTF_K = 12` ranuras repartidas **globalmente por cercanía** entre OB, FVG, pools, BOS, CHoCH, EQH,
+EQL y sweeps. El ancla es por construcción **el más lejano de todos** ⇒ tendría que ganarle a 12
+candidatos más cercanos. **El HH de D1 no puede llegar a H1/M5 con el transporte actual.** Subir
+`i_mtfCapPool` no lo arregla: el cuello no es el cap por concepto, es el orden global por distancia.
+
 - **La pieza ya existe:** `f_farthestPool(src, px, up, minT, bound, inclSwept)` está en el CORE desde
   S115/ADR-018 (`:1858-1872`) y es exactamente el selector de ancla. No hay que escribir el algoritmo,
   hay que **darle una ranura en el transporte**.
-- Coste: es un cambio de **CORE** (byte-idéntico ×3) y de ranuras del buffer MTF — ADR-024 §3 advierte
-  que las ranuras son hoy el dial más caro (12 ranuras × 89 identificadores × 2 llamadas). **No medido.**
+- **El coste es MENOR de lo que ADR-024 §3 temía.** Su advertencia era sobre **añadir** ranuras (12 ×
+  89 identificadores × 2 llamadas). Aquí no hace falta añadir ninguna: basta **RESERVAR 2 de las 12
+  existentes** (una por lado) para las anclas, saltándose el orden por distancia. **El tuple no crece**
+  ⇒ el dial caro no se toca. Contrapartida: se pierden 2 de los 12 huecos de cercanía. **No medido**
+  cuánto duele esa pérdida — es el probe que falta antes de I-1.
 - **Orden (S139):** la herencia se decide **después** de verificar el concepto en su TF nativo. El nativo
   (D1) queda verificado en S145; H1 y M5 nativos **no**. Por eso (b) queda en Paso 2, no se improvisa.
 
