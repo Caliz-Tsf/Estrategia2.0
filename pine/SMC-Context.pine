@@ -2096,6 +2096,12 @@ if barstate.isfirst
             array.push(ctxLabels, label.new(time, close, "", xloc = xloc.bar_time, color = na, textcolor = na, size = size.tiny, style = label.style_label_left))
 
 if barstate.islast
+    // [S145] Reset de aparcamiento ANTES de dibujar: las 4 labels de CAJA por HTF no las gestiona
+    // nadie (f_ctxBox no recibe label en su firma), asi que se quedaban para siempre en el close de la
+    // PRIMERA barra (0.92 en EURUSD D1) arrastrando la auto-escala. Aparcar TODAS en 'close' y dejar
+    // que el dibujo reposicione las que se usen es mas barato y no deja huerfanas.
+    for lb in ctxLabels
+        label.set_y(lb, close)
     // Ensamblar los 8 slots por HTF desde la tuple plana. Presencia de un slot = not na(top).
     array<float> dTop = array.from(ctxD1_t0, ctxD1_t1, ctxD1_t2, ctxD1_t3, ctxD1_t4, ctxD1_t5, ctxD1_t6, ctxD1_t7)
     array<float> dBot = array.from(ctxD1_b0, ctxD1_b1, ctxD1_b2, ctxD1_b3, ctxD1_b4, ctxD1_b5, ctxD1_b6, ctxD1_b7)
