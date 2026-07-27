@@ -3788,18 +3788,28 @@ if barstate.islast
 // SMC_majorSwingsV (estructura DOMINANTE, cap i_swingMaxKeep 350-600 -> prolonga hacia atras). Es
 // ademas mas fiel a lo pedido: "la pierna completa" y "el swing historico" son estructura dominante,
 // no micro-pivotes.
-f_unsweptLadder(array<SMC_Swing> sw, bool up, float startRun, int maxN, array<float> outLvl, array<int> outTA) =>
-    float run = startRun
-    int   n   = array.size(sw)
-    if n > 0
-        for j = 0 to n - 1
-            SMC_Swing s = array.get(sw, n - 1 - j)                                                       // recorrido NUEVO -> VIEJO
-            bool isHigh = s.kind == KIND_HH or s.kind == KIND_LH
-            if (up ? isHigh : not isHigh) and (up ? s.price > run : s.price < run) and array.size(outLvl) < maxN
-                run := s.price
-                array.push(outLvl, s.price)
-                array.push(outTA, s.barTime)
-    run
+// [S145 FIX] ENCADENAR FUENTES CON EL RECORD CORRIDO ERA INCORRECTO. Con `run` heredado, cada fuente
+// nueva solo podia anadir niveles MAS PROFUNDOS y jamas rellenar huecos ENTRE escalones ya emitidos:
+// un EQL que caiga entre 1.10654 y 1.07330 quedaba descartado por construccion. Por eso faltaban
+// niveles intermedios que el usuario ve a simple vista. La forma correcta es FUNDIR las fuentes en un
+// unico conjunto y aplicar el filtro de record UNA sola vez sobre el conjunto ordenado por TIEMPO.
+// Recolectores: vuelcan candidatos del lado pedido en (cp, ct). El sistema YA identifica estos niveles
+// -HH/LH y HL/LL en swings, EQH/EQL en el array de liquidez-; el fallo era no mirarlos todos.
+f_gatherSw(array<SMC_Swing> sw, bool up, array<float> cp, array<int> ct) =>
+    if array.size(sw) > 0
+        for i = 0 to array.size(sw) - 1
+            SMC_Swing s = array.get(sw, i)
+            if up == (s.kind == KIND_HH or s.kind == KIND_LH)
+                array.push(cp, s.price)
+                array.push(ct, s.barTime)
+
+f_gatherEv(array<SMC_Event> ev, bool up, array<float> cp, array<int> ct) =>
+    if array.size(ev) > 0
+        for i = 0 to array.size(ev) - 1
+            SMC_Event e = array.get(ev, i)
+            if e.kind == (up ? KIND_EQH : KIND_EQL)
+                array.push(cp, e.price)
+                array.push(ct, e.barTime)
 
 // f_drawPools [T09b]: linea horizontal dashed del nivel del pool VIVO (swept==false), de barTime ->
 // barra actual (la liquidez vive hasta ser barrida). BSL (sobre highs) ROJO suave = liquidez tomada
@@ -3918,12 +3928,29 @@ if i_showPools and barstate.islast
     array.clear(SMC_extLabels)
     array<float> ladL = array.new<float>()
     array<int>   ladT = array.new<int>()
+    array<float> candP = array.new<float>()
+    array<int>   candT = array.new<int>()
     for side = 0 to 1
         bool up = side == 0
         array.clear(ladL)
         array.clear(ladT)
-        float runE = f_unsweptLadder(SMC_swings, up, close, DOL_LADDER_N, ladL, ladT)                   // finos: escalones cercanos
-        f_unsweptLadder(SMC_majorSwingsV, up, runE, DOL_LADDER_N, ladL, ladT)                            // dominantes: prolonga la pierna hacia atras
+        array.clear(candP)
+        array.clear(candT)
+        f_gatherSw(SMC_swings,       up, candP, candT)                                                   // pivotes finos: escalones cercanos
+        f_gatherSw(SMC_majorSwingsV, up, candP, candT)                                                   // estructura dominante: prolonga la pierna
+        f_gatherEv(SMC_eqhl,         up, candP, candT)                                                   // EQH/EQL: liquidez que las otras dos no ven
+        // Record UNICO sobre el conjunto FUNDIDO y ordenado por TIEMPO (nuevo -> viejo). Asi un nivel
+        // de cualquier fuente puede rellenar un hueco intermedio; con el encadenado no podia.
+        array<int> ordT = array.size(candT) > 0 ? array.sort_indices(candT, order.descending) : array.new<int>()
+        float run = close
+        if array.size(ordT) > 0
+            for k = 0 to array.size(ordT) - 1
+                int   ix  = array.get(ordT, k)
+                float lvl = array.get(candP, ix)
+                if (up ? lvl > run : lvl < run) and array.size(ladL) < DOL_LADDER_N
+                    run := lvl
+                    array.push(ladL, lvl)
+                    array.push(ladT, array.get(candT, ix))
         color colE = up ? COL_BSL : COL_SSL
         if array.size(ladL) > 0
             for k = 0 to array.size(ladL) - 1
