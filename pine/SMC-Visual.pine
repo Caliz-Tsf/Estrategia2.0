@@ -2237,13 +2237,18 @@ float atr14      = ta.atr(14)
 // acercado -> los lejanos vuelven a la columna para no reventar la escala. Adaptativo.
 // Contrapartida asumida (ADR-026 D4-1): chart.*_visible_bar_time hace recalcular en cada scroll/zoom.
 int   DOL_BAND_MIN = 50
-int   DOL_BAND_MAX = 5000
+int   DOL_BAND_MAX = 8000                                                                               // [FIX-2] de 2008 a hoy son ~4700 velas D1: 5000 se quedaba justo
 // [S145 D13 FIX] BLINDAJE DE BARRA 0: sin `nz` esto reventaba con "Invalid value of the 'length'
 // argument in the 'highest' function. It must not be na". En bar 0 no existe time[1], asi que
 // time-time[1] es na, la division propaga na y ta.highest recibe longitud nula. Igual con el span
 // visible antes de que el chart lo publique. Ambos con fallback.
 int   dolBarMs  = math.max(1, int(nz(time - time[1], 86400000)))
-int   dolSpanMs = int(nz(chart.right_visible_bar_time - chart.left_visible_bar_time, 0))
+// [S145 D13 FIX-2] N va del borde IZQUIERDO de la vista hasta HOY, no el ANCHO de la ventana.
+// ta.highest(high, N) mira N velas atras desde la vela ACTUAL, no dentro de la ventana visible. Con el
+// ancho (derecha-izquierda) una vista en 2008-2018 daba N~2600, que cubre 2016-hoy: justo el tramo que
+// NO contiene el maximo de 2008. Por eso desplazarse hacia atras no colocaba nada — la banda siempre
+// termina en la ultima vela. Midiendo desde la izquierda hasta ahora, la banda ABARCA lo que se ve.
+int   dolSpanMs = int(nz(time - chart.left_visible_bar_time, 0))
 int   dolBandN  = math.min(DOL_BAND_MAX, math.max(DOL_BAND_MIN, dolSpanMs / dolBarMs))
 float dolHi = ta.highest(high, dolBandN)
 float dolLo = ta.lowest(low,   dolBandN)
