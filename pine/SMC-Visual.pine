@@ -2230,9 +2230,18 @@ float atr14      = ta.atr(14)
 // Lookback FIJO (no chart.*_visible_bar_time): esa via recalcula el script en cada scroll/zoom y no
 // esta medida (P-DOL-1). Constante, no input: candidato congelado hasta Fase 3 (ADR-002), y ademas
 // no corre los in_N de indicator_set_inputs.
-int   DOL_BAND_BARS = 200
-float dolHi = ta.highest(high, DOL_BAND_BARS)
-float dolLo = ta.lowest(low,   DOL_BAND_BARS)
+// [S145 D13] La banda sigue el RANGO VISIBLE, no un lookback fijo. Con 200 velas fijas la banda se
+// quedaba en 1.13-1.19 aunque el usuario se alejara a "Todos" y en pantalla cupiera de 0.90 a 1.60:
+// resultado, todos los niveles a la columna de borde JUSTO cuando habia sitio de sobra para pintarlos
+// en su precio. Ahora: alejado -> cada nivel cae en banda y se dibuja EN SU SITIO con su linea;
+// acercado -> los lejanos vuelven a la columna para no reventar la escala. Adaptativo.
+// Contrapartida asumida (ADR-026 D4-1): chart.*_visible_bar_time hace recalcular en cada scroll/zoom.
+int   DOL_BAND_MIN = 50
+int   DOL_BAND_MAX = 5000
+int   dolBarMs  = math.max(1, time - time[1])
+int   dolBandN  = math.min(DOL_BAND_MAX, math.max(DOL_BAND_MIN, int((chart.right_visible_bar_time - chart.left_visible_bar_time) / dolBarMs)))
+float dolHi = ta.highest(high, dolBandN)
+float dolLo = ta.lowest(low,   dolBandN)
 // [S145 · ADR-026 D9] DETECTOR DE PIVOTES PROPIO DE LA ESCALERA. MEDIDO que la densidad del lado de
 // abajo la gobierna UNA sola cosa: la sensibilidad de deteccion de pivotes (swingLen 5->2 anadio dos
 // escalones; el tope 12->18 anadio CERO abajo; fundir EQH/EQL anadio CERO — un EQ esta por definicion
