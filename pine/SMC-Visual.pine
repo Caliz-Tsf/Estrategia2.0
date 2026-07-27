@@ -3952,7 +3952,11 @@ var array<label> SMC_extLabels = array.new<label>()
 // (quedaba tramo hasta el pool 1.51421); abajo, al afinar swingLen a 2, la escalera llego a 12 justos
 // = saturacion. El objetivo es cubrir los pivotes de TODA la pierna, no una cuota. Sigue autolimitada
 // por ser secuencia de records, asi que 18 es cinturon, no recorte esperado.
-int DOL_LADDER_N = 18                                                                                   // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
+// [S145 D11] 18 -> 26: el objetivo declarado por el usuario es ver la escalera COMPLETA, del maximo
+// historico al minimo historico. Con 18 el tramo alto cortaba en 1.45487 y quedaban fuera 1.46963,
+// 1.49401 y 1.51412. Con la separacion creciente (D11) el numero real de escalones baja solo, asi que
+// 26 no satura: es cinturon para que el tope no vuelva a ser el limitante.
+int DOL_LADDER_N = 26                                                                                   // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
 if i_showPools and barstate.islast
     for l in SMC_extLines
         line.delete(l)
@@ -3983,7 +3987,12 @@ if i_showPools and barstate.islast
                 float lvl = array.get(candP, ix)
                 // [S145 D10] SEPARACION MINIMA: sin ella salian escalones a 2 pips (1.13638 vs 1.13618)
                 // = el mismo objetivo contado dos veces, y consumian el cupo hasta cortar el tramo alto.
-                if (up ? lvl > run + 0.5 * atr14 : lvl < run - 0.5 * atr14) and array.size(ladL) < DOL_LADDER_N
+                // [D11] El umbral CRECE con la distancia al precio: con 0.5*ATR fijo seguian colandose
+                // pares como 0.97302/0.97049 (25 pips) porque el ATR se mide en el precio ACTUAL y a 34
+                // ATR de distancia se queda corto. Fino cerca (donde se opera), grueso lejos (donde solo
+                // importa el escalon, no el pip) — que es como se lee una proyeccion.
+                float sep = math.max(0.5 * atr14, 0.04 * math.abs(run - close))
+                if (up ? lvl > run + sep : lvl < run - sep) and array.size(ladL) < DOL_LADDER_N
                     run := lvl
                     array.push(ladL, lvl)
                     array.push(ladT, array.get(candT, ix))
