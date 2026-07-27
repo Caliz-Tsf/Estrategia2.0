@@ -1,6 +1,6 @@
 # ADR-026 — DOL: la **escalera** de draw-on-liquidity y el **marcador de borde** para objetivos fuera de escala
 
-- **Estado:** 🟡 **Propuesto** — pendiente de aprobación del usuario y de los 3 probes de §7. **Ningún cambio en `pine/` hasta que P-DOL-1 y P-DOL-2 estén medidos.**
+- **Estado:** ✅ **ACEPTADO E IMPLEMENTADO (S145)** — verificado en vivo en D1 EURUSD. La escalera cubre del **máximo histórico (1.60389, jul-2008)** al **mínimo (0.90275)**, con 35 de 36 niveles anclados en su pivote. Decisiones **D8–D14** añadidas al final. CORE intacto `7ad95b3e612d041a`. Ver [Sesion-145](../../memory/sesiones/Sesion-145.md).
 - **Fecha:** 2026-07-25 (Sesion-145).
 - **Contexto de fase:** Fase 1 (curación visual F1-GATE) **tocando Ruta B / Sprint 2.1**. El DOL estaba asignado a Sprint 2.1 como *modulador de bias* (`ESQUELETO-P1 §342`, `MATRIZ-conceptos-cobertura §87`, reglas §1082). Se adelanta **solo la parte de objetivos/dibujo** porque la curación de la familia Liquidez está bloqueada por ella (S144); el **cableado al scoring queda en Sprint 2.1**.
 - **Relacionado:** [[ADR-006]] (ciclo de vida de pools), [[ADR-016]] (retención por importancia), [[ADR-017]]/[[ADR-024]] (reparto Visual/Context), [[ADR-021]] (dealing range 2.º extremo), [[ADR-023]] (el panel se lee desde el TF más bajo), `DOSSIER-FABLE-proyeccion-confluencia.md` §2.2/§2.3.
@@ -361,3 +361,71 @@ test trivial**: mismo set de pools + mismo precio ⇒ misma secuencia `T1..Tn`. 
 no se traduce**: es un artefacto de la escala de TradingView. En MT5 el EA consume la escalera como
 lista de objetivos (TP escalonados / DOL para el bias), donde el problema de escala no existe — el
 mismo argumento que hizo ganar a ADR-023.
+
+---
+
+## 9. Decisiones D8–D14 (añadidas en S145, tras implementar)
+
+### D8 — La escalera son los **extremos NO BARRIDOS**, no los pools
+
+Un pool exige `touches >= 2`. Un extremo de **un solo toque** —el mínimo de 0.95444, nunca perforado—
+es liquidez real y la regla de pools **no puede verlo**. Ya medido en S131: *"los TOQUES miden
+congestión, el usuario marca EXTREMOS — son propiedades opuestas"*.
+
+**El fallo no es del lado bajista, es del EXTREMO en cualquier dirección:** el 1.51 aparece por ser
+CONGESTIÓN (3 toques), no por ser el extremo. En un mercado en máximos históricos estaríamos igual de
+ciegos hacia arriba.
+
+`f_unsweptLadder` → `f_gatherSw`/`f_gatherPv` + paso de récord: recorrido nuevo→viejo con el extremo
+corrido. Los que aparecen son exactamente los nunca perforados, y forman una **escalera completa**.
+
+### D9 — Detector de pivotes **propio** de la escalera
+
+Medido: la densidad la gobierna **solo** la sensibilidad de detección (`swingLen` 5→2 añadió escalones;
+el tope y las demás fuentes, cero). Pero `i_swingLen` no se puede afinar: de él cuelgan swings,
+BOS/CHoCH, MSS y pools, congelados hasta Fase 3 (ADR-002).
+
+⇒ `ta.pivothigh/pivotlow` con longitud propia (`DOL_PIV_LEN = 2`, cap 400). Densifica sin tocar nada.
+
+### D10/D11 — Columna fuera de banda + separación creciente
+
+Los marcadores se aparcaban **dentro** de la banda; con el precio pegado al mínimo de la ventana, los
+objetivos de ABAJO acababan dibujados ARRIBA del precio. Ahora salen del lado que les toca. Separación
+mínima `max(0.5·ATR, 4% de la distancia)`: fino cerca, grueso lejos.
+
+### D12 — Cierre en el extremo **real**
+
+El mínimo absoluto cae en las primerísimas barras del histórico, donde `ta.pivotlow` no puede confirmar
+pivote por falta de velas a la izquierda. **Era inalcanzable para cualquier detector.** Se rastrea
+aparte (`dolAllHi`/`dolAllLo`) y se usa para cerrar la escalera. Importa: los stops viven bajo el
+extremo **real**, no bajo el pivote.
+
+### D13 — La banda sigue el **rango visible** (sustituye al lookback fijo de D4)
+
+Con 200 velas fijas la banda ignoraba el zoom y mandaba todo a la columna **justo cuando había sitio**.
+Ahora `N` va del **borde izquierdo de la vista hasta hoy** — no el ancho de la ventana:
+`ta.highest(high, N)` mira N velas atrás desde la vela **actual**, no dentro de la ventana.
+
+⚠️ **Dos trampas que costaron dos errores rojos en producción:**
+1. `nz()` obligatorio: en bar 0 no existe `time[1]`.
+2. **Nada de longitud dinámica** en `ta.highest/lowest` → **RE10143** (`historical offset beyond
+   buffer's limit`). Tres llamadas de longitud **fija** (200/1200/5000) y selección por tramo.
+
+Se asume la contrapartida de D4-1: recalcula en cada scroll/zoom. **Coste sin medir.**
+
+### D14 — Fuera de banda: **resumen**, no columna
+
+Apilar las etiquetas las **desancla de su pivote** y el lector ve niveles donde no los hay: información
+falsa. Una sola etiqueta resumen por lado (`▲ 6 objetivos · hasta 1.60389 (95×ATR)`). Al ampliar la
+vista, esos escalones se dibujan solos en su precio y el resumen desaparece.
+
+---
+
+## 10. Lo que este ADR NO resolvió
+
+- **El indicador no regenera SSL/BSL al avanzar la tendencia** (hilo prioritario de S146). S144 medía 4
+  pools vivos en D1; S145 midió **1 y cero SSL**. El precio se los comió y no apareció ninguno nuevo.
+- `0.90275` vs `0.90179`: sin resolver si el cierre D12 dispara o si 0.90275 es el mínimo real.
+- `OH 1.51441` y `BSL 1.51421` son el mismo techo por dos vías. Fusionar.
+- Distancia en ATR del TF **de origen** (hoy `72×ATR` en D1 y `2507×ATR` en M5 para el mismo nivel).
+- **Puerta de banda para P/D y Gradient Levels** — es lo que hace M5 ilegible.
