@@ -3904,7 +3904,11 @@ var array<label> SMC_extLabels = array.new<label>()
 // importan para proyectar. Subirlo es SEGURO porque la escalera es una secuencia de RECORDS (cada
 // escalon debe ser mas extremo que TODOS los posteriores), asi que se autolimita: sobre los ~350
 // pivotes retenidos rara vez pasa de una decena. 12 es cinturon de seguridad, no un recorte esperado.
-int DOL_LADDER_N = 12                                                                                   // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
+// [S145] 12 -> 18: MEDIDO que el tope ya MUERDE. Arriba salian exactamente 12 OH cortando en 1.37007
+// (quedaba tramo hasta el pool 1.51421); abajo, al afinar swingLen a 2, la escalera llego a 12 justos
+// = saturacion. El objetivo es cubrir los pivotes de TODA la pierna, no una cuota. Sigue autolimitada
+// por ser secuencia de records, asi que 18 es cinturon, no recorte esperado.
+int DOL_LADDER_N = 18                                                                                   // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
 if i_showPools and barstate.islast
     for l in SMC_extLines
         line.delete(l)
