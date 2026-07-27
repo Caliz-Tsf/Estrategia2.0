@@ -4053,7 +4053,8 @@ if i_showPools and barstate.islast
                 array.push(ladL, allExt)
                 array.push(ladT, up ? dolAllHiT : dolAllLoT)
         color colE = up ? COL_BSL : COL_SSL
-        int oob = 0                                                                                      // contador de marcadores FUERA de banda, por lado
+        int   oob    = 0                                                                                 // cuantos escalones quedan FUERA de banda, por lado
+        float oobFar = na                                                                                // el mas lejano de ellos (cabeza del tramo no visible)
         if array.size(ladL) > 0
             for k = 0 to array.size(ladL) - 1
                 float lvl = array.get(ladL, k)
@@ -4062,16 +4063,20 @@ if i_showPools and barstate.islast
                     array.push(SMC_extLines, line.new(array.get(ladT, k), lvl, time, lvl, xloc = xloc.bar_time, color = color.new(colE, 55), style = line.style_dotted, width = 1))
                     array.push(SMC_extLabels, label.new(bar_index + 2, lvl, tg, style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
                 else
-                    // [S145 D10 FIX] La columna de marcadores va FUERA de la banda y DEL LADO QUE LE
-                    // TOCA. Antes se aparcaba DENTRO (dolLo + k*ATR) y, con el precio pegado al minimo
-                    // de 200 velas (dolLo 1.13246 vs precio 1.13706), los objetivos de ABAJO acababan
-                    // dibujados ARRIBA del precio: ilegible y enganoso. Ahora bajan desde dolLo hacia
-                    // abajo (y suben desde dolHi hacia arriba), asi que un objetivo bajista SIEMPRE se
-                    // lee por debajo. Extiende la escala, pero de forma ACOTADA y proporcional al ATR
-                    // (0.35 por marcador), no los 4400 pips que forzaba dibujar el nivel a su precio.
+                    // [S145 D14] FUERA DE BANDA -> NO se emite etiqueta propia. Apilarlas en columna las
+                    // DESANCLA de su pivote: parecen niveles donde no los hay, que es informacion falsa.
+                    // Y dibujarlas a su precio rompe la escala (el defecto original). Salida honesta: se
+                    // cuentan y se resumen en UNA sola etiqueta por lado (ver despues del bucle). Asi no
+                    // hay amontonamiento ni anclaje fingido, y no se pierde el aviso de que ahi hay
+                    // objetivos.
                     oob += 1
-                    float yEdge = up ? dolHi + (0.35 * oob) * atr14 : dolLo - (0.35 * oob) * atr14
-                    array.push(SMC_extLabels, label.new(bar_index + 2, yEdge, tg + "  (" + str.tostring(math.round(math.abs(lvl - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
+                    oobFar := lvl
+        // [S145 D14] UNA etiqueta resumen por lado con lo que no cabe en la vista actual. Pegada al
+        // borde de la banda (no apilada) y redactada como RESUMEN, no como nivel: asi no se confunde
+        // con un objetivo anclado a un pivote. Al ampliar la vista, esos escalones pasan solos a
+        // dibujarse en su precio y el resumen desaparece.
+        if oob > 0 and not na(oobFar)
+            array.push(SMC_extLabels, label.new(bar_index + 2, up ? dolHi + 0.5 * atr14 : dolLo - 0.5 * atr14, (up ? "▲ " : "▼ ") + str.tostring(oob) + (oob == 1 ? " objetivo · " : " objetivos · ") + "hasta " + str.tostring(oobFar, format.mintick) + "  (" + str.tostring(math.round(math.abs(oobFar - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(colE, 80), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
 
 // Marcadores de sweep (trampa) [T10, Propuesta B]: cada SMC_sweeps es un pool barrido cuyo close
 // volvio dentro (trampa). Sweep de BSL = sesgo bajista (rojo, marca arriba); sweep de SSL = sesgo
