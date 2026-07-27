@@ -3888,7 +3888,13 @@ if i_showPools and barstate.islast
 // probabilidad en Fase 3, asi que no deben verse iguales.
 var array<line>  SMC_extLines  = array.new<line>()
 var array<label> SMC_extLabels = array.new<label>()
-int DOL_LADDER_N = 4                                                                                    // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
+// [S145] Tope 4 -> 12: el usuario pide la PIERNA COMPLETA por lado ("si venimos de un swing alcista
+// hacia abajo, en la pierna debio dejar liquidez") y hacia atras el swing historico entero. Con 4 la
+// escalera moria en 1.07330 (12xATR) y dejaba fuera objetivos de mayor recorrido — justo los que
+// importan para proyectar. Subirlo es SEGURO porque la escalera es una secuencia de RECORDS (cada
+// escalon debe ser mas extremo que TODOS los posteriores), asi que se autolimita: sobre los ~350
+// pivotes retenidos rara vez pasa de una decena. 12 es cinturon de seguridad, no un recorte esperado.
+int DOL_LADDER_N = 12                                                                                   // constante, no input: evita un 2o knob de profundidad (deuda i_profundidad) y no corre los in_N
 if i_showPools and barstate.islast
     for l in SMC_extLines
         line.delete(l)
