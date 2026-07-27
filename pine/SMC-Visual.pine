@@ -3981,11 +3981,14 @@ if i_showPools and barstate.islast
             for k = 0 to array.size(ordT) - 1
                 int   ix  = array.get(ordT, k)
                 float lvl = array.get(candP, ix)
-                if (up ? lvl > run : lvl < run) and array.size(ladL) < DOL_LADDER_N
+                // [S145 D10] SEPARACION MINIMA: sin ella salian escalones a 2 pips (1.13638 vs 1.13618)
+                // = el mismo objetivo contado dos veces, y consumian el cupo hasta cortar el tramo alto.
+                if (up ? lvl > run + 0.5 * atr14 : lvl < run - 0.5 * atr14) and array.size(ladL) < DOL_LADDER_N
                     run := lvl
                     array.push(ladL, lvl)
                     array.push(ladT, array.get(candT, ix))
         color colE = up ? COL_BSL : COL_SSL
+        int oob = 0                                                                                      // contador de marcadores FUERA de banda, por lado
         if array.size(ladL) > 0
             for k = 0 to array.size(ladL) - 1
                 float lvl = array.get(ladL, k)
@@ -3994,8 +3997,16 @@ if i_showPools and barstate.islast
                     array.push(SMC_extLines, line.new(array.get(ladT, k), lvl, time, lvl, xloc = xloc.bar_time, color = color.new(colE, 55), style = line.style_dotted, width = 1))
                     array.push(SMC_extLabels, label.new(bar_index + 2, lvl, tg, style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
                 else
-                    // Fuera de banda: apilado por escalon (0.4*ATR entre marcadores) para que T1..Tn no se solapen.
-                    array.push(SMC_extLabels, label.new(bar_index + 2, up ? dolHi - (0.5 + 0.4 * k) * atr14 : dolLo + (0.5 + 0.4 * k) * atr14, tg + "  (" + str.tostring(math.round(math.abs(lvl - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
+                    // [S145 D10 FIX] La columna de marcadores va FUERA de la banda y DEL LADO QUE LE
+                    // TOCA. Antes se aparcaba DENTRO (dolLo + k*ATR) y, con el precio pegado al minimo
+                    // de 200 velas (dolLo 1.13246 vs precio 1.13706), los objetivos de ABAJO acababan
+                    // dibujados ARRIBA del precio: ilegible y enganoso. Ahora bajan desde dolLo hacia
+                    // abajo (y suben desde dolHi hacia arriba), asi que un objetivo bajista SIEMPRE se
+                    // lee por debajo. Extiende la escala, pero de forma ACOTADA y proporcional al ATR
+                    // (0.35 por marcador), no los 4400 pips que forzaba dibujar el nivel a su precio.
+                    oob += 1
+                    float yEdge = up ? dolHi + (0.35 * oob) * atr14 : dolLo - (0.35 * oob) * atr14
+                    array.push(SMC_extLabels, label.new(bar_index + 2, yEdge, tg + "  (" + str.tostring(math.round(math.abs(lvl - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(colE, 88), textcolor = colE, size = size.tiny, xloc = xloc.bar_index))
 
 // Marcadores de sweep (trampa) [T10, Propuesta B]: cada SMC_sweeps es un pool barrido cuyo close
 // volvio dentro (trampa). Sweep de BSL = sesgo bajista (rojo, marca arriba); sweep de SSL = sesgo
