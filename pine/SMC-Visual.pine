@@ -2233,6 +2233,34 @@ float atr14      = ta.atr(14)
 int   DOL_BAND_BARS = 200
 float dolHi = ta.highest(high, DOL_BAND_BARS)
 float dolLo = ta.lowest(low,   DOL_BAND_BARS)
+// [S145 · ADR-026 D9] DETECTOR DE PIVOTES PROPIO DE LA ESCALERA. MEDIDO que la densidad del lado de
+// abajo la gobierna UNA sola cosa: la sensibilidad de deteccion de pivotes (swingLen 5->2 anadio dos
+// escalones; el tope 12->18 anadio CERO abajo; fundir EQH/EQL anadio CERO — un EQ esta por definicion
+// al MISMO precio que un pivote ya conocido, asi que jamas puede ser un record nuevo).
+// Pero i_swingLen NO se puede afinar: de el cuelgan swings, BOS/CHoCH, MSS y pools, y su calibracion
+// esta congelada hasta Fase 3 (ADR-002). Solucion: la escalera detecta SUS pivotes con su propia
+// longitud fina, sin tocar la deteccion global. Cap propio para no crecer sin limite.
+int DOL_PIV_LEN = 2
+int DOL_PIV_MAX = 400
+var array<float> dolPvHp = array.new<float>()
+var array<int>   dolPvHt = array.new<int>()
+var array<float> dolPvLp = array.new<float>()
+var array<int>   dolPvLt = array.new<int>()
+float dolPH = ta.pivothigh(high, DOL_PIV_LEN, DOL_PIV_LEN)
+float dolPL = ta.pivotlow(low,   DOL_PIV_LEN, DOL_PIV_LEN)
+if barstate.isconfirmed
+    if not na(dolPH)
+        array.push(dolPvHp, dolPH)
+        array.push(dolPvHt, time[DOL_PIV_LEN])
+        if array.size(dolPvHp) > DOL_PIV_MAX
+            array.shift(dolPvHp)
+            array.shift(dolPvHt)
+    if not na(dolPL)
+        array.push(dolPvLp, dolPL)
+        array.push(dolPvLt, time[DOL_PIV_LEN])
+        if array.size(dolPvLp) > DOL_PIV_MAX
+            array.shift(dolPvLp)
+            array.shift(dolPvLt)
 // [S103 · BUG#1] Poblar el escalar de suavizado en el estado del chart. Sin gate isconfirmed:
 // atr14 es escalar de PRESENTACION que el path islast necesita SIEMPRE (asimetria deliberada con
 // pdHigh/pdLow, que son snapshot al cierre). Sin esto queda na -> colapsa band-pick/posRole/
@@ -3803,6 +3831,12 @@ f_gatherSw(array<SMC_Swing> sw, bool up, array<float> cp, array<int> ct) =>
                 array.push(cp, s.price)
                 array.push(ct, s.barTime)
 
+f_gatherPv(array<float> pp, array<int> pt, array<float> cp, array<int> ct) =>
+    if array.size(pp) > 0
+        for i = 0 to array.size(pp) - 1
+            array.push(cp, array.get(pp, i))
+            array.push(ct, array.get(pt, i))
+
 f_gatherEv(array<SMC_Event> ev, bool up, array<float> cp, array<int> ct) =>
     if array.size(ev) > 0
         for i = 0 to array.size(ev) - 1
@@ -3938,7 +3972,7 @@ if i_showPools and barstate.islast
         array.clear(candT)
         f_gatherSw(SMC_swings,       up, candP, candT)                                                   // pivotes finos: escalones cercanos
         f_gatherSw(SMC_majorSwingsV, up, candP, candT)                                                   // estructura dominante: prolonga la pierna
-        f_gatherEv(SMC_eqhl,         up, candP, candT)                                                   // EQH/EQL: liquidez que las otras dos no ven
+        f_gatherPv(up ? dolPvHp : dolPvLp, up ? dolPvHt : dolPvLt, candP, candT)                         // [D9] pivotes finos PROPIOS: la unica fuente que densifica de verdad
         // Record UNICO sobre el conjunto FUNDIDO y ordenado por TIEMPO (nuevo -> viejo). Asi un nivel
         // de cualquier fuente puede rellenar un hueco intermedio; con el encadenado no podia.
         array<int> ordT = array.size(candT) > 0 ? array.sort_indices(candT, order.descending) : array.new<int>()
