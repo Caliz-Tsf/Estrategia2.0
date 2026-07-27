@@ -2250,8 +2250,20 @@ int   dolBarMs  = math.max(1, int(nz(time - time[1], 86400000)))
 // termina en la ultima vela. Midiendo desde la izquierda hasta ahora, la banda ABARCA lo que se ve.
 int   dolSpanMs = int(nz(time - chart.left_visible_bar_time, 0))
 int   dolBandN  = math.min(DOL_BAND_MAX, math.max(DOL_BAND_MIN, dolSpanMs / dolBarMs))
-float dolHi = ta.highest(high, dolBandN)
-float dolLo = ta.lowest(low,   dolBandN)
+// [S145 D13 FIX-3] NADA de longitud DINAMICA en ta.highest/lowest. Provoca RE10143:
+//   "Error on bar 4930: The requested historical offset (1421) is beyond the historical buffer's
+//    limit (1420)"  at #main():2253
+// Pine dimensiona el buffer historico observando las primeras barras; si despues la longitud crece por
+// encima, revienta en ejecucion. Con longitudes FIJAS el buffer se reserva bien. Tres tramos dan el
+// mismo comportamiento adaptativo por escalones: cerca / medio / todo el historico.
+float dolHiA = ta.highest(high, 200)
+float dolLoA = ta.lowest(low,   200)
+float dolHiB = ta.highest(high, 1200)
+float dolLoB = ta.lowest(low,   1200)
+float dolHiC = ta.highest(high, 5000)
+float dolLoC = ta.lowest(low,   5000)
+float dolHi = dolBandN <= 300 ? dolHiA : dolBandN <= 1500 ? dolHiB : dolHiC
+float dolLo = dolBandN <= 300 ? dolLoA : dolBandN <= 1500 ? dolLoB : dolLoC
 // [S145 · ADR-026 D9] DETECTOR DE PIVOTES PROPIO DE LA ESCALERA. MEDIDO que la densidad del lado de
 // abajo la gobierna UNA sola cosa: la sensibilidad de deteccion de pivotes (swingLen 5->2 anadio dos
 // escalones; el tope 12->18 anadio CERO abajo; fundir EQH/EQL anadio CERO — un EQ esta por definicion
