@@ -2238,8 +2238,13 @@ float atr14      = ta.atr(14)
 // Contrapartida asumida (ADR-026 D4-1): chart.*_visible_bar_time hace recalcular en cada scroll/zoom.
 int   DOL_BAND_MIN = 50
 int   DOL_BAND_MAX = 5000
-int   dolBarMs  = math.max(1, time - time[1])
-int   dolBandN  = math.min(DOL_BAND_MAX, math.max(DOL_BAND_MIN, int((chart.right_visible_bar_time - chart.left_visible_bar_time) / dolBarMs)))
+// [S145 D13 FIX] BLINDAJE DE BARRA 0: sin `nz` esto reventaba con "Invalid value of the 'length'
+// argument in the 'highest' function. It must not be na". En bar 0 no existe time[1], asi que
+// time-time[1] es na, la division propaga na y ta.highest recibe longitud nula. Igual con el span
+// visible antes de que el chart lo publique. Ambos con fallback.
+int   dolBarMs  = math.max(1, int(nz(time - time[1], 86400000)))
+int   dolSpanMs = int(nz(chart.right_visible_bar_time - chart.left_visible_bar_time, 0))
+int   dolBandN  = math.min(DOL_BAND_MAX, math.max(DOL_BAND_MIN, dolSpanMs / dolBarMs))
 float dolHi = ta.highest(high, dolBandN)
 float dolLo = ta.lowest(low,   dolBandN)
 // [S145 · ADR-026 D9] DETECTOR DE PIVOTES PROPIO DE LA ESCALERA. MEDIDO que la densidad del lado de
