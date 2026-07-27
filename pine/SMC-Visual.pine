@@ -3779,8 +3779,17 @@ if barstate.islast
 // PURA (solo lee el array por parametro, no dibuja, no toca series) -> promovible al CORE y portable a
 // golden tests MQL5 cuando la Strategy la necesite para el bias (Sprint 2.1). Hoy vive fuera del CORE
 // para no abrirlo (byte-identico x3) mientras se valida.
-f_unsweptLadder(array<SMC_Swing> sw, bool up, float px, int maxN, array<float> outLvl, array<int> outTA) =>
-    float run = px
+// [S145] Recibe y DEVUELVE el extremo corrido para poder ENCADENAR fuentes. Motivo medido: SMC_swings
+// esta capado por MAX_SWINGS=100 (constante del CORE, "NO se tocan"), y con swingLen=5 en D1 eso no
+// alcanza 2022 -> la escalera moria en 1.01779 y no llegaba al minimo de 0.95444, que el usuario marco
+// a mano como objetivo valido. Ni DOL_LADDER_N (se paraba sola en 7) ni i_swingMaxKeep (capa OTRO
+// array, el dominante) eran el freno: los dos se probaron y no movieron nada.
+// Solucion sin abrir el CORE: encadenar SMC_swings (pivotes finos -> escalones CERCANOS) con
+// SMC_majorSwingsV (estructura DOMINANTE, cap i_swingMaxKeep 350-600 -> prolonga hacia atras). Es
+// ademas mas fiel a lo pedido: "la pierna completa" y "el swing historico" son estructura dominante,
+// no micro-pivotes.
+f_unsweptLadder(array<SMC_Swing> sw, bool up, float startRun, int maxN, array<float> outLvl, array<int> outTA) =>
+    float run = startRun
     int   n   = array.size(sw)
     if n > 0
         for j = 0 to n - 1
@@ -3790,6 +3799,7 @@ f_unsweptLadder(array<SMC_Swing> sw, bool up, float px, int maxN, array<float> o
                 run := s.price
                 array.push(outLvl, s.price)
                 array.push(outTA, s.barTime)
+    run
 
 // f_drawPools [T09b]: linea horizontal dashed del nivel del pool VIVO (swept==false), de barTime ->
 // barra actual (la liquidez vive hasta ser barrida). BSL (sobre highs) ROJO suave = liquidez tomada
@@ -3908,7 +3918,8 @@ if i_showPools and barstate.islast
         bool up = side == 0
         array.clear(ladL)
         array.clear(ladT)
-        f_unsweptLadder(SMC_swings, up, close, DOL_LADDER_N, ladL, ladT)
+        float runE = f_unsweptLadder(SMC_swings, up, close, DOL_LADDER_N, ladL, ladT)                   // finos: escalones cercanos
+        f_unsweptLadder(SMC_majorSwingsV, up, runE, DOL_LADDER_N, ladL, ladT)                            // dominantes: prolonga la pierna hacia atras
         color colE = up ? COL_BSL : COL_SSL
         if array.size(ladL) > 0
             for k = 0 to array.size(ladL) - 1
