@@ -2246,6 +2246,21 @@ var array<float> dolPvHp = array.new<float>()
 var array<int>   dolPvHt = array.new<int>()
 var array<float> dolPvLp = array.new<float>()
 var array<int>   dolPvLt = array.new<int>()
+// [S145 D12] EXTREMO REAL del historico cargado. El pivote detectado SI es el minimo de su vela, pero
+// el minimo absoluto (0.90179, 6-may-2002 = primera vela del dato en OANDA) cae en las primerisimas
+// barras, donde ta.pivotlow NO puede confirmar pivote por falta de velas a la izquierda. Por eso la
+// escalera se quedaba 10 pips por encima (0.90275). Se rastrea aparte y se usa para CERRAR la escalera.
+var float dolAllHi  = na
+var float dolAllLo  = na
+var int   dolAllHiT = na
+var int   dolAllLoT = na
+if barstate.isconfirmed
+    if na(dolAllHi) or high > dolAllHi
+        dolAllHi  := high
+        dolAllHiT := time
+    if na(dolAllLo) or low < dolAllLo
+        dolAllLo  := low
+        dolAllLoT := time
 float dolPH = ta.pivothigh(high, DOL_PIV_LEN, DOL_PIV_LEN)
 float dolPL = ta.pivotlow(low,   DOL_PIV_LEN, DOL_PIV_LEN)
 if barstate.isconfirmed
@@ -3996,6 +4011,16 @@ if i_showPools and barstate.islast
                     run := lvl
                     array.push(ladL, lvl)
                     array.push(ladT, array.get(candT, ix))
+        // [S145 D12] CIERRE EN EL EXTREMO REAL: el ultimo escalon debe ser el maximo/minimo absoluto del
+        // historico cargado, no el pivote mas extremo que se pudo confirmar. Sin esto la escalera moria
+        // en 0.90275 cuando el suelo real del dato es 0.90179 (primera vela, sin velas a la izquierda
+        // para formar pivote). Es el ancla de la escalera: no puede quedarse a 10 pips del suelo.
+        float allExt = up ? dolAllHi : dolAllLo
+        if not na(allExt) and array.size(ladL) < DOL_LADDER_N
+            float lastL = array.size(ladL) > 0 ? array.get(ladL, array.size(ladL) - 1) : close
+            if (up ? allExt > lastL : allExt < lastL)
+                array.push(ladL, allExt)
+                array.push(ladT, up ? dolAllHiT : dolAllLoT)
         color colE = up ? COL_BSL : COL_SSL
         int oob = 0                                                                                      // contador de marcadores FUERA de banda, por lado
         if array.size(ladL) > 0
