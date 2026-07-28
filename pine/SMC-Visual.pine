@@ -1455,6 +1455,32 @@ f_detectSweep(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, in
                     ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_SWEEP)
     ev
 
+// f_detectGrab [T10b, §3.3]: el GRAB es el subconjunto del sweep sobre un nivel AISLADO — la mecha
+// perfora un extremo no barrido de MENOS de minTouches toques y el close vuelve dentro. Misma
+// mecanica que f_detectSweep (§3.2), nivel de menor calidad => confluencia #11, con menos peso que
+// la #10. La particion es EXCLUYENTE por touches: >= minTouches lo cobra f_detectSweep, < minTouches
+// lo cobra este; el mismo nivel nunca puede emitir los dos. NO necesita estado nuevo: f_upsertPool
+// ya da de alta cada swing suelto con touches = 1 en el mismo array [S146: 37 de 38 pools vivos en
+// D1 EURUSD eran de 1 toque, invisibles para f_detectSweep por construccion]. El sesgo es CONTRARIO
+// al lado tomado (§3.2): BSL tomado con close por debajo -> trampa bajista. Entre varios candidatos
+// de la misma barra devuelve el MAS CERCANO al close: touches no discrimina aqui (todos valen 1),
+// asi que el criterio es la proximidad, no la fuerza. PURA (sin series ni request.security) ->
+// portable a golden tests MQL5 (ADR-002).
+f_detectGrab(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, int minTouches) =>
+    SMC_Event ev = na
+    float bestDist = 1e9
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if p.swept and p.sweptBarIdx == barIdx and p.touches < minTouches
+                bool trapBSL = p.dir == DIR_BULL and barClose < p.level
+                bool trapSSL = p.dir == DIR_BEAR and barClose > p.level
+                float d = math.abs(barClose - p.level)
+                if (trapBSL or trapSSL) and d < bestDist
+                    bestDist := d
+                    ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_GRAB)
+    ev
+
 // f_prunePools: acota el set persistente a maxN. Borra primero el pool BARRIDO mas antiguo
 // (historial/marcador, prescindible); si no hay barridos, el del frente (mas antiguo). Mantiene los
 // imanes vivos el mayor tiempo posible. PURA (muta y devuelve el array).
@@ -1940,6 +1966,7 @@ var array<SMC_Event> SMC_events = array.new<SMC_Event>()
 var array<SMC_Zone>  SMC_zones  = array.new<SMC_Zone>()
 var array<SMC_Pool>  SMC_pools  = array.new<SMC_Pool>()
 var array<SMC_Event> SMC_sweeps = array.new<SMC_Event>()
+var array<SMC_Event> SMC_grabs  = array.new<SMC_Event>()                                                    // [T10b · §3.3] grabs = sweeps de nivel aislado (confluencia #11)
 
 // [S106 Paso B §7 · ADR-016] MAX_ZONES_CHART: cap del set de zonas del CHART. Vive FUERA del CORE
 // byte-idéntico (que termina en L1850); el transporte f_computeTFState sigue a MAX_ZONES=50 -> cero riesgo
@@ -2697,7 +2724,15 @@ if barstate.isconfirmed
         f_pushEvent(SMC_sweeps, evSweep, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
         evSweepAlert := evSweep
         lastSweepBar := bar_index
-    f_prunePoolsV(SMC_pools, MAX_POOLS_CHART)                                                               // [S106 Paso C] chart: cap 80 + desalojo por importancia
+    // GRAB [T10b · §3.3]: el mismo barrido, pero sobre un nivel AISLADO (< i_minTouches). Va DESPUES
+    // del sweep y ANTES del prune: comparte el marcado de f_markPoolsSwept y la particion por touches
+    // garantiza que un nivel no genere los dos. NO alimenta lastSweepBar ni sweptRecently: esos son el
+    // gate del Mitigation Block (§2.8 "sin sweep previo") y del peso de evento, y §3.3 le da al grab
+    // MENOS peso que al sweep — colarlo ahi lo ascenderia de categoria por la puerta de atras.
+    SMC_Event evGrab = f_detectGrab(SMC_pools, close, bar_index, time, i_minTouches)
+    if not na(evGrab)
+        f_pushEvent(SMC_grabs, evGrab, MAX_EVENTS, evRangeAtr, evBodyPct, sweptRecently, chartState.bias)
+    f_prunePoolsV(SMC_pools, MAX_POOLS_CHART)                                                             // [S106 Paso C] chart: cap 80 + desalojo por importancia
     // Fuerza de pools: son DINAMICOS (touches/swept/cercania cambian por f_upsertPool) -> se refresca
     // al cierre en vez de fijarse en un unico sitio de creacion [Eje2 · ADR-014 · §5.5]. Guard de tamano
     // por la semantica de 'for 0 to size-1' de Pine (con size=0 iteraria a -1).
@@ -4102,6 +4137,27 @@ if i_showSweeps and barstate.islast
             string sbase = sw.kind == KIND_RAID ? "⚡ Raid" : sw.kind == KIND_SPRING ? "⇧ Spring" : "✗ Sweep"
             string stxt = sbase + (bearTrap ? " ↓" : " ↑")
             array.push(SMC_sweepLabels, f_evLbl(sw.barTime, sw.price, bearTrap ? label.style_label_down : label.style_label_up, stxt, scol, 70, scol))
+
+// Marcadores de GRAB [T10b · §3.3]. Mismo toggle y misma cuota que el sweep A PROPOSITO: son el mismo
+// evento sobre niveles de distinta calidad, y §6.3.12 los coloca en la MISMA jerarquia visual — sweep
+// PRIMARIO, grab SECUNDARIO. Por eso no se abre un input nuevo (ademas de que un input nuevo corre los
+// ids in_N de los 48 toggles ya guardados, S145). La distincion es glifo + transparencia: "· Grab" con
+// transp 85 frente al "✗ Sweep" con 70 -> se lee como version atenuada del mismo concepto, que es
+// exactamente lo que es. f_evLbl ya deduplica por ranura (evSeen), asi que un grab que caiga en la
+// misma celda que un sweep NO se dibuja dos veces.
+var array<label> SMC_grabLabels = array.new<label>()
+if i_showSweeps and barstate.islast
+    for lb in SMC_grabLabels
+        label.delete(lb)
+    array.clear(SMC_grabLabels)
+    int nGr = array.size(SMC_grabs)
+    if nGr > 0
+        int grabCap = f_famOK(FAM_EST) ? i_maxShowSweeps : 1                                                // Operacion: solo el ultimo grab (§8.2 F8, igual que el sweep)
+        for i = math.max(0, nGr - grabCap) to nGr - 1
+            SMC_Event gr = array.get(SMC_grabs, i)
+            bool grBear = gr.dir == DIR_BEAR
+            color gcol = grBear ? COL_BEAR : COL_BULL
+            array.push(SMC_grabLabels, f_evLbl(gr.barTime, gr.price, grBear ? label.style_label_down : label.style_label_up, "· Grab " + (grBear ? "↓" : "↑"), gcol, 85, gcol))
 
 // Marcadores de Displacement [T16 · §4.1]. Mismo patron repintado-en-islast que los sweeps
 // (objetos acotados a i_maxShowDisp). Naranja: lo distingue del teal/rojo de estructura y del

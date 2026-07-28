@@ -1386,6 +1386,32 @@ f_detectSweep(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, in
                     ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_SWEEP)
     ev
 
+// f_detectGrab [T10b, §3.3]: el GRAB es el subconjunto del sweep sobre un nivel AISLADO — la mecha
+// perfora un extremo no barrido de MENOS de minTouches toques y el close vuelve dentro. Misma
+// mecanica que f_detectSweep (§3.2), nivel de menor calidad => confluencia #11, con menos peso que
+// la #10. La particion es EXCLUYENTE por touches: >= minTouches lo cobra f_detectSweep, < minTouches
+// lo cobra este; el mismo nivel nunca puede emitir los dos. NO necesita estado nuevo: f_upsertPool
+// ya da de alta cada swing suelto con touches = 1 en el mismo array [S146: 37 de 38 pools vivos en
+// D1 EURUSD eran de 1 toque, invisibles para f_detectSweep por construccion]. El sesgo es CONTRARIO
+// al lado tomado (§3.2): BSL tomado con close por debajo -> trampa bajista. Entre varios candidatos
+// de la misma barra devuelve el MAS CERCANO al close: touches no discrimina aqui (todos valen 1),
+// asi que el criterio es la proximidad, no la fuerza. PURA (sin series ni request.security) ->
+// portable a golden tests MQL5 (ADR-002).
+f_detectGrab(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, int minTouches) =>
+    SMC_Event ev = na
+    float bestDist = 1e9
+    if array.size(pools) > 0
+        for i = 0 to array.size(pools) - 1
+            SMC_Pool p = array.get(pools, i)
+            if p.swept and p.sweptBarIdx == barIdx and p.touches < minTouches
+                bool trapBSL = p.dir == DIR_BULL and barClose < p.level
+                bool trapSSL = p.dir == DIR_BEAR and barClose > p.level
+                float d = math.abs(barClose - p.level)
+                if (trapBSL or trapSSL) and d < bestDist
+                    bestDist := d
+                    ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_GRAB)
+    ev
+
 // f_prunePools: acota el set persistente a maxN. Borra primero el pool BARRIDO mas antiguo
 // (historial/marcador, prescindible); si no hay barridos, el del frente (mas antiguo). Mantiene los
 // imanes vivos el mayor tiempo posible. PURA (muta y devuelve el array).

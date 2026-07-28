@@ -275,7 +275,8 @@ Protocolo por concepto: **implementar → compilar 0 errores/0 warnings → scre
 
 **Sprint 1.3 — Liquidez (corazón SMC) ✅ COMPLETADO:**
 9. ✅ Pools (clustering EQH/EQL + swings, Sesion-027, commit 139e1c1, core-sync 503 líneas, validación ≥90 pendiente)
-10. ✅ Sweeps + Grabs (T09b/T10 cierre formal, Sesion-030, commit 45c4b40, core-sync 592 líneas, validación 93/100 ✅)
+10. ✅ **Sweeps** (T09b/T10 cierre formal, Sesion-030, commit 45c4b40, core-sync 592 líneas, validación 93/100 ✅) — *el título decía "Sweeps + Grabs" pero el commit y `validaciones.md:20` solo acreditan §3.1/§3.2; §3.3 se desdobla a T10b*
+10b. ✅ **Grabs** (`f_detectGrab`, §3.3, confluencia #11, Sesion-146, core-sync 1809 líneas SHA `5e21ca38b43cf0e4`, validación 96/100 ✅) — el barrido de un nivel **aislado** (`touches < i_minTouches`), partición exclusiva con el sweep. Cierra el follow-up de S057 (*"§3.3 Grab no es función nombrada separada"*), que S146 midió: **37 de 38 pools vivos en D1 eran de 1 toque** e invisibles para `f_detectSweep`
 11. ✅ Kill Zones (background + estado, Sesion-035, commit 68f2946, core-sync 623 líneas, validación 95/100 ✅, f_killZone + perfiles FX-London-NY/FX-Asia, confluencia #34)
 12. ✅ MSS (Market Structure Shift, Sesion-036, commits 114a62b/4b4f3cc/88c8e92/f561b34, core-sync 644 líneas SHA 2de06be3, validación 95/100 ✅, f_detectMSS puro, unificación CHoCH/MSS, tooling pine_check/pine_inject, panel reescrito, consolidación f_drawStructure)
 
