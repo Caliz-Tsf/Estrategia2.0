@@ -14,6 +14,15 @@
       - docs/adrs/         -> <vault>/adrs/
       - memory/ESTADO-ACTUAL.md -> <vault>/ESTADO-ACTUAL.md  (estado inter-sesión)
 
+    Doctrina (añadida en S147). Hasta entonces el vault respaldaba el ESTADO y las
+    DECISIONES, pero no las REGLAS — que son lo irreemplazable: un ADR se puede
+    reconstruir desde la sesión que lo originó, una regla cuantificada no.
+      - CLAUDE.md               -> <vault>/CLAUDE.md      (mapa, punto de entrada)
+      - WORKPLAN-MAESTRO-V2.md  -> <vault>/docs/          (fuente de verdad del plan)
+      - docs/REGLAS-DURAS.md    -> <vault>/docs/          (las 8 reglas innegociables)
+      - docs/reglas-smc-ict.md  -> <vault>/docs/          (fuente de verdad SMC, ~231 KB)
+      - docs/reglas-dev.md      -> <vault>/docs/          (convenciones de código)
+
 .PARAMETER DryRun
     No copia nada; solo reporta qué se copiaría. Es el modo del criterio de
     "done" de SCR-02.
@@ -46,6 +55,14 @@ $jobs = @(
     @{ Source = Join-Path $RepoRoot 'memory\sesiones';     Dest = Join-Path $VaultRoot 'sesiones'; Kind = 'dir' }
     @{ Source = Join-Path $RepoRoot 'docs\adrs';           Dest = Join-Path $VaultRoot 'adrs';     Kind = 'dir' }
     @{ Source = Join-Path $RepoRoot 'memory\ESTADO-ACTUAL.md'; Dest = $VaultRoot;                  Kind = 'file' }
+
+    # Doctrina (S147). El mapa entra en la raíz del vault por ser el punto de
+    # entrada; el resto va a <vault>/docs/ para no ensuciarla.
+    @{ Source = Join-Path $RepoRoot 'CLAUDE.md';               Dest = $VaultRoot;                          Kind = 'file' }
+    @{ Source = Join-Path $RepoRoot 'WORKPLAN-MAESTRO-V2.md';  Dest = (Join-Path $VaultRoot 'docs');       Kind = 'file' }
+    @{ Source = Join-Path $RepoRoot 'docs\REGLAS-DURAS.md';    Dest = (Join-Path $VaultRoot 'docs');       Kind = 'file' }
+    @{ Source = Join-Path $RepoRoot 'docs\reglas-smc-ict.md';  Dest = (Join-Path $VaultRoot 'docs');       Kind = 'file' }
+    @{ Source = Join-Path $RepoRoot 'docs\reglas-dev.md';      Dest = (Join-Path $VaultRoot 'docs');       Kind = 'file' }
 )
 
 function Get-FileHashSafe([string]$Path) {
