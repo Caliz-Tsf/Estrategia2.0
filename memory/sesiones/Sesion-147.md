@@ -90,8 +90,56 @@ buscaba.
   al mismo límite. No bloquean el arranque; conviene medirlos y decidir si se trocean.
 - **F1-GATE sigue sin firmar.**
 
-## Commits (1)
+## Resultado 5 — CLAUDE.md pasa a ser un MAPA (petición del usuario, tras el cierre)
+
+CLAUDE.md tenía **59 líneas** y mezclaba mapa con doctrina. Techo nuevo: **40 líneas**, y solo
+dice qué documentos madre existen, qué contiene cada uno y cuándo ir a leerlo. Quedó en **38**,
+con las 10 rutas que cita verificadas como existentes.
+
+- La doctrina salió **verbatim** a `docs/REGLAS-DURAS.md` (51 líneas). Verificado línea a
+  línea: las únicas líneas del antiguo que no se trasladaron son las de índice, reescritas
+  como mapa. **Cero doctrina perdida.**
+- **Hallazgo:** CLAUDE.md declaraba `## Estado actual — Fase 0 (entorno y fundaciones)`,
+  rancio desde ~S010. El mapa nuevo no afirma la fase: apunta a `ESTADO-ACTUAL.md`.
+- **ADR-003 escrito.** Se citaba como vigente en 8 documentos y **nunca tuvo fichero**
+  (`git log --all --diff-filter=A`: ningún commit lo añadió). Transcrito del texto literal de
+  `ESTADO-ACTUAL`, sin inventar las alternativas descartadas — no quedaron registradas.
+  Validado en vivo: `main` congelado en `3e437f2` (2026-06-11, el día de la decisión) y **429
+  commits** en `pine/sistema-completo`.
+- **ADR-015 NO se escribió, y es correcto.** No es un fichero perdido: está reservado desde
+  S098 y solo se redacta si el usuario ordena cambiar `minRR` (default 3.0 mandatorio). Se
+  creó `docs/adrs/README.md` con el índice de los 26 ADRs y **los huecos explicados**, para
+  que un hueco no vuelva a confundirse con una pérdida.
+
+## Resultado 6 — `reglas-smc-ict.md` NO se parte: la premisa del usuario era la correcta
+
+Propuse partir el documento (231 KB, 88 % del límite de `Read`). **El usuario objetó que los
+conceptos ya están todos creados.** Medido, tenía razón:
+
+- Las **42 confluencias canónicas** están cerradas y enumeradas en `WORKPLAN-MAESTRO-V2.md`
+  §4.8 (línea 353). No falta ninguna.
+- Último contenido **nuevo**: 2026-07-04 (§7, 40 fichas, +488 líneas).
+- Los **6 commits posteriores** (S133/S134/S135) son **un solo hilo de enmienda** al mismo
+  sitio, §2.3.2 chart-TF: +36-34, +29, +17-1, +18-4, +15-1, +46-3. Correcciones, no conceptos.
+
+Mi frase «con dos o tres conceptos más lo cruza» era **falsa**: no hay más conceptos que
+añadir. Quedan **31.191 B** de margen y la única fuente de crecimiento son enmiendas.
+**Recomendación retirada, documento intacto.** `WORKPLAN-MAESTRO-V2.md` mide **58 KB**, no los
+~185 KB que estimé sin medir; tampoco se tocó (orden explícita del usuario).
+
+## Resultado 7 — el vault respaldaba el estado, no las reglas
+
+`sync-obsidian.ps1` copiaba `memory/sesiones/`, `docs/adrs/` y `ESTADO-ACTUAL.md`. Asimetría
+mal puesta: un ADR se puede reconstruir desde la sesión que lo originó; **una regla
+cuantificada no**. Añadidos 5 destinos (`CLAUDE.md` a la raíz del vault por ser el punto de
+entrada; `WORKPLAN-MAESTRO-V2.md`, `REGLAS-DURAS.md`, `reglas-smc-ict.md`, `reglas-dev.md` a
+`<vault>/docs/`). Probado con `-DryRun` y luego en real: **7 copiados, 0 fuentes ausentes.**
+
+## Commits (4)
 
 - `00c28f0` — `fix(memory): S147 — ESTADO-ACTUAL rota en vez de acumular (291 KB -> 12 KB)`
+- `5dd5c13` — `docs(cierre): S147 — arranque reparado; el plan de ADR-027 pasa integro a S148`
+- `2197e60` — `docs(estructura): CLAUDE.md pasa a ser MAPA de <=40 lineas + ADR-003 escrito + indice de ADRs`
+- `7a630b1` — `tools(scr-02): S147 — sync-obsidian respalda tambien la DOCTRINA`
 
 Ver [[Sesion-146]] · [[Sesion-145]] · [[Sesion-144]].
