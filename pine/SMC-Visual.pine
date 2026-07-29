@@ -273,6 +273,7 @@ type SMC_Pool
     int    sweptBarTime = na
     int    sweptBarIdx  = na
     float  strength     = 0.0     // [Eje2 ADR-014] calidad 0-1 (touches+frescura+cercania) -> jerarquia visual
+    int    firstBarTime = na      // [ADR-027] PRIMER toque (origen del tramo). barTime guarda el ULTIMO: no sirve
 type SMC_GradientGrid
     float  top
     float  bottom
@@ -1415,7 +1416,7 @@ f_upsertPool(array<SMC_Pool> pools, bool isHigh, float level, int weight, int ba
             p.barTime := barTime
             p.barIdx  := barIdx
     else
-        array.push(pools, SMC_Pool.new(level, poolDir, weight, barTime, false, "", barIdx, na, na))
+        array.push(pools, SMC_Pool.new(level, poolDir, weight, barTime, false, "", barIdx, na, na, 0.0, barTime))
     pools
 
 // f_markPoolsSwept: marca como barrido (swept) cada pool VIVO cuyo nivel cruza la barra actual.
@@ -1454,6 +1455,7 @@ f_detectSweep(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, in
                 if (trapBSL or trapSSL) and p.touches > bestTouches
                     bestTouches := p.touches
                     ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_SWEEP)
+                    ev.origBarTime := p.firstBarTime                                                        // [ADR-027] origen del tramo = el PRIMER toque del pool
     ev
 
 // f_detectGrab [T10b, §3.3]: el GRAB es el subconjunto del sweep sobre un nivel AISLADO — la mecha
@@ -4121,11 +4123,19 @@ if i_showPools and barstate.islast
 // ANCLAJE por xloc.bar_time (sw.barTime), no bar_index: un sweep a >10000 barras de la barra viva
 // (historia profunda) reventaba en runtime con xloc.bar_index. bar_time no tiene ese limite (cf.
 // lineas de pool y estructura dominante).
+// TRAMO vela->vela [ADR-027 D1], subconjunto 2/3: del PRIMER toque del pool (sw.origBarTime, que
+// f_detectSweep toma de p.firstBarTime — OJO: p.barTime guarda el ULTIMO toque y habria dado un tramo
+// falso) hasta la vela del barrido, con el nombre al medio. Raid y Spring son subtipos del sweep
+// (f_classifySweep) y heredan el mismo tramo con su glifo. Mismo idioma que el grab y que f_drawEQHL.
 var array<label> SMC_sweepLabels = array.new<label>()
+var array<line>  SMC_sweepLines  = array.new<line>()
 if i_showSweeps and barstate.islast
     for lb in SMC_sweepLabels
         label.delete(lb)
+    for ln in SMC_sweepLines
+        line.delete(ln)
     array.clear(SMC_sweepLabels)
+    array.clear(SMC_sweepLines)
     int nSw = array.size(SMC_sweeps)
     if nSw > 0
         int sweepCap = f_famOK(FAM_EST) ? i_maxShowSweeps : 1                                               // Operacion: solo el ultimo sweep/raid (§8.2 F8)
@@ -4138,7 +4148,11 @@ if i_showSweeps and barstate.islast
             // de rango) / sweep simple. El texto distingue los tres; el color sigue el sesgo del sweep.
             string sbase = sw.kind == KIND_RAID ? "⚡ Raid" : sw.kind == KIND_SPRING ? "⇧ Spring" : "✗ Sweep"
             string stxt = sbase + (bearTrap ? " ↓" : " ↑")
-            array.push(SMC_sweepLabels, f_evLbl(sw.barTime, sw.price, bearTrap ? label.style_label_down : label.style_label_up, stxt, scol, 70, scol))
+            bool swSpan = not na(sw.origBarTime) and sw.origBarTime < sw.barTime                            // sin origen (evento previo al ADR-027) -> etiqueta suelta de siempre
+            if swSpan
+                array.push(SMC_sweepLines, line.new(sw.origBarTime, sw.price, sw.barTime, sw.price, xloc = xloc.bar_time, color = color.new(scol, 30), style = line.style_dotted, width = 1))
+            int swX = swSpan ? math.round((sw.origBarTime + sw.barTime) / 2.0) : sw.barTime
+            array.push(SMC_sweepLabels, f_evLbl(swX, sw.price, bearTrap ? label.style_label_down : label.style_label_up, stxt, scol, 70, scol))
 
 // Marcadores de GRAB [T10b · §3.3]. Mismo toggle y misma cuota que el sweep A PROPOSITO: son el mismo
 // evento sobre niveles de distinta calidad, y §6.3.12 los coloca en la MISMA jerarquia visual — sweep

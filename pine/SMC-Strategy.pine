@@ -204,6 +204,7 @@ type SMC_Pool
     int    sweptBarTime = na
     int    sweptBarIdx  = na
     float  strength     = 0.0     // [Eje2 ADR-014] calidad 0-1 (touches+frescura+cercania) -> jerarquia visual
+    int    firstBarTime = na      // [ADR-027] PRIMER toque (origen del tramo). barTime guarda el ULTIMO: no sirve
 type SMC_GradientGrid
     float  top
     float  bottom
@@ -1346,7 +1347,7 @@ f_upsertPool(array<SMC_Pool> pools, bool isHigh, float level, int weight, int ba
             p.barTime := barTime
             p.barIdx  := barIdx
     else
-        array.push(pools, SMC_Pool.new(level, poolDir, weight, barTime, false, "", barIdx, na, na))
+        array.push(pools, SMC_Pool.new(level, poolDir, weight, barTime, false, "", barIdx, na, na, 0.0, barTime))
     pools
 
 // f_markPoolsSwept: marca como barrido (swept) cada pool VIVO cuyo nivel cruza la barra actual.
@@ -1385,6 +1386,7 @@ f_detectSweep(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, in
                 if (trapBSL or trapSSL) and p.touches > bestTouches
                     bestTouches := p.touches
                     ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_SWEEP)
+                    ev.origBarTime := p.firstBarTime                                                        // [ADR-027] origen del tramo = el PRIMER toque del pool
     ev
 
 // f_detectGrab [T10b, §3.3]: el GRAB es el subconjunto del sweep sobre un nivel AISLADO — la mecha
