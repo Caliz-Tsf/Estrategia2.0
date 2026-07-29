@@ -1,6 +1,8 @@
 # ADR-027 — El **tramo vela→vela** de la familia Liquidez: dónde nació el nivel y dónde murió
 
-- **Estado:** 🟡 **PROPUESTO — acordado con el usuario en S146, NO implementado.** La implementación va a **S147, por subconjuntos, verificando cada uno** (decisión explícita del usuario). Ninguna línea de este ADR está en el código todavía.
+- **Estado:** 🟢 **ACEPTADO E IMPLEMENTADO (D1 completo) en S148**, por subconjuntos y midiendo cada uno,
+  como pidió el usuario: grab (`e57c68a`) → sweep/raid/spring (`4f59c83`) → pool barrido (`4988819`).
+  D2 (Judas y False breakout sin tramo) sigue vigente y sin código, que es lo que decide.
 - **Fecha:** 2026-07-28 (Sesion-146).
 - **Contexto de fase:** Fase 1 · curación visual (F1-GATE), familia **Liquidez** — el objetivo original de S144 que S145 dejó sin retomar.
 - **Relacionado:** [[ADR-006]] (ciclo de vida de pools), [[ADR-014]] (strength decide *cómo* se dibuja), [[ADR-026]] (DOL: puerta de banda y escalera), `reglas-smc-ict.md` §3.1/§3.2/§3.3/§3.5/§3.7, §6.3.11/§6.3.12.
@@ -93,6 +95,35 @@ diferencia explícita**, para no repetir una decisión ya tomada sin darse cuent
 **No se estima a ojo.** Memoria del proyecto: *los tokens y los objetos de Pine no se predicen, solo se
 miden* (~8 predicciones muertas). La medición es la **primera tarea de S147**, antes de extender el
 tramo a los tres conceptos.
+
+### 4.1 MEDIDO en S148 — el riesgo era real, pero no está donde decía este ADR
+
+Instrumento: `data_get_pine_lines` → `total_lines` (el conteo CRUDO de objetos; `horizontal_levels`
+es el que deduplica y no sirve para censar). **Con rango visible FIJO**: la banda del DOL depende del
+rango visible (ADR-026), así que dos lecturas con distinta ventana no son comparables — las dos
+primeras medidas de la sesión estaban contaminadas por ese cambio y hubo que repetirlas.
+
+**Coste del tramo** (D1 EURUSD, familia Liquidez aislada, densidad *Todo*):
+
+| subconjunto | Δ líneas | cómo se aisló |
+|---|---|---|
+| Grab + Sweep/Raid/Spring | **+40 exactas** (20 + 20 = los dos caps) | toggle `in_84` off/on |
+| Pool barrido | **+2** | cuota 20 → 1, Δ = 1 |
+| **total ADR-027** | **+42** sobre 125 de la familia | — |
+
+**Hallazgo 1 — el subconjunto 3 nace casi inerte.** No por el filtro anti-duplicado, sino por el
+**ciclo de vida** (ADR-006): `f_prunePools` borra **primero** los pools barridos, así que apenas
+sobreviven en el array para llegar a dibujarse. Si se quiere que el historial de pools tomados se vea
+de verdad, hay que tocar la poda, no el dibujo.
+
+**Hallazgo 2 — el tope ya estaba desbordado, y la culpable es ESTRUCTURA, no Liquidez.** Con todos los
+toggles encendidos: *Todo* **501 líneas / 503 etiquetas**, *Estudio* **504 / 500** — ambos topes son
+500, o sea que el Visual **ya descartaba objetos en silencio** antes de este ADR. Aislando: la familia
+Liquidez completa gasta **97** líneas, el grid **6**, y **`in_10` (BOS/CHoCH swing) solo gasta 302
+líneas + 302 etiquetas** — el 60 % del presupuesto en un único toggle, que además es el **único** de
+esa familia **sin cuota `i_maxShow*`**. En *Operación* no hay problema (59 líneas / 136 etiquetas).
+Pendiente abierto, fuera del alcance de este ADR: poner cuota a BOS/CHoCH. Ojo — por **constante**, no
+por input nuevo: un input corre los ids `in_N` ya guardados (mordió en S145).
 
 ## 5. Plan de ejecución (S147) — por subconjuntos, verificando cada uno
 
