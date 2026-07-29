@@ -622,6 +622,20 @@ El subsistema más grande y el más distintivo del SMC/ICT: el mercado se mueve 
 - ✓ Grab BSL 2026-06-10 23:40 GMT: mecha **1.15378** sobre el swing 1.15368, `close` 1.15364.
 - ✗ Contraejemplo: el sweep del 06-11 17:25 toma un **pool confirmado** (≥2 touches) → cuenta como **sweep** (mayor peso), no como grab. Y una mecha que no alcanza ningún swing previo no es grab.
 
+**Casos NATIVOS por TF, fechados y reproducibles** *(EURUSD OANDA, S148 2026-07-28; `swingLen` 5, `poolTol` 0.1×ATR14, `minTouches` 2; horas en **UTC**)*. Los tres casos de arriba son de M5 2026-06-10/11 y el histórico M5 de OANDA ya no los alcanza — **no son reproducibles**; estos sí. Método: reimplementación independiente de §3.3 sobre las velas nativas del TF (sonda JS: pivotes simétricos → `upsert` de pools → marcado de barridos → grab), contrastada contra lo que dibuja el indicador.
+
+*H1* (401 velas desde 2026-07-06, 46 pools, **18 grabs**):
+- ✓ **Grab BSL 2026-07-22 13:00**: nivel **1.14184** (pivote aislado del **2026-07-22 07:00**, 1 toque), mecha **1.14217** > nivel, `close` **1.14135** < nivel → cierra de vuelta dentro. ATR14 0.00077. Verificado en pantalla: el tramo `[ADR-027]` va de 03:00 a 09:00 hora del chart (UTC−4) = 07:00→13:00 UTC, con el nombre en el punto medio.
+- ✓ Grab SSL 2026-07-23 11:00: nivel 1.13842 (pivote del 2026-07-14 07:00), mecha 1.13832, `close` 1.13947.
+- ✓ Grab SSL 2026-07-28 05:00: nivel 1.13650 (pivote del 2026-07-24 13:00), mecha 1.13618, `close` 1.13659.
+
+*M5* (300 velas desde 2026-07-27 23:55, 23 pools, **6 grabs**):
+- ✓ **Grab BSL 2026-07-28 12:50**: nivel **1.13679** (pivote del **11:50**, 1 toque), mecha **1.13685** > nivel, `close` **1.13654** < nivel. ATR14 0.00029.
+- ✓ **Grab SSL 2026-07-28 12:30**: nivel **1.13612** (pivote del **11:50**), mecha **1.13608** < nivel, `close` **1.13624** > nivel. Punto medio del tramo = 08:10 hora del chart, que es donde el indicador dibuja la etiqueta.
+- ✓ Grab BSL 2026-07-28 13:45: nivel 1.13736 (pivote del 07:15), mecha 1.13741, `close` 1.13731.
+
+> **Nota de método.** La sonda ve solo las velas que TV tiene cargadas (401 en H1, 300 en M5) mientras que Pine recorre su propio buffer, más largo: por eso el indicador dibuja más grabs de los que cuenta la sonda (20 en H1 —su cuota— y 14 en M5, frente a 18 y 6). No es discrepancia: los casos concretos sí coinciden uno a uno en fecha, nivel y extremos del tramo.
+
 ---
 
 ### 3.4 Kill Zones `f_killZone` `[ADR-001]`
