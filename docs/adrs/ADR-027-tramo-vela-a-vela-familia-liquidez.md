@@ -137,7 +137,7 @@ Decisión del usuario: **no implementar los tres de golpe**. Orden propuesto:
 5. Retomar la **curación de la familia Liquidez** (hue violeta sobrecargado, anti-solape EQL↔Sweep),
    que sigue siendo el objetivo original heredado de S144.
 
-## 6. Pendiente independiente de este ADR
+## 6. ~~Pendiente~~ RESUELTO en S148 — ver `reglas-smc-ict.md` §3.3, bloque «Casos NATIVOS por TF»
 
 **Verificación de §3.3 Grab en H1 y M5 con casos nativos de cada TF.** La validación de S146 (96/100)
 se apoyó en la correspondencia regla↔código porque los 3 casos canónicos de §3.3 son de **M5
