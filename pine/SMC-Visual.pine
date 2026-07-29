@@ -4020,6 +4020,49 @@ if i_showPools and barstate.islast
                     // de 5 digitos) y ATR es la unidad relativa canonica del proyecto.
                     array.push(SMC_poolLabels, label.new(bar_index + 2, isBSL ? dolHi - 0.5 * atr14 : dolLo + 0.5 * atr14, (isBSL ? "▲ BSL " : "▼ SSL ") + str.tostring(p.level, format.mintick) + " ·" + str.tostring(p.touches) + "  (" + str.tostring(math.round(math.abs(p.level - close) / atr14)) + "×ATR)", style = label.style_label_left, color = color.new(col, 80), textcolor = col, size = size.small, xloc = xloc.bar_index))
 
+// TRAMO del POOL BARRIDO [ADR-027 D1], subconjunto 3/3. REABRE a proposito lo que S144 retiro (ver el
+// comentario de f_drawPools), y el ADR §3 lo justifica: aquello era un segmento CORTO, tenue y ANONIMO;
+// esto va al ORIGEN REAL (primer toque) y lleva el NOMBRE al medio, que son los dos defectos que lo
+// hacian inutil. Diferencias de estilo con el pool VIVO, para que no se confundan: el vivo es dashed y
+// llega hasta la barra actual (sigue siendo iman); el barrido es DOTTED y MUERE en la vela que lo
+// barrio (ya no es objetivo, es historia). Solo Estudio+ (f_famOK(FAM_EST)): en Operacion el pool
+// consumido es ruido puro — esa parte del diagnostico de S144 sigue en pie. Puerta de banda de
+// ADR-026 D3 igual que el pool vivo: fuera de [dolLo, dolHi] no se emite primitiva (forzaria la
+// escala). Cuota i_maxShowSweeps (los mas recientes), misma familia y mismo knob que sweep/grab.
+var array<line>  SMC_poolSwLines  = array.new<line>()
+var array<label> SMC_poolSwLabels = array.new<label>()
+if i_showPools and f_famOK(FAM_EST) and barstate.islast
+    for l in SMC_poolSwLines
+        line.delete(l)
+    for lb in SMC_poolSwLabels
+        label.delete(lb)
+    array.clear(SMC_poolSwLines)
+    array.clear(SMC_poolSwLabels)
+    int nSwPool = 0
+    if array.size(SMC_pools) > 0
+        for i = array.size(SMC_pools) - 1 to 0                                                              // de mas reciente a mas antiguo: la cuota se queda con los ultimos
+            if nSwPool >= i_maxShowSweeps
+                break
+            SMC_Pool p = array.get(SMC_pools, i)
+            // ANTI-DUPLICADO: si ese mismo barrido ya emitio un SWEEP (trampa), su tramo es EL MISMO
+            // segmento (mismo primer toque -> misma vela de barrido) y ya se dibuja en el subconjunto 2.
+            // Lo que queda aqui, y es informacion nueva, es el pool tomado SIN trampa: ruptura limpia,
+            // la liquidez se consumio y el precio siguio. f_evLbl deduplicaria la etiqueta pero NO la
+            // linea, asi que el gasto de presupuesto seria invisible: se filtra en origen.
+            bool yaEsSweep = false
+            if p.swept and array.size(SMC_sweeps) > 0
+                for j = 0 to array.size(SMC_sweeps) - 1
+                    SMC_Event sv = array.get(SMC_sweeps, j)
+                    if sv.barTime == p.sweptBarTime and sv.origBarTime == p.firstBarTime
+                        yaEsSweep := true
+                        break
+            if p.swept and not yaEsSweep and p.touches >= i_minTouches and not na(p.firstBarTime) and not na(p.sweptBarTime) and p.firstBarTime < p.sweptBarTime and p.level <= dolHi and p.level >= dolLo
+                nSwPool += 1
+                bool swBSL = p.dir == DIR_BULL
+                color swCol = swBSL ? COL_BSL : COL_SSL
+                array.push(SMC_poolSwLines, line.new(p.firstBarTime, p.level, p.sweptBarTime, p.level, xloc = xloc.bar_time, color = color.new(swCol, 55), style = line.style_dotted, width = 1))
+                array.push(SMC_poolSwLabels, f_evLbl(math.round((p.firstBarTime + p.sweptBarTime) / 2.0), p.level, swBSL ? label.style_label_down : label.style_label_up, (swBSL ? "BSL ·" : "SSL ·") + str.tostring(p.touches) + " tomado", swCol, 80, swCol))
+
 // Dibujo de la escalera de extremos no barridos [S145 · ADR-026 D8]. ESTILO PROPIO, deliberadamente
 // distinto del pool: mismo HUE (es la misma familia, liquidez) pero PUNTEADO y mas transparente. Un
 // pool es liquidez ACUMULADA (varios toques = mas stops apilados); un extremo de un toque es liquidez
