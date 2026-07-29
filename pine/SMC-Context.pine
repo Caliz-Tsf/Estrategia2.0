@@ -135,6 +135,7 @@ type SMC_Event
     string tf   = ""
     int    kind = 0
     float  strength = 0.0   // [Eje2 ADR-014] calidad 0-1 (f_eventStrength) -> jerarquia visual + scoring F3
+    int    origBarTime = na // [ADR-027] barra que CREO el nivel consumido (origen del tramo). na = sin tramo
 type SMC_Swing
     float  price
     int    barIdx
@@ -1360,6 +1361,7 @@ f_detectGrab(array<SMC_Pool> pools, float barClose, int barIdx, int barTime, int
                 if (trapBSL or trapSSL) and d < bestDist
                     bestDist := d
                     ev := SMC_Event.new(p.level, trapBSL ? DIR_BEAR : DIR_BULL, barIdx, barTime, "", KIND_GRAB)
+                    ev.origBarTime := p.barTime                                                             // [ADR-027] origen del tramo = la barra del pivote aislado
     ev
 
 // f_prunePools: acota el set persistente a maxN. Borra primero el pool BARRIDO mas antiguo
