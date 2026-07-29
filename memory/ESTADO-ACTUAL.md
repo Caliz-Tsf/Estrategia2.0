@@ -9,32 +9,41 @@
 
 ## Estado
 - **Rama de trabajo:** **`pine/sistema-completo`** (creada Sesion-010, publicada en origin). Todo el código Pine (Fases 1-3) vive aquí; `main` queda estable hasta el gate de Fable pre-Fase 4. Ver **ADR-003**.
-- **Fase actual:** **FASE 1 · S147 — EL ARRANQUE DE SESIÓN ESTABA ROTO: `ESTADO-ACTUAL` AHORA ROTA EN VEZ DE ACUMULAR (sesión de infraestructura documental, CERO Pine).** El plan de S147 (ADR-027) **no se ejecutó**: al leer este archivo, paso 1 BLOQUEANTE del arranque, el tool `Read` falló. Medidos **dos** defectos. **(a) Tamaño:** pesaba **291.219 B** contra el límite de `Read` de **262.144**; por `git log` cruzó el límite entre el **2026-07-18 (254.164 B)** y el **2026-07-20 (259.423 B)** ⇒ **desde ~S140 ningún arranque pudo leer el estado**, ~5 KB por sesión. Apilaba desde **Sesion-017** en **tres series superpuestas** (`Fase (SNNN)` ×18, `Última tarea (Sesion-NNN)` ~45, `*Sesion-NNN:*` ~30) con duplicados (S100, S095) y **4.685 chars** de historial embebido dentro de la línea de fase actual como `<!-- historial -->`. **(b) Frescura — el grave:** la sección «Cómo arrancar la próxima sesión» llevaba **congelada en S090 durante 56 sesiones** (mandaba al Paso 9 del Eje 2 y a las opciones A/B de S058). **Causa raíz:** regla ambigua de `smc-doc-updater` («Nunca borres historial; ESTADO-ACTUAL se sobreescribe») que mezclaba dos archivos con políticas opuestas; el histórico ya vivía completo en `memory/sesiones/` (133 ficheros) ⇒ la acumulación era duplicación pura. **Poda verificada:** 6 sesiones (S061/S067/S068/S070/S071/S115) solo existían aquí — rescatadas **verbatim** a su `Sesion-NNN.md` ANTES de borrar; re-cruzado contra el backup, solo quedan S010 y S049 y son menciones sin párrafo propio. **Nada perdido.** Archivo reescrito reutilizando las líneas vivas verbatim vía `sed`: **291.219 → 12.381 B (4,2 %)**. **Anti-recaída:** `smc-doc-updater` REGLA ABSOLUTA 3 «rota, no acumula» (reemplazo de fase actual sin `<!-- historial -->`, ventana de 3, reescritura del arranque con nº de sesión en el título, techo 40 KB por `wc -c`, y confirmar que existe el `Sesion-NNN.md` antes de podar); `smc-session-startup` mide el archivo **antes** de leerlo (40 KB ⚠️ / 256 KB ❌) y comprueba la frescura del título; reglas de mantenimiento escritas también en la cabecera de este archivo. **CORE INTACTO — 1809 líneas, SHA `5e21ca38b43cf0e4`, `check-core-sync` OK ×3 + EXTREMES CORE OK (ADR-022).** **SEGUNDA PARTE (petición del usuario):** **CLAUDE.md es ahora un MAPA de ≤40 líneas** (59→38, las 10 rutas verificadas), con la doctrina extraída **verbatim** a `docs/REGLAS-DURAS.md` (cero líneas perdidas, comprobado una a una) — declaraba «Fase 0» desde ~S010, rancio, ya no afirma fase. **ADR-003 escrito** (se citaba en 8 documentos y nunca tuvo fichero; transcrito del literal de ESTADO-ACTUAL, alternativas descartadas *no registradas*; validado: `main` congelado en `3e437f2` del 2026-06-11 y 429 commits en la rama). **ADR-015 NO se escribe y es correcto** — reservado desde S098, solo se redacta si el usuario ordena cambiar `minRR` (default 3.0 mandatorio); nuevo `docs/adrs/README.md` con índice de 26 ADRs y **huecos explicados**. **`reglas-smc-ict.md` NO se parte:** el usuario objetó que los conceptos ya están todos, y medido tenía razón — 42/42 confluencias cerradas (WORKPLAN §4.8:353), último contenido nuevo el 2026-07-04, y los 6 commits posteriores son **un solo hilo de enmienda** a §2.3.2; quedan **31.191 B** de margen. Mi «dos o tres conceptos más y lo cruza» era falso. `WORKPLAN-MAESTRO-V2.md` mide **58 KB**, no ~185 KB como estimé sin medir; intacto por orden del usuario. **`sync-obsidian.ps1` ahora respalda también la doctrina** (+5 destinos: CLAUDE.md, workplan, REGLAS-DURAS, reglas-smc-ict, reglas-dev) — antes el vault guardaba estado y decisiones pero no las reglas, que son lo irreemplazable. **F1-GATE sigue sin firmar.** Ver [Sesion-147](sesiones/Sesion-147.md).
+- **Fase actual:** **FASE 1 · S148 — ADR-027 (tramo vela→vela de la familia Liquidez) ACEPTADO E IMPLEMENTADO EN D1, POR SUBCONJUNTOS VERIFICADOS.** Se ejecutaron las tareas 1-3 del plan de S147; la tarea 4 (curación de Liquidez, objetivo original de S144) queda para S149. **Tarea 1 — medición:** `data_get_pine_lines`/`data_get_pine_labels` devuelven `total_lines`/`total_labels` (censo crudo; `horizontal_levels` deduplica y engañaba desde S144). Coste real del ADR con rango visible fijo (la banda del DOL depende del rango, ADR-026, así que rangos distintos NO son comparables — las dos primeras medidas, contaminadas, dieron falsos +21/+20): **+42 líneas** sobre las 125 de la familia Liquidez (grab+sweep +40 exactas, pool barrido +2). **HALLAZGO 1 (el importante): el tope de 500 objetos YA ESTABA DESBORDADO antes de este ADR, y la culpable es ESTRUCTURA, no Liquidez.** Con todos los toggles encendidos: *Todo* 501 líneas/503 etiquetas, *Estudio* 504/500 (topes son 500/500) ⇒ Pine lleva tiempo desalojando en silencio los objetos creados primero (los de más señal). Aislado: `in_10` («Mostrar BOS/CHoCH (swing)») él solo genera **302 líneas + 302 etiquetas** (60% del presupuesto) y es el ÚNICO concepto de estructura SIN cuota `i_maxShow*`. La frecuencia del evento no predice el gasto; lo predice si el dibujo tiene cuota o no. **HALLAZGO 2:** el subconjunto pool-barrido nace casi inerte (solo 2 tramos en toda la historia D1) porque `f_prunePools` (ADR-006) borra los pools barridos ANTES de que sobrevivan para dibujarse — palanca real: la poda, no el dibujo. **Tarea 2 — implementación (3 commits, cada uno aplicado y medido en TV antes del siguiente):** grab (`e57c68a`, nuevo `SMC_Event.origBarTime`), sweep/raid/spring (`4f59c83`, bug encontrado: `SMC_Pool.barTime` guardaba el ÚLTIMO toque no el PRIMERO, se añade `SMC_Pool.firstBarTime` fijado en el alta), pool barrido (`4988819`, dotted, filtro anti-duplicado contra sweep ya emitido). ADR-027 → **ACEPTADO (`390164e`)**, D2 (Judas/False breakout sin tramo) sigue vigente y sin código. CORE **1813 líneas, SHA `b2be604143c08a83`** (verificado byte-idéntico ×3), TV `SMC_Library` v419→**v422**. **Tarea 3 — verificación nativa del grab en H1/M5** (cierra ADR-027 §6): el censo de dibujos no fecha (índices + precios redondeados), se reimplementó §3.3 independiente sobre velas nativas (`scripts/gen_probe_grab_nativo.js`). H1 (401 velas, 46 pools, 18 grabs): caso ancla Grab BSL 2026-07-22 13:00 UTC nivel 1.14184 coincide con lo dibujado. M5 (300 velas, 23 pools, 6 grabs, todos 2026-07-28): dos casos (BSL 12:50, SSL 12:30 UTC) coinciden. La sonda ve menos grabs que el indicador (18/6 vs 20/14) porque solo alcanza las velas cargadas por TV — no es discrepancia, los casos concretos coinciden uno a uno. Commits `31ba71b` (§3.3 en reglas-smc-ict.md) y `8ede405` (ADR-027 §6 RESUELTO). **Obstáculo de herramienta:** modal promocional de TV bloqueó `chart_set_timeframe`/`chart_set_visible_range`; se resolvió cerrándolo por DOM (`button[aria-label="Cierre"]`, en español) y forzando resolución vía `TradingViewApi._activeChartWidgetWV`. **F1-GATE sigue sin firmar.** Ver [Sesion-148](sesiones/Sesion-148.md).
 
 ## Sesiones recientes (detalle completo en `memory/sesiones/`)
+- **[[Sesion-147]]** (2026-07-28) — reparado el arranque de sesión (ESTADO-ACTUAL rota, no acumula) + CLAUDE.md pasa a MAPA de ≤40 líneas + ADR-003 escrito + índice de ADRs. Plan de S147 (ADR-027) pasó íntegro a S148.
 - **[[Sesion-146]]** (2026-07-28) — hilo de pools RESUELTO por medición (la causa era el gate `touches>=2`, no la creación: 704 altas) + **§3.3 Grab implementado** (`f_detectGrab`, F1-S1.3-T10b, confluencia #11, 96/100) + **ADR-027 propuesto**. CORE → `5e21ca38b43cf0e4` (1809 líneas).
 - **[[Sesion-145]]** (2026-07-25/27) — DOL: escalera de liquidez del máximo histórico al mínimo. ADR-026 aceptado (D1-D14). CORE intacto `7ad95b3e612d041a`.
-- **[[Sesion-144]]** (2026-07-25) — arranque de la curación de la familia **Liquidez** (objetivo original, aún abierto): EQH/EQL sano, far/old pivots se conservan, pools barridos no se dibujan.
 
 ## Bloqueos
 - Ninguno. (SEC-01 resuelto: usuario confirmó keys viejas revocadas; nuevas en .env/.mcp.json gitignored.)
 
-## Cómo arrancar la próxima sesión — **S148**
+## Cómo arrancar la próxima sesión — **S149**
 
-**El plan sigue siendo el de S147, íntegro: S147 se fue entera en reparar el arranque y no ejecutó ni un punto.**
+**Objetivo:** retomar la **tarea 4 de S148, no ejecutada**: la curación visual de la familia
+Liquidez (hue violeta sobrecargado, anti-solape EQL↔Sweep) — objetivo original heredado de
+**S144**, sigue abierto.
 
-**Objetivo:** implementar **ADR-027** (tramo vela→vela de la familia Liquidez) por subconjuntos, y con ello retomar la curación de la familia Liquidez que quedó abierta desde S144.
+1. **Volver a D1** (el chart quedó en M5 tras la tarea 3 de S148).
+2. **Reencender los toggles de Liquidez** que quedaron apagados por el aislamiento de la
+   tarea 3 (`in_78`, `in_81`, `in_87`, `in_90`, `in_92`) — mapear `in_N` en vivo antes de
+   escribir, no adivinar.
+3. Ejecutar la curación: revisar colisión de paleta/hue en la familia Liquidez y el
+   anti-solape EQL↔Sweep, ahora con los tramos vela→vela de ADR-027 ya dibujados.
+4. **Fuera de esta tarea pero anotado como pendiente** (no bloquea S149, decidir si se
+   aborda): poner cuota a `in_10` (BOS/CHoCH swing), que hoy genera 302 líneas + 302
+   etiquetas sin `i_maxShow*` — 60% del presupuesto de 500 objetos (hallazgo de S148). Y si
+   se quiere ver el historial real de pools barridos, revisar la poda `f_prunePools`
+   (ADR-006), no el dibujo.
 
-1. **Medir primero el coste en objetos** del tramo sobre **un solo concepto**. Cada evento pasa de *1 etiqueta* a *1 etiqueta + 1 línea*, y hay **topes duros de 500 de cada uno**. Sin esta medición no se implementa el resto.
-2. **Implementar ADR-027 por subconjuntos, verificando cada uno** en este orden: **grab** → **sweep/raid/spring** → **pool barrido**.
-3. **Verificar el grab en H1 y M5** con casos **nativos de cada TF**, fechados.
-4. **Retomar la curación de la familia Liquidez** — sigue siendo el objetivo original de S144.
-
-**⚠️ Estado en que quedó el entorno (sin cambios: S147 no abrió TradingView):**
-- **TV está apagado** — lanzar con `mcp__tradingview__tv_launch` (nunca a mano).
-- El chart quedó en **M5 con la ventana de las últimas 7 h**.
-- **`in_84` (`i_showSweeps`) quedó ENCENDIDO.** Si se retoma el **DOL**, hay que volver a **D1 y apagarlo** para recuperar el aislamiento.
-- Antes de escribir inputs: **mapear `in_N` en vivo** — los índices se corren (en S145 se corrompieron 6 inputs numéricos por adivinar).
+**⚠️ Estado en que quedó el entorno (S148 dejó TV abierto):**
+- **TV abierto**, `SMC_Library` **v422** guardado, editor de Pine abierto con el Visual.
+- Chart en **M5**, ventana visible 2026-07-28 11:00→14:30 UTC. Volver a D1.
+- Inputs: solo `in_84` (sweeps/grabs) encendido de la familia Liquidez; `in_78`, `in_81`,
+  `in_87`, `in_90`, `in_92` apagados. `in_118` (Densidad) = Todo. `in_85` (max sweeps) = 20.
+- Antes de escribir inputs: **mapear `in_N` en vivo** — los índices se corren (en S145 se
+  corrompieron 6 inputs numéricos por adivinar).
 
 ## Decisiones vigentes (no re-litigar)
 - Arquitectura Pine: 1 core compartido + SMC-Visual.pine (indicator) + SMC-Strategy.pine (strategy → Strategy Tester).
@@ -57,7 +66,7 @@
 - **ADR-001 — Bot MULTI-SÍMBOLO, sin filtro horario duro.** Kill Zone = confluencia ponderada + sessionProfile configurable (FX-London-NY/FX-Asia/None), no bloqueo. Guardián universal = filtro de spread. Pesos del scoring por símbolo. Valida EURUSD primero, cada símbolo nuevo = Fase 5 abreviada. Umbrales ATR-relativo = base de portabilidad.
 
 ### ADRs
-Índice completo en `docs/adrs/` (**ADR-001 … ADR-027**). Vigentes de referencia frecuente: **ADR-003** (ramas), **ADR-006** (ciclo de vida de pools), **ADR-014** (`strength` es propiedad de detección, vive en el CORE), **ADR-017** (consumidor Context), **ADR-021** (dealing range, 2.º extremo), **ADR-023** (el panel se lee desde el TF más bajo), **ADR-024** (reparto del dibujo Visual/Context), **ADR-026** (DOL: escalera + marcador de borde). **ADR-027 está 🟡 PROPUESTO — se implementa en S147.**
+Índice completo en `docs/adrs/` (**ADR-001 … ADR-027**). Vigentes de referencia frecuente: **ADR-003** (ramas), **ADR-006** (ciclo de vida de pools), **ADR-014** (`strength` es propiedad de detección, vive en el CORE), **ADR-017** (consumidor Context), **ADR-021** (dealing range, 2.º extremo), **ADR-023** (el panel se lee desde el TF más bajo), **ADR-024** (reparto del dibujo Visual/Context), **ADR-026** (DOL: escalera + marcador de borde). **ADR-027 🟢 ACEPTADO E IMPLEMENTADO en D1 (S148)** — tramo vela→vela de la familia Liquidez (grab/sweep/pool barrido); D2 (Judas/False breakout) sigue vigente y sin código.
 
 ## Notas de herramientas
 - **TV MCP:** lanzar SIEMPRE por `mcp__tradingview__tv_launch` (CDP 9222), nunca manual. Fork en `D:\CODE\BOT\Bot\tradingview-mcp-jackson` +4 ahead de origin (merge upstream sin pushear).
